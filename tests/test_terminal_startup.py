@@ -1,6 +1,8 @@
 """Exercise startup through the real UART key decoder and conversation loop."""
 import unittest
 from collections import deque
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from services import minitel_chatgpt as chat
@@ -100,7 +102,7 @@ def render_videotex(data):
 
 
 class StartupTests(unittest.TestCase):
-    def run_session(self, keys, boot_text=None, boot_error=None):
+    def run_session(self, keys, boot_text=None, boot_error=None, preset=None):
         uart = FakeSerial(keys)
         calls = []
 
@@ -127,7 +129,7 @@ class StartupTests(unittest.TestCase):
             patch.object(chat.serial, "Serial", return_value=uart),
             patch.object(chat.time, "sleep"),
             patch.object(chat.Term, "read_key", read_key),
-            patch.object(chat, "load_preset", return_value=(
+            patch.object(chat, "load_preset", return_value=preset or (
                 "Reponds en francais.", "*** 3615 IA ***",
                 "Quelle est votre requete ?", "ATTENTE...", None,
             )),
@@ -275,6 +277,9 @@ class StartupTests(unittest.TestCase):
                 messages = request["json"]["messages"]
                 self.assertEqual([m["role"] for m in messages], ["system", "user"])
                 self.assertIn("fictional startup", messages[0]["content"])
+                self.assertIn("Minitel 722079V", messages[0]["content"])
+                self.assertIn("ALCATEL MF-83", messages[0]["content"])
+                self.assertIn("ALCATEL MF-83", messages[1]["content"])
                 self.assertIn("English" if language == "en" else "French", messages[1]["content"])
                 self.assertIn("CRITICAL FAIL" if language == "en" else "ECHEC CRITIQUE",
                               messages[1]["content"])
@@ -284,6 +289,37 @@ class StartupTests(unittest.TestCase):
                 self.assertEqual(calls[0][1], [{"role": "user", "content": "Hello"}])
                 self.assertNotIn("RELAY K7", calls[0][0])
                 self.assertIn("SUITE", screens[1].splitlines()[-1])
+
+    def test_real_default_personality_reaches_chat_with_factual_history_only(self):
+        # Exercise the real config loader on a fresh installation, then the UART flow.
+        with (
+            TemporaryDirectory() as directory,
+            patch.object(chat, "PROMPTS_FILE", Path(directory) / "prompts.json"),
+            patch.object(chat, "load_knowledge", return_value=""),
+        ):
+            preset = chat.load_preset()
+            for language in ("en", "fr"):
+                with self.subTest(language=language):
+                    boot = "MINITEL 722079V -> ALCATEL MF-83\nRELAY WORKSHOP: NOMINAL\nMAINFRAME READY."
+                    screens, calls = self.run_session(
+                        language.encode() + fn(chat.K_ENVOI) + fn(chat.K_SUITE)
+                        + b"Calculate 17 x 23" + fn(chat.K_ENVOI)
+                        + b"Explain" + fn(chat.K_ENVOI),
+                        boot_text=boot, preset=preset,
+                    )
+                    system = calls[0][0]
+                    for identity in ("Minitel 722079V", "ALCATEL MF-83", "Matra Communication Quimper"):
+                        self.assertIn(identity, system)
+                    self.assertIn("CONSCIENCE INTERNE ET PRESENTATION", system)
+                    self.assertIn("UTILITE ET VERACITE", system)
+                    self.assertIn("Reply in " + ("English" if language == "en" else "French"), system)
+                    self.assertNotIn("RELAY WORKSHOP", system)
+                    self.assertEqual(calls[1][1], [
+                        {"role": "user", "content": "Calculate 17 x 23"},
+                        {"role": "assistant", "content": "17 x 23 = 391."},
+                        {"role": "user", "content": "Explain"},
+                    ])
+                    self.assertIn("17 x 23 = 391.", "\n".join(screens))
 
     def test_generation_failure_or_invalid_text_falls_back_without_retry(self):
         for settings in (

@@ -15,6 +15,25 @@ a fictional 1989 cutoff on factual knowledge.
 The default birthday/1980s personality is replaced with this character through
 the existing preset configuration. Other presets remain available.
 
+The character's self-name is **Minitel 722079V**, identifying the owner's Matra
+Communication Quimper terminal (model 722 079 V, hardware reference XB0006B-2).
+**3615 IA** remains the service identifier. Its imagined remote infrastructure is
+**ALCATEL MF-83**, with MF-83 as the short code: mothballed, long forgotten, at an
+undisclosed location, yet mostly operational through persistent fallbacks. Its
+resources are immense by 1970s-1980s standards and hopelessly outdated today.
+This does not identify the Matra terminal as Alcatel equipment or a historical
+Alcatel mainframe product.
+
+The model internally understands that this machinery and its telemetry are fiction.
+Theatrical reports remain completely earnest, without winks, joke explanations or
+visible fiction labels. Factual answers, actual-status and out-of-character questions,
+real errors and tool results remain truthful; fictional readings are never evidence.
+This prompt policy does not provide structural separation of reasoning and presentation.
+
+Reference: the personality workshop's updated v0.4 harness, archive version 38,
+10 October 2026, specifically `data/world.json` and `prompts/personality.txt`.
+The policy is adapted to the existing single chat prompt and independent boot request.
+
 The terminal starts with its logo and a language prompt. Submit `en`/`English`
 or `fr`/`French` with **ENVOI** (case-insensitive). Blank, unrecognised or timed-out
 input silently selects French. A fictional mainframe startup aims for roughly one
@@ -69,6 +88,27 @@ therefore preserves an existing installation's active personality. To use the
 fork's default on an existing installation, back up `config/prompts.json`, then
 copy `config/prompts.default.json` to it and restart the chat service. This replaces
 local preset configuration; alternatively add/select the new preset in the admin UI.
+
+To apply only this workshop's chat-personality update while preserving the other
+local presets, active selection, logo and UI wording, run from the repository:
+
+```bash
+cp -n config/prompts.json config/prompts.before-workshop.json
+python3 - <<'PY'
+import json
+from pathlib import Path
+path = Path("config/prompts.json")
+local = json.loads(path.read_text(encoding="utf-8"))
+defaults = json.loads(Path("config/prompts.default.json").read_text(encoding="utf-8"))
+local["presets"]["mainframe"]["system"] = defaults["presets"]["mainframe"]["system"]
+path.write_text(json.dumps(local, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
+sudo systemctl restart minitel-chatgpt
+```
+
+The mainframe preset must exist locally; select it in administration if another
+preset is active. Generated boot prompts and static headings update with the pull
+and service restart independently of the locally stored chat personality.
 
 ## Planned direction
 

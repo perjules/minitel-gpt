@@ -13,7 +13,7 @@
     "password": "Password",
     "guide_return": "Press any key to return",
     "boot": [
-      "MF-83 / ATOMIC MAINFRAME",
+      "MINITEL 722079V -> ALCATEL MF-83",
       "",
       "TERMINAL UPLINK : OPEN",
       "MAINS POWER    : OFFLINE",
@@ -47,7 +47,7 @@
     "password": "Mot de passe",
     "guide_return": "Une touche pour revenir",
     "boot": [
-      "MF-83 / MAINFRAME ATOMIQUE",
+      "MINITEL 722079V -> ALCATEL MF-83",
       "",
       "UPLINK TERMINAL : OUVERT",
       "SECTEUR         : HORS LIGNE",

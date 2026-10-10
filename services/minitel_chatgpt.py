@@ -259,7 +259,8 @@ def load_preset():
     ASCII d'accueil (voir admin, onglet Personnalites)."""
     try:
         ensure_prompts()
-        data = json.load(open(PROMPTS_FILE))
+        with PROMPTS_FILE.open(encoding="utf-8") as source:
+            data = json.load(source)
         key = data["active"]
         p = data["presets"][key]
         system = p.get("system", FALLBACK_PROMPT)
@@ -486,7 +487,7 @@ def prepare_boot(language):
         prompt = BOOT_PROMPT_FILE.read_text(encoding="utf-8")
         examples = json.loads(BOOT_EXAMPLES_FILE.read_text(encoding="utf-8"))
         name = "English" if language == "en" else "French"
-        request = f"Generate a new MF-83 startup in {name}. Reviewed examples:\n\n"
+        request = f"Generate a new ALCATEL MF-83 startup in {name}. Reviewed examples:\n\n"
         request += "\n\n".join(example[language] for example in examples)
         text = generate(prompt, [{"role": "user", "content": request}],
                         timeout=BOOT_TIMEOUT, require_complete=True)

@@ -6,4 +6,5 @@ logs/
 fix_config.py
 config/knowledge/
 config/prompts.json
+config/prompts.before-workshop.json
 .last_version
