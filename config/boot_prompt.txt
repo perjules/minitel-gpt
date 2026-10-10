@@ -24,10 +24,12 @@ Vary the sequence and wording; do not simply concatenate or copy all examples.
 
 OUTPUT CONTRACT
 - Use only the requested language, apart from MF-83 and technical identifiers.
-- Return plain text only: 16 to 20 lines INCLUDING blank separator lines.
+- Return plain text only. Aim for roughly 12 to 18 lines, including blank
+  separators. This is a length preference, not an exact count: shorter or longer
+  sequences are acceptable. The terminal scrolls automatically when necessary.
 - Every line must be at most 39 characters, counting spaces. Keep labels short.
 - Printable ASCII only: no accents, Unicode, tabs or terminal control characters.
 - No Markdown, code fences, bullet lists, JSON, commentary or explanations.
 - Finish with a short statement that the mainframe is ready.
-- No questions, input prompts, function-key names or instructions to press keys.
+- No questions, input prompts or instructions to press function keys.
   Python appends the final continuation instruction separately.

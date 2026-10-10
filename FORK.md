@@ -17,9 +17,9 @@ the existing preset configuration. Other presets remain available.
 
 The terminal starts with its logo and a language prompt. Submit `en`/`English`
 or `fr`/`French` with **ENVOI** (case-insensitive). Blank, unrecognised or timed-out
-input silently selects French. A fictional mainframe startup then occupies one
-screen. **SUITE** opens the question prompt; **SOMMAIRE** returns
-to language selection, and **GUIDE** retains access to administration. Boot-screen
+input silently selects French. A fictional mainframe startup aims for roughly one
+screen and scrolls automatically when longer. **SUITE** opens the question prompt;
+**SOMMAIRE** returns to language selection, and **GUIDE** retains access to administration. Boot-screen
 inactivity returns to the start screen after five minutes.
 
 The language applies to terminal messages and the model's default answer language;
@@ -29,16 +29,23 @@ wording. Language selection and startup diagnostics are never conversation turns
 **SOMMAIRE** resets both language selection and conversation history.
 
 After language submission, a short waiting message appears while one independent
-request generates 16-20 lines of boot diagnostics. It uses the configured Mistral
-or Claude model and credentials, with an eight-second HTTP request timeout and no
+request generates boot diagnostics, aiming for 12-18 lines without a hard line-count
+limit. It uses the configured Mistral or Claude model and credentials, with an
+eight-second HTTP request timeout and no
 retry. The dedicated prompt is `config/boot_prompt.txt`; its nine bilingual examples
 in `config/boot_examples.json` are reviewed selections from the personality lab
 (i05, i09, l11, l13, i16, l25, l04, l12 and l24). These are alternate examples,
 not consecutive stages to copy into one startup.
 
-Python rejects incomplete responses, invalid line counts, lines over 39 columns,
-non-ASCII/control characters, Markdown and function-key instructions. It then adds
-a blank separator and the final **SUITE** instruction itself. On failure, missing
+Python rejects incomplete/empty responses, control characters, Markdown and explicit
+function-key instructions. It transliterates accents using the existing ASCII helper
+and wraps long lines to 39 columns without truncating their text. It then adds
+a blank separator and the final **SUITE** instruction itself. Boot display uses
+Videotex rouleau mode (`ESC 3A 69 43`), so the ending stays visible even when the
+sequence exceeds 24 rows. Page mode (`ESC 3A 6A 43`) is restored on every exit;
+protocol acknowledgements are consumed rather than becoming question input.
+These commands follow the [STUM protocol](https://jbellue.github.io/stum1b/);
+physical-terminal scrolling still requires validation. On failure, missing
 credentials/prompt files, or a search-only Linkup configuration, the existing static
 21-line startup is used. A language-screen timeout also uses static text: leaving
 the terminal unattended does not repeatedly spend boot-generation API calls.
@@ -95,6 +102,7 @@ python3 -m unittest discover -s tests -v
 
 The checks run the conversation loop with a simulated UART and mocked provider
 responses, including Videotex/VT100 function keys, language defaults, the SUITE gate,
-screen dimensions, session resets, factual-history isolation, completion reasons,
+screen dimensions, variable-length boot scrolling, mode restoration and protocol
+acknowledgements, session resets, factual-history isolation, completion reasons,
 timeouts and fallback behavior. They make no live API calls and do not replace
 live-model review or validation on the physical Minitel.

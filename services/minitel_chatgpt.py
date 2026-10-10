@@ -12,6 +12,7 @@ import time
 import logging
 import re
 import subprocess
+import textwrap
 import unicodedata
 from pathlib import Path
 from dotenv import load_dotenv
@@ -206,6 +207,9 @@ BG_BLACK  = bytes([ESC,0x50])
 DBL_HEIGHT= bytes([ESC,0x4C])   # double hauteur
 DBL_SIZE  = bytes([ESC,0x4F])   # double hauteur+largeur
 SZ_NORMAL = bytes([ESC,0x4C-0x0C])  # 0x40 normal (placeholder)
+# PRO2 START/STOP ROULEAU: scrolling within the 40-column Videotex screen.
+SCROLL_ON = bytes([ESC, 0x3A, 0x69, 0x43])
+SCROLL_OFF = bytes([ESC, 0x3A, 0x6A, 0x43])
 
 # Touches de fonction Minitel (SEP + code)
 K_ENVOI=0x41; K_RETOUR=0x42; K_REPET=0x43; K_GUIDE=0x44
@@ -369,6 +373,17 @@ class Term:
                 t2 = time.time() + 0.5
                 while b2 is None and time.time() < t2:
                     b2 = self.read_byte()
+                if b2 in (0x39, 0x3A, 0x3B):
+                    # Consume complete PRO1/2/3 replies, including scroll ACKs.
+                    # Their printable status bytes must not become user input.
+                    for _ in range(b2 - 0x38):
+                        reply = self.read_byte()
+                        t3 = time.time() + 0.5
+                        while reply is None and time.time() < t3:
+                            reply = self.read_byte()
+                        if reply is None:
+                            break
+                    continue
                 if b2 == 0x4F:        # 'O' → séquence SS3
                     code = self.read_byte()
                     t3 = time.time() + 0.5
@@ -434,22 +449,26 @@ def session_prompt(system_prompt, language):
 
 
 def validate_boot(text):
-    """Reject unsafe controls and screen overflow; never truncate generated rows."""
+    """Reject controls/bad formats, then adapt text for a scrolling display."""
     if not isinstance(text, str):
         raise ValueError("Startup response is not text")
     text = text.replace("\r\n", "\n")
-    if any(c != "\n" and not 0x20 <= ord(c) <= 0x7E for c in text):
-        raise ValueError("Startup contains non-printable or non-ASCII characters")
+    if any(c != "\n" and not c.isprintable() for c in text):
+        raise ValueError("Startup contains non-printable characters")
+    text = to_ascii(text)
+    if not text.strip():
+        raise ValueError("Startup is empty")
     lines = text.strip("\n").split("\n")
-    if not 16 <= len(lines) <= 20:
-        raise ValueError("Startup must occupy 16-20 lines")
-    if any(len(line) >= COLS for line in lines):
-        raise ValueError("Startup line exceeds 39 columns")
     if "```" in text or any(line.lstrip().startswith(("#", "* ", "- ")) for line in lines):
         raise ValueError("Startup contains Markdown")
-    if re.search(r"\b(ENVOI|SUITE|RETOUR|SOMMAIRE|GUIDE|ANNULATION|CORRECTION|REPETITION)\b", text, re.I):
+    if re.search(r"\b(press|push|appuyez|pressez|tapez)\b[^\n]*"
+                 r"\b(ENVOI|SUITE|RETOUR|SOMMAIRE|GUIDE|ANNULATION|CORRECTION|REPETITION)\b", text, re.I):
         raise ValueError("Startup contains function-key instructions")
-    return lines
+    rows = []
+    for line in lines:
+        rows.extend(textwrap.wrap(line, width=COLS - 1, replace_whitespace=False,
+                                  break_on_hyphens=False) or [""])
+    return rows
 
 
 def prepare_boot(language):
@@ -483,20 +502,25 @@ def prepare_boot(language):
 def show_boot(t: Term, language, lines=None):
     """Fictional diagnostics; only SUITE opens the question prompt."""
     t.clear()
-    t.w(FG_CYAN)
-    for line in lines if lines is not None else UI[language]["boot"]:
-        t.line(line)
-    while True:
-        kind, code = t.read_key(IDLE_TIMEOUT)
-        if kind == 'timeout':
-            return 'timeout'
-        if kind == 'fn':
-            if code == K_SUITE:
-                return 'done'
-            if code == K_SOMMAIRE:
-                return 'sommaire'
-            if code == K_GUIDE:
-                return 'guide'
+    try:
+        t.w(SCROLL_ON)
+        t.w(FG_CYAN)
+        for line in lines if lines is not None else UI[language]["boot"]:
+            t.line(line)
+        while True:
+            kind, code = t.read_key(IDLE_TIMEOUT)
+            if kind == 'timeout':
+                return 'timeout'
+            if kind == 'fn':
+                if code == K_SUITE:
+                    return 'done'
+                if code == K_SOMMAIRE:
+                    return 'sommaire'
+                if code == K_GUIDE:
+                    return 'guide'
+    finally:
+        # Restore page mode for the existing menus and paginated answers.
+        t.w(SCROLL_OFF)
 
 
 def show_question_prompt(t: Term, question_msg):

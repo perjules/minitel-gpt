@@ -37,15 +37,66 @@ def fn(code):
 def screen_text(data):
     """Strip colour/cursor controls, retaining line breaks and visible text."""
     visible = bytearray()
-    skip = False
+    skip = 0
+    escape = False
     for code in data:
         if skip:
-            skip = False
+            skip -= 1
+        elif escape:
+            skip = code - 0x38 if code in (0x39, 0x3A, 0x3B) else 0
+            escape = False
         elif code == chat.ESC:
-            skip = True
+            escape = True
         elif code in (chat.CR, chat.LF) or 0x20 <= code <= 0x7E:
             visible.append(code)
     return visible.decode("ascii")
+
+
+def render_videotex(data):
+    """Small screen model: page/rouleau mode, FF/RS, CR/LF and column wrap."""
+    screen = [""] * 24
+    row = column = 0
+    scrolling = False
+    index = 0
+
+    def down():
+        nonlocal row
+        if row < 23:
+            row += 1
+        elif scrolling:
+            screen.pop(0)
+            screen.append("")
+        else:
+            row = 0
+
+    while index < len(data):
+        code = data[index]
+        index += 1
+        if code == 0x1B:
+            command = data[index]
+            index += 1
+            if command == 0x3A:
+                operation, mode = data[index:index + 2]
+                index += 2
+                if mode == 0x43:
+                    scrolling = operation == 0x69
+        elif code == 0x0C:
+            screen = [""] * 24
+            row = column = 0
+        elif code == 0x1E:
+            row = column = 0
+        elif code == 0x0D:
+            column = 0
+        elif code == 0x0A:
+            down()
+        elif 0x20 <= code <= 0x7E:
+            current = screen[row].ljust(column + 1)
+            screen[row] = current[:column] + chr(code) + current[column + 1:]
+            column += 1
+            if column == 40:
+                column = 0
+                down()
+    return screen, scrolling
 
 
 class StartupTests(unittest.TestCase):
@@ -94,6 +145,7 @@ class StartupTests(unittest.TestCase):
             chat.run()
         self.boot_requests = post.call_args_list
         self.boot_screens = boot_screen.call_args_list
+        self.uart = uart
         screens = [screen_text(s) for s in bytes(uart.output).split(bytes([chat.FF])) if s]
         return screens, calls
 
@@ -237,8 +289,8 @@ class StartupTests(unittest.TestCase):
         for settings in (
             {"boot_error": chat.requests.Timeout("timeout")},
             {"boot_error": chat.requests.HTTPError("401")},
-            {"boot_text": "Too short"},
-            {"boot_text": "\n".join(["x" * 40] * 18)},
+            {"boot_text": "   "},
+            {"boot_text": "```\nBOOT\n```"},
             {"boot_text": "\n".join(["\x1b[2J"] * 18)},
         ):
             with self.subTest(settings=settings):
@@ -249,6 +301,60 @@ class StartupTests(unittest.TestCase):
                 self.assertEqual(screens[1].splitlines(), chat.UI["en"]["boot"])
                 self.assertEqual(len(self.boot_requests), 1)
                 self.assertEqual(calls[0][1], [{"role": "user", "content": "Hi"}])
+
+    def test_short_and_long_api_boots_do_not_fall_back(self):
+        for count in (8, 15, 21, 45):
+            narrative = [f"CHECK {index:02d}: NOMINAL" for index in range(count - 1)]
+            narrative.append("MAINFRAME READY.")
+            with self.subTest(count=count):
+                screens, _ = self.run_session(
+                    b"en" + fn(chat.K_ENVOI), boot_text="\n".join(narrative),
+                )
+                expected = narrative + ["", chat.UI["en"]["boot"][-1]]
+                self.assertEqual(screens[1].splitlines(), expected)
+                self.assertEqual(len(self.boot_requests), 1)
+                screen, scrolling = render_videotex(bytes(self.uart.output))
+                self.assertIn("MAINFRAME READY.", screen)
+                self.assertIn(chat.UI["en"]["boot"][-1], screen)
+                if count >= 24:
+                    self.assertEqual(screen, expected[-23:] + [""])
+                self.assertFalse(scrolling)  # also restored when input/IO raises
+
+    def test_scroll_mode_is_restored_for_every_boot_exit(self):
+        for key, result in (
+            (fn(chat.K_SUITE), "done"), (fn(chat.K_SOMMAIRE), "sommaire"),
+            (fn(chat.K_GUIDE), "guide"), (None, "timeout"),
+        ):
+            with self.subTest(result=result):
+                uart = FakeSerial(key or [])
+                term = object.__new__(chat.Term)
+                term.s = uart
+                with (
+                    patch.object(chat.time, "sleep"),
+                    patch.object(term, "read_key", wraps=term.read_key) as read_key,
+                ):
+                    if key is None:
+                        read_key.return_value = ("timeout", None)
+                    self.assertEqual(chat.show_boot(term, "en"), result)
+                output = bytes(uart.output)
+                self.assertIn(b"\x1b\x3a\x69\x43", output)
+                self.assertTrue(output.endswith(b"\x1b\x3a\x6a\x43"))
+                _, scrolling = render_videotex(output)
+                self.assertFalse(scrolling)
+
+    def test_scroll_acknowledgements_do_not_contaminate_keys_or_chat(self):
+        _, calls = self.run_session(
+            b"en" + fn(chat.K_ENVOI) + b"\x1b\x3a\x73\x42"
+            + fn(chat.K_SUITE) + b"\x1b\x3a\x73\x40"
+            + b"Hello" + fn(chat.K_ENVOI),
+        )
+        self.assertEqual(calls[0][1], [{"role": "user", "content": "Hello"}])
+        # A UART read may pause between bytes of the terminal's reply.
+        term = object.__new__(chat.Term)
+        term.s = Mock()
+        term.s.read.side_effect = [b"\x1b", b"", b"\x3a", b"", b"\x73", b"", b"\x42",
+                                  b"\x13", b"\x48"]
+        self.assertEqual(term.read_key(1), ("fn", chat.K_SUITE))
 
 
 if __name__ == "__main__":

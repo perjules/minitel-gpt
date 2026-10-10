@@ -9,21 +9,29 @@ class BootGenerationTests(unittest.TestCase):
     def setUp(self):
         self.text = "\n".join(chat.UI["en"]["boot"][:-2])
 
-    def test_line_boundaries_and_crlf(self):
-        for count in (16, 20):
+    def test_variable_line_counts_and_crlf_are_accepted(self):
+        # Include both sides of the old 16-20 boundary and multiple screens.
+        for count in (1, 8, 15, 16, 20, 21, 45):
             rows = ["x" * 39] * count
-            self.assertEqual(chat.validate_boot("\r\n".join(rows) + "\r\n"), rows)
-        for count in (15, 21):
-            with self.assertRaises(ValueError):
-                chat.validate_boot("\n".join(["x"] * count))
-        with self.assertRaises(ValueError):
-            chat.validate_boot("\n".join(["x" * 40] * 18))
+            with self.subTest(count=count):
+                self.assertEqual(chat.validate_boot("\r\n".join(rows) + "\r\n"), rows)
 
-    def test_controls_unicode_and_unexpected_formats_are_rejected(self):
-        for extra in ("\x00", "\x08", "\t", "\x0b", "\x0c", "\r", "\x13", "\x1b", "\x7f", "é"):
+    def test_accents_and_long_diagnostics_are_rendered_without_truncation(self):
+        text = "CORRECTION PARITÉ: TERMINÉE.\n\n" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ" * 4
+        rows = chat.validate_boot(text)
+        self.assertEqual(rows[:2], ["CORRECTION PARITE: TERMINEE.", ""])
+        self.assertEqual("".join(rows[2:]), "ABCDEFGHIJKLMNOPQRSTUVWXYZ" * 4)
+        self.assertTrue(all(len(row) < chat.COLS for row in rows))
+        sentence = "RELAY CHECK COMPLETE " * 5 + "END."
+        rows = chat.validate_boot(sentence)
+        self.assertEqual(" ".join(rows), sentence)
+        self.assertTrue(all(len(row) < chat.COLS for row in rows))
+
+    def test_controls_empty_text_and_unexpected_formats_are_rejected(self):
+        for extra in ("\x00", "\x08", "\t", "\x0b", "\x0c", "\r", "\x13", "\x1b", "\x7f", "\x85"):
             with self.subTest(extra=repr(extra)), self.assertRaises(ValueError):
                 chat.validate_boot(self.text + extra)
-        for text in (None, [], {}, "", " " * 800):
+        for text in (None, [], {}, "", "\n\n", " " * 800, "☃"):
             with self.subTest(text=type(text)), self.assertRaises(ValueError):
                 chat.validate_boot(text)
         for prefix in ("```", "# Boot", "* step", "- step"):
@@ -32,8 +40,9 @@ class BootGenerationTests(unittest.TestCase):
 
     def test_model_cannot_supply_function_key_instructions(self):
         for key in ("SUITE", "ENVOI", "SOMMAIRE", "GUIDE", "RETOUR", "CORRECTION"):
-            with self.subTest(key=key), self.assertRaises(ValueError):
-                chat.validate_boot(self.text.replace("MAINFRAME READY.", f"Press {key.lower()}"))
+            for instruction in (f"Press {key.lower()}", f"Appuyez sur {key}"):
+                with self.subTest(instruction=instruction), self.assertRaises(ValueError):
+                    chat.validate_boot(instruction)
 
     def test_missing_keys_and_search_provider_make_no_request(self):
         with patch.object(chat.requests, "post") as post:
