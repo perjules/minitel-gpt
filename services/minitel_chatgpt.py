@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 MINITEL GPT - service de chat années 80 sur Minitel.
-Interface : sommaire (titre ASCII + invite) → saisie → réponse paginée → re-saisie.
+Interface : langue → demarrage fictif → SUITE → saisie → reponse paginee.
 Touches : ENVOI = valider, SUITE = page suivante, SOMMAIRE = retour accueil.
 Timeout 5 min sans action → retour sommaire.
 """
@@ -76,6 +76,8 @@ LINKUP_URL = "https://api.linkup.so/v1/search"
 MODEL = {"claude": CLAUDE_MODEL, "linkup": LINKUP_DEPTH}.get(PROVIDER, MISTRAL_MODEL)
 PROMPTS_FILE = Path(__file__).parent.parent / "config" / "prompts.json"
 PROMPTS_DEFAULT = Path(__file__).parent.parent / "config" / "prompts.default.json"
+UI_FILE = Path(__file__).parent.parent / "config" / "terminal_ui.json"
+UI = json.loads(UI_FILE.read_text(encoding="utf-8"))
 
 
 def ensure_prompts():
@@ -387,22 +389,66 @@ def wrap(text, width=COLS):
 
 
 # ── Écrans ───────────────────────────────────────────────────────────────
-def show_home(t: Term, title_lines, title_msg, question_msg):
+def show_home(t: Term, title_lines, title_msg):
     t.clear()
     t.w(bytes([CR, LF]))
     t.w(FG_CYAN)
     for ln in title_lines:
         t.center(ln)
-    t.w(bytes([CR, LF, CR, LF]))      # 2 lignes après le logo
+    t.line()
     t.w(FG_YELLOW)
     t.center(title_msg)
-    t.w(bytes([CR, LF, CR, LF]))      # ligne vide après le message titre
+    t.line()
+    t.w(FG_WHITE)
+    t.center(UI["language_prompt"])
+    t.center(UI["language_options"])
+    t.center(UI["language_submit"])
+    t.line()
+
+
+def choose_language(text):
+    """French is the silent fallback for empty or unrecognised input."""
+    return "en" if (text or "").strip().lower() in ("en", "english") else "fr"
+
+
+def session_prompt(system_prompt, language):
+    """Keep the selected language out of conversation history."""
+    name = "English" if language == "en" else "French"
+    return system_prompt + (
+        f"\n\nSESSION LANGUAGE: Reply in {name} unless the user explicitly "
+        "requests another language. This overrides any default language above. "
+        "Always refer to Minitel function keys by their French names: "
+        "ENVOI, SUITE, RETOUR, SOMMAIRE, GUIDE, ANNULATION, CORRECTION, REPETITION."
+    )
+
+
+def show_boot(t: Term, language):
+    """Static fictional diagnostics; only SUITE opens the question prompt."""
+    t.clear()
+    t.w(FG_CYAN)
+    for line in UI[language]["boot"]:
+        t.line(line)
+    while True:
+        kind, code = t.read_key(IDLE_TIMEOUT)
+        if kind == 'timeout':
+            return 'timeout'
+        if kind == 'fn':
+            if code == K_SUITE:
+                return 'done'
+            if code == K_SOMMAIRE:
+                return 'sommaire'
+            if code == K_GUIDE:
+                return 'guide'
+
+
+def show_question_prompt(t: Term, question_msg):
+    t.clear()
     t.w(FG_WHITE)
     t.center(question_msg)
-    t.w(bytes([CR, LF, CR, LF]))      # 1 ligne vide avant la saisie
+    t.line()
 
 
-def show_guide(t: Term):
+def show_guide(t: Term, language="fr"):
     """Écran d'aide affiché sur la touche GUIDE : adresse de l'interface d'admin."""
     ip = get_ip()
     t.clear()
@@ -413,15 +459,15 @@ def show_guide(t: Term):
     if ip:
         t.center(f"http://{ip}:8080")
     else:
-        t.center("Adresse IP indisponible")
+        t.center(UI[language]["ip_unavailable"])
     t.w(bytes([CR, LF, CR, LF]))
-    t.center(f"Mot de passe : {os.getenv('ADMIN_PASSWORD', 'mistral')}")
+    t.center(f"{UI[language]['password']} : {os.getenv('ADMIN_PASSWORD', 'mistral')}")
     t.w(bytes([CR, LF, CR, LF, CR, LF]))
-    t.w(FG_CYAN); t.center("Une touche pour revenir")
+    t.w(FG_CYAN); t.center(UI[language]["guide_return"])
     t.read_key(120)
 
 
-def read_question(t: Term):
+def read_question(t: Term, allow_empty=False):
     """Lit une question. Retourne (texte, 'envoi') / (None,'sommaire') / (None,'timeout')."""
     t.w(FG_GREEN)
     t.w("> ")
@@ -437,7 +483,7 @@ def read_question(t: Term):
             if code == K_GUIDE:
                 return None, 'guide'
             if code == K_ENVOI:
-                if buf:
+                if buf or allow_empty:
                     return "".join(buf), 'envoi'
             if code in (K_CORR, K_RETOUR):
                 if buf:
@@ -447,7 +493,7 @@ def read_question(t: Term):
         # caractère
         c = code
         if c in (CR, LF):
-            if buf:
+            if buf or allow_empty:
                 return "".join(buf), 'envoi'
         elif c in (BS, 0x7F):
             if buf:
@@ -457,7 +503,7 @@ def read_question(t: Term):
             buf.append(chr(c))       # pas d'écho (le Minitel l'affiche)
 
 
-def show_response(t: Term, text: str):
+def show_response(t: Term, text: str, language="fr"):
     """Affiche la réponse en pages. Retourne 'sommaire' / 'done' / 'timeout'."""
     lines = wrap(text)
     pages = [lines[i:i+CONTENT_ROWS] for i in range(0, len(lines), CONTENT_ROWS)] or [[""]]
@@ -470,7 +516,7 @@ def show_response(t: Term, text: str):
         if not last:
             t.w(bytes([CR, LF]))
             t.w(FG_CYAN)
-            t.center("-- SUITE pour la suite --")
+            t.center(UI[language]["next_page"])
             while True:
                 kind, code = t.read_key(IDLE_TIMEOUT)
                 if kind == 'timeout':
@@ -493,12 +539,29 @@ def run():
         system_prompt, title_msg, question_msg, loading_msg, title_art = load_preset()
         title_lines = build_title(title_art)
         history = []
-        show_home(t, title_lines, title_msg, question_msg)
+        show_home(t, title_lines, title_msg)
+        choice, action = read_question(t, allow_empty=True)
+        if action == 'guide':
+            show_guide(t)
+            continue
+        if action == 'sommaire':
+            continue
+        language = choose_language(choice)
+        system_prompt = session_prompt(system_prompt, language)
+        if language == "en":
+            question_msg = UI[language]["question"]
+            loading_msg = UI[language]["loading"]
+        result = show_boot(t, language)
+        if result == 'guide':
+            show_guide(t, language)
+        if result != 'done':
+            continue
+        show_question_prompt(t, question_msg)
 
         while True:  # boucle conversation
             question, action = read_question(t)
             if action == 'guide':
-                show_guide(t)
+                show_guide(t, language)
                 break          # retour au sommaire après l'écran d'aide
             if action in ('sommaire', 'timeout'):
                 break
@@ -514,16 +577,16 @@ def run():
                 answer = to_ascii(answer)
             except Exception as e:
                 log.error(f"API: {e}")
-                answer = "Erreur de connexion. Reessayez."
+                answer = UI[language]["connection_error"]
 
-            result = show_response(t, answer)
+            result = show_response(t, answer, language)
             if result in ('sommaire', 'timeout'):
                 break
 
             # Invite pour rebondir
             t.w(bytes([CR, LF]))
             t.w(FG_WHITE)
-            t.center("Repondez ou SOMMAIRE pour finir")
+            t.center(UI[language]["follow_up"])
             t.w(bytes([CR, LF]))
 
             if len(history) > 20:
