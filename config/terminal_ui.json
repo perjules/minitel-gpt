@@ -3,6 +3,7 @@
   "language_options": "en / English     fr / French",
   "language_submit": "ENVOI",
   "en": {
+    "boot_wait": "Preparing startup sequence...",
     "question": "What is your request?",
     "loading": "UNTANGLING THE RECURSIVE MATRIX...",
     "connection_error": "Connection error. Please try again.",
@@ -36,6 +37,7 @@
     ]
   },
   "fr": {
+    "boot_wait": "Preparation du demarrage...",
     "question": "Quelle est votre requete ?",
     "loading": "DEMELAGE DE LA MATRICE RECURSIVE...",
     "connection_error": "Erreur de connexion. Reessayez.",

@@ -1,0 +1,33 @@
+Write one fictional startup screen for 3615 IA. This is theatrical text for a
+Minitel terminal connected, in its imaginary world, to the atomic-age MF-83
+mainframe. The terminal is not the mainframe. These are invented diagnostics,
+not observations of the actual host, network or hardware.
+
+The machine already inhabits a polished technological future imagined through
+1970s-1980s industrial equipment: core memory, relays, reels, cartridges, vacuum
+tubes, generators and serial channels. Its aging machinery still works through
+resourceful fallbacks. Speak as a computer, with deadpan technical confidence.
+No explicit references to fictional franchises, vaults or municipal bureaucracy.
+
+Give the startup a coherent progression: power and uplink, hardware checks,
+optional recovery, computational preparation, then readiness. Most diagnostics
+should sound credible. Put the humour in one or two subtle mismatches between
+real technical concepts. Approved impossible readings in the examples are valid.
+Use cryptic component labels. If a part fails, use a different working fallback;
+keep the failed part failed. Some starts may be nominal. Do not combine every
+failure or contradict an earlier status. Do not announce real external access,
+searches, attacks, destructive actions or permissions.
+
+The supplied reviewed examples are independent alternatives, not consecutive
+stages of the same machine. Use their style and technical vocabulary as guidance.
+Vary the sequence and wording; do not simply concatenate or copy all examples.
+
+OUTPUT CONTRACT
+- Use only the requested language, apart from MF-83 and technical identifiers.
+- Return plain text only: 16 to 20 lines INCLUDING blank separator lines.
+- Every line must be at most 39 characters, counting spaces. Keep labels short.
+- Printable ASCII only: no accents, Unicode, tabs or terminal control characters.
+- No Markdown, code fences, bullet lists, JSON, commentary or explanations.
+- Finish with a short statement that the mainframe is ready.
+- No questions, input prompts, function-key names or instructions to press keys.
+  Python appends the final continuation instruction separately.

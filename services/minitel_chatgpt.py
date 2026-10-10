@@ -10,6 +10,7 @@ import os
 import sys
 import time
 import logging
+import re
 import subprocess
 import unicodedata
 from pathlib import Path
@@ -78,6 +79,9 @@ PROMPTS_FILE = Path(__file__).parent.parent / "config" / "prompts.json"
 PROMPTS_DEFAULT = Path(__file__).parent.parent / "config" / "prompts.default.json"
 UI_FILE = Path(__file__).parent.parent / "config" / "terminal_ui.json"
 UI = json.loads(UI_FILE.read_text(encoding="utf-8"))
+BOOT_PROMPT_FILE = UI_FILE.with_name("boot_prompt.txt")
+BOOT_EXAMPLES_FILE = UI_FILE.with_name("boot_examples.json")
+BOOT_TIMEOUT = 8          # one attempt, then the static startup takes over
 
 
 def ensure_prompts():
@@ -88,7 +92,7 @@ def ensure_prompts():
                                 encoding="utf-8")
 
 
-def call_mistral(system_prompt, history):
+def call_mistral(system_prompt, history, timeout=30, require_complete=False):
     """Appelle l'API Mistral (chat completions) et retourne le texte de réponse."""
     messages = [{"role": "system", "content": system_prompt}] + history
     r = requests.post(
@@ -96,13 +100,17 @@ def call_mistral(system_prompt, history):
         headers={"Authorization": f"Bearer {MISTRAL_KEY}",
                  "Content-Type": "application/json"},
         json={"model": MISTRAL_MODEL, "messages": messages, "max_tokens": 700},
-        timeout=30,
+        timeout=timeout,
     )
     r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"].strip()
+    choice = r.json()["choices"][0]
+    if require_complete and choice.get("finish_reason") != "stop":
+        raise ValueError("Incomplete Mistral startup response")
+    text = choice["message"]["content"]
+    return text if require_complete else text.strip()
 
 
-def call_claude(system_prompt, history):
+def call_claude(system_prompt, history, timeout=30, require_complete=False):
     """Appelle l'API Claude (Anthropic Messages) et retourne le texte de réponse.
     Le prompt systeme est passe a part (champ `system`), pas dans `messages`."""
     r = requests.post(
@@ -116,12 +124,15 @@ def call_claude(system_prompt, history):
               # une réponse rapide ; Haiku 4.5 refuse ce paramètre.
               **({} if CLAUDE_MODEL.startswith("claude-haiku")
                  else {"output_config": {"effort": "low"}})},
-        timeout=30,
+        timeout=timeout,
     )
     r.raise_for_status()
-    blocks = r.json().get("content", [])
-    return "".join(b.get("text", "") for b in blocks
-                   if b.get("type") == "text").strip()
+    data = r.json()
+    if require_complete and data.get("stop_reason") != "end_turn":
+        raise ValueError("Incomplete Claude startup response")
+    blocks = data.get("content", [])
+    text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+    return text if require_complete else text.strip()
 
 
 def call_linkup(system_prompt, history):
@@ -422,11 +433,58 @@ def session_prompt(system_prompt, language):
     )
 
 
-def show_boot(t: Term, language):
-    """Static fictional diagnostics; only SUITE opens the question prompt."""
+def validate_boot(text):
+    """Reject unsafe controls and screen overflow; never truncate generated rows."""
+    if not isinstance(text, str):
+        raise ValueError("Startup response is not text")
+    text = text.replace("\r\n", "\n")
+    if any(c != "\n" and not 0x20 <= ord(c) <= 0x7E for c in text):
+        raise ValueError("Startup contains non-printable or non-ASCII characters")
+    lines = text.strip("\n").split("\n")
+    if not 16 <= len(lines) <= 20:
+        raise ValueError("Startup must occupy 16-20 lines")
+    if any(len(line) >= COLS for line in lines):
+        raise ValueError("Startup line exceeds 39 columns")
+    if "```" in text or any(line.lstrip().startswith(("#", "* ", "- ")) for line in lines):
+        raise ValueError("Startup contains Markdown")
+    if re.search(r"\b(ENVOI|SUITE|RETOUR|SOMMAIRE|GUIDE|ANNULATION|CORRECTION|REPETITION)\b", text, re.I):
+        raise ValueError("Startup contains function-key instructions")
+    return lines
+
+
+def prepare_boot(language):
+    """One independent model call; its result never enters factual history."""
+    fallback = list(UI[language]["boot"])
+    if PROVIDER == "claude":
+        generate, key = call_claude, ANTHROPIC_KEY
+    elif PROVIDER == "mistral":
+        generate, key = call_mistral, MISTRAL_KEY
+    else:
+        return fallback          # Linkup is a search service, not a boot writer
+    if not key:
+        return fallback
+    try:
+        prompt = BOOT_PROMPT_FILE.read_text(encoding="utf-8")
+        examples = json.loads(BOOT_EXAMPLES_FILE.read_text(encoding="utf-8"))
+        name = "English" if language == "en" else "French"
+        request = f"Generate a new MF-83 startup in {name}. Reviewed examples:\n\n"
+        request += "\n\n".join(example[language] for example in examples)
+        text = generate(prompt, [{"role": "user", "content": request}],
+                        timeout=BOOT_TIMEOUT, require_complete=True)
+        rows = validate_boot(text)
+        log.info("Generated fictional startup: %s lines", len(rows))
+        return rows + ["", fallback[-1]]
+    except Exception as e:
+        log.warning("Startup generation failed (%s: %s); using static sequence",
+                    type(e).__name__, e)
+        return fallback
+
+
+def show_boot(t: Term, language, lines=None):
+    """Fictional diagnostics; only SUITE opens the question prompt."""
     t.clear()
     t.w(FG_CYAN)
-    for line in UI[language]["boot"]:
+    for line in lines if lines is not None else UI[language]["boot"]:
         t.line(line)
     while True:
         kind, code = t.read_key(IDLE_TIMEOUT)
@@ -551,7 +609,13 @@ def run():
         if language == "en":
             question_msg = UI[language]["question"]
             loading_msg = UI[language]["loading"]
-        result = show_boot(t, language)
+        t.w(bytes([CR, LF]))
+        t.w(FG_CYAN)
+        t.center(UI[language]["boot_wait"])
+        # An unattended language-screen timeout must not spend an API call.
+        boot_lines = (prepare_boot(language) if action == 'envoi'
+                      else list(UI[language]["boot"]))  # retained for this session only
+        result = show_boot(t, language, boot_lines)
         if result == 'guide':
             show_guide(t, language)
         if result != 'done':

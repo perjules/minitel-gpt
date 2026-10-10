@@ -1,7 +1,7 @@
 """Exercise startup through the real UART key decoder and conversation loop."""
 import unittest
 from collections import deque
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from services import minitel_chatgpt as chat
 
@@ -49,7 +49,7 @@ def screen_text(data):
 
 
 class StartupTests(unittest.TestCase):
-    def run_session(self, keys):
+    def run_session(self, keys, boot_text=None, boot_error=None):
         uart = FakeSerial(keys)
         calls = []
 
@@ -65,6 +65,13 @@ class StartupTests(unittest.TestCase):
             except TimeoutError:
                 return 'timeout', None
 
+        response = Mock()
+        response.json.return_value = {
+            "choices": [{"finish_reason": "stop", "message": {"content": boot_text}}],
+        }
+        post = Mock(return_value=response, side_effect=boot_error)
+        boot_screen = Mock(wraps=chat.show_boot)
+
         with (
             patch.object(chat.serial, "Serial", return_value=uart),
             patch.object(chat.time, "sleep"),
@@ -75,11 +82,18 @@ class StartupTests(unittest.TestCase):
             )),
             patch.object(chat, "build_title", return_value=["LOGO"]),
             patch.object(chat, "call_llm", side_effect=reply),
+            patch.object(chat.requests, "post", post),
+            patch.object(chat, "MISTRAL_KEY", "test-key" if boot_text or boot_error else ""),
+            patch.object(chat, "ANTHROPIC_KEY", ""),
+            patch.object(chat, "PROVIDER", "mistral"),
+            patch.object(chat, "show_boot", boot_screen),
             patch.object(chat, "get_ip", return_value="192.0.2.1"),
             patch.object(chat.log, "info"),
             self.assertRaises(EndOfInput),
         ):
             chat.run()
+        self.boot_requests = post.call_args_list
+        self.boot_screens = boot_screen.call_args_list
         screens = [screen_text(s) for s in bytes(uart.output).split(bytes([chat.FF])) if s]
         return screens, calls
 
@@ -117,9 +131,13 @@ class StartupTests(unittest.TestCase):
                 self.assertIn("MAINFRAME READY.", screens[1])
 
     def test_language_timeout_defaults_to_french_but_boot_timeout_returns_home(self):
-        screens, calls = self.run_session([None, *fn(chat.K_SUITE), *b"Hi", *fn(chat.K_ENVOI)])
+        screens, calls = self.run_session(
+            [None, *fn(chat.K_SUITE), *b"Hi", *fn(chat.K_ENVOI)],
+            boot_text="\n".join(chat.UI["fr"]["boot"][:-2]),
+        )
         self.assertIn("MAINFRAME PRET.", screens[1])
         self.assertEqual(len(calls), 1)
+        self.assertEqual(self.boot_requests, [])
         screens, calls = self.run_session([*fn(chat.K_ENVOI), None])
         self.assertIn("Choose language", screens[-1])
         self.assertEqual(calls, [])
@@ -189,6 +207,48 @@ class StartupTests(unittest.TestCase):
         with patch.object(chat.time, "sleep"):
             chat.show_home(term, ["LOGO"] * chat.TITLE_ART_MAX_HEIGHT, "*** 3615 IA ***")
         self.assertLess(screen_text(uart.output).count("\n"), chat.SCREEN_ROWS)
+
+    def test_generated_startup_uses_its_own_request_and_python_suite_footer(self):
+        for language in ("en", "fr"):
+            with self.subTest(language=language):
+                # The existing reviewed-style screen is also a valid generated fixture.
+                narrative = chat.UI[language]["boot"][:-2]
+                screens, calls = self.run_session(
+                    language.encode() + fn(chat.K_ENVOI) + fn(chat.K_SUITE)
+                    + b"Hello" + fn(chat.K_ENVOI), boot_text="\n".join(narrative),
+                )
+                self.assertEqual(len(self.boot_requests), 1)
+                request = self.boot_requests[0].kwargs
+                self.assertEqual(request["timeout"], chat.BOOT_TIMEOUT)
+                messages = request["json"]["messages"]
+                self.assertEqual([m["role"] for m in messages], ["system", "user"])
+                self.assertIn("fictional startup", messages[0]["content"])
+                self.assertIn("English" if language == "en" else "French", messages[1]["content"])
+                self.assertIn("CRITICAL FAIL" if language == "en" else "ECHEC CRITIQUE",
+                              messages[1]["content"])
+                expected = narrative + ["", chat.UI[language]["boot"][-1]]
+                self.assertEqual(self.boot_screens[0].args[2], expected)
+                self.assertEqual(screens[1].splitlines(), expected)
+                self.assertEqual(calls[0][1], [{"role": "user", "content": "Hello"}])
+                self.assertNotIn("RELAY K7", calls[0][0])
+                self.assertIn("SUITE", screens[1].splitlines()[-1])
+
+    def test_generation_failure_or_invalid_text_falls_back_without_retry(self):
+        for settings in (
+            {"boot_error": chat.requests.Timeout("timeout")},
+            {"boot_error": chat.requests.HTTPError("401")},
+            {"boot_text": "Too short"},
+            {"boot_text": "\n".join(["x" * 40] * 18)},
+            {"boot_text": "\n".join(["\x1b[2J"] * 18)},
+        ):
+            with self.subTest(settings=settings):
+                screens, calls = self.run_session(
+                    b"en" + fn(chat.K_ENVOI) + fn(chat.K_SUITE) + b"Hi" + fn(chat.K_ENVOI),
+                    **settings,
+                )
+                self.assertEqual(screens[1].splitlines(), chat.UI["en"]["boot"])
+                self.assertEqual(len(self.boot_requests), 1)
+                self.assertEqual(calls[0][1], [{"role": "user", "content": "Hi"}])
 
 
 if __name__ == "__main__":

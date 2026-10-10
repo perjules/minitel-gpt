@@ -17,8 +17,8 @@ the existing preset configuration. Other presets remain available.
 
 The terminal starts with its logo and a language prompt. Submit `en`/`English`
 or `fr`/`French` with **ENVOI** (case-insensitive). Blank, unrecognised or timed-out
-input silently selects French. A static, fictional 21-line mainframe startup
-then occupies one screen. **SUITE** opens the question prompt; **SOMMAIRE** returns
+input silently selects French. A fictional mainframe startup then occupies one
+screen. **SUITE** opens the question prompt; **SOMMAIRE** returns
 to language selection, and **GUIDE** retains access to administration. Boot-screen
 inactivity returns to the start screen after five minutes.
 
@@ -28,10 +28,33 @@ retain the active preset's custom wording; English uses the terminal's translate
 wording. Language selection and startup diagnostics are never conversation turns.
 **SOMMAIRE** resets both language selection and conversation history.
 
-Static UI and boot text live in `config/terminal_ui.json`. Edit that JSON and restart
-the chat service to change the text. These diagnostics describe imaginary machinery,
-not actual measurements. The standalone personality harness and idle scenarios are
-not integrated; no new runtime dependencies are required.
+After language submission, a short waiting message appears while one independent
+request generates 16-20 lines of boot diagnostics. It uses the configured Mistral
+or Claude model and credentials, with an eight-second HTTP request timeout and no
+retry. The dedicated prompt is `config/boot_prompt.txt`; its nine bilingual examples
+in `config/boot_examples.json` are reviewed selections from the personality lab
+(i05, i09, l11, l13, i16, l25, l04, l12 and l24). These are alternate examples,
+not consecutive stages to copy into one startup.
+
+Python rejects incomplete responses, invalid line counts, lines over 39 columns,
+non-ASCII/control characters, Markdown and function-key instructions. It then adds
+a blank separator and the final **SUITE** instruction itself. On failure, missing
+credentials/prompt files, or a search-only Linkup configuration, the existing static
+21-line startup is used. A language-screen timeout also uses static text: leaving
+the terminal unattended does not repeatedly spend boot-generation API calls.
+
+The complete displayed boot sequence remains in a separate local variable for the
+session. It is never added to the chat prompt or factual history. Restarting the
+chat service or returning to **SOMMAIRE** discards it. A future paired shutdown may
+use that same text; no shutdown generator or hardware-state parser is implemented.
+
+Static UI/fallback text live in `config/terminal_ui.json`. Edit the prompt/examples
+or JSON and restart the service to refine the performance. Generated wording is
+not newly approved phrase-bank content. Checks ensure display integrity, not humour,
+semantic consistency or translation quality; live review is still needed. These
+diagnostics describe imaginary machinery, not actual measurements. The standalone
+personality harness and idle scenarios are not integrated; no new runtime
+dependencies are required.
 
 The default lives in `config/prompts.default.json`. Upstream copies it to
 `config/prompts.json` only when the latter does not exist. Updating the repository
@@ -45,7 +68,7 @@ local preset configuration; alternatively add/select the new preset in the admin
 - Develop and play-test the character without requiring a physical terminal.
 - Separate factual reasoning and conversation history from fictional performance.
 - Add coherent startup/recovery/shutdown diagnostics, reviewed situation-dependent
-  messages and optional fictional idle scenes beyond the initial static startup.
+  messages and optional fictional idle scenes beyond the initial generated startup.
 - Preserve useful answers, uncertainty, technical details and honest real status.
 - Explore narrowly scoped useful tools, such as search or printing, independently
   of the character's imaginary capabilities.
@@ -70,7 +93,8 @@ Using an environment with the existing runtime dependencies (`requests`,
 python3 -m unittest discover -s tests -v
 ```
 
-The checks run the conversation loop with a simulated UART and model, including
-Videotex/VT100 function keys, language defaults, the SUITE gate, screen dimensions,
-session resets and factual-history isolation. They make no live API calls and
-do not replace validation on the physical Minitel.
+The checks run the conversation loop with a simulated UART and mocked provider
+responses, including Videotex/VT100 function keys, language defaults, the SUITE gate,
+screen dimensions, session resets, factual-history isolation, completion reasons,
+timeouts and fallback behavior. They make no live API calls and do not replace
+live-model review or validation on the physical Minitel.
