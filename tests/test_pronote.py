@@ -272,6 +272,40 @@ class PronoteTests(unittest.TestCase):
 
 
 class PinnedSDKTests(unittest.TestCase):
+    def test_pronote_2026_identification_encrypts_raw_challenge(self):
+        # Exercise the real pinned SDK login through our read-only hook.
+        # A newer server returns a raw challenge, not ciphertext to decrypt.
+        from Crypto.Hash import SHA256
+        from pronotepy.pronoteAPI import _Encryption
+
+        client = object.__new__(pn.client_class())
+        client.ent = None
+        client.username = "synthetic-user"
+        client.password = "synthetic-token"
+        client.attributes = {"a": "3"}
+        client.login_mode = "qr_code"
+        client.uuid = "synthetic-device"
+        client.communication = Mock()
+        client.communication.encryption.aes_iv = bytes(16)
+        challenge = "00" * 16
+        response = {"dataSec": {"data": {"challenge": challenge,
+                    "modeCompLog": False, "modeCompMdp": False}}}
+        client.communication.post.side_effect = [response, RuntimeError("stop after challenge")]
+
+        with (patch("pronotepy.clients._Encryption.aes_decrypt",
+                    side_effect=AssertionError("raw challenge must not be decrypted")),
+              self.assertRaisesRegex(RuntimeError, "stop after challenge")):
+            client._login()
+
+        calls = client.communication.post.call_args_list
+        self.assertEqual([call.args[0] for call in calls], ["Identification", "Authentification"])
+        encryption = _Encryption()
+        encryption.aes_set_iv(bytes(16))
+        digest = SHA256.new(client.password.encode()).hexdigest().upper()
+        encryption.aes_set_key((client.username + digest).encode())
+        self.assertEqual(calls[1].args[1]["data"]["challenge"],
+                         encryption.aes_encrypt(challenge.encode()).hex())
+
     def test_readonly_post_and_early_save_even_if_user_parameters_fail(self):
         cls = pn.client_class()
         client = object.__new__(cls)

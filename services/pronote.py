@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 ROOT = Path(__file__).resolve().parent.parent
-SDK_VERSION = "2.15.6"
+SDK_VERSION = "2.15.7"
 CACHE_SECONDS = 600
 STALE_SECONDS = 86400
 MAX_ITEMS = 100

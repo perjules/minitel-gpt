@@ -1,7 +1,7 @@
 # PRONOTE on 3615 IA
 
 Read-only local access to homework and published grades through **PronotePy
-2.15.6 / ParentClient**. Enrollment uses a parent mobile-app QR code, followed
+2.15.7 / ParentClient**. Enrollment uses a parent mobile-app QR code, followed
 by token login. Every successful login saves the rotated token on the Pi.
 There is no ENT password scraping and no school write operation.
 
@@ -20,6 +20,18 @@ existing system Python dependencies, and points `admin-ui` and
 `minitel-chatgpt` at that interpreter through systemd drop-ins. Both services
 restart. The normal installer and other installations remain unchanged.
 PRONOTE is disabled until you enable it in its admin page.
+
+“Dépendance installée : oui” means the tested SDK version is installed.
+“Intégration : désactivée” means PRONOTE tools are not offered to Mistral and
+ordinary conversation does not use the school adapter. It does not prevent
+parent-account enrollment or the administrative child-list check. After
+enrollment, add the permitted child aliases, check **Activer pour Mistral
+Conversations**, then **Enregistrer**. Enabling does not repair a failed login.
+
+For an existing installation, pull the updated `develop` branch and rerun
+`sudo bash scripts/install_pronote.sh`; this upgrades the pinned dependency
+and restarts both services. A source-only pull/restart retains the old package.
+Do not upgrade only the package: the adapter's strict version check must match.
 
 1. Open **Paramètres → PRONOTE** in the existing admin UI, or `/pronote`.
 2. Generate a new mobile-app connection QR in your PRONOTE **parent** space.
@@ -158,6 +170,12 @@ indicates a problem during the immediate token/device check; supply the account
 security PIN if required. A generic `enrollment_failed` by itself does not
 identify the cause. Report the diagnostic, not the QR or credentials.
 
+Version 2.15.7 changes the login-challenge handling for PRONOTE 2026.
+The older 2.15.6 can raise `CryptoError` after `Identification` even when the
+initial QR-field decryption succeeds. This matches upstream
+[issue 346](https://github.com/bain3/pronotepy/issues/346); a fresh QR and live
+retry are still needed to confirm enrollment on a particular school server.
+
 - `dependency_missing` / `dependency_version`: run the optional installer;
   do not upgrade PronotePy independently of its tested adapter.
 - `not_enrolled`, `authentication_required`, `enrollment_failed`: regenerate
@@ -186,5 +204,5 @@ implementation defaults, not claims about unseen text.
 
 Primary references checked for this adapter:
 [PronotePy quickstart](https://pronotepy.readthedocs.io/en/stable/quickstart.html),
-[the pinned SDK release](https://github.com/bain3/pronotepy/tree/v2.15.6),
+[the pinned SDK release](https://github.com/bain3/pronotepy/tree/v2.15.7),
 and [Mistral Conversations entry contracts](https://docs.mistral.ai/api/endpoint/beta/conversations).

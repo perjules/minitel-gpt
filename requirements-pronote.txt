@@ -1,2 +1,2 @@
 # Optional local adapter. SDK hooks and protocol behavior are tested against this version.
-pronotepy==2.15.6
+pronotepy==2.15.7
