@@ -176,6 +176,62 @@ class LocalAnswerTests(unittest.TestCase):
         self.assertIn("possibly outdated", screen_text(uart.output))
         self.assertIn("PRONOTE Alex", screen_text(uart.output))
 
+    def test_grade_table_becomes_narrow_vertical_list_in_preview_and_terminal_only(self):
+        table = ("Notes d'Alex\n\n"
+                 "| Matiere | Note | Coefficient | Date |\n"
+                 "| :--- | ---: | ---: | --- |\n"
+                 "| Mathematiques et sciences physiques | 17,5/20 | 0,5 | 2026-10-11 |\n"
+                 "| Francais | Non noté | 1 | 2026-10-10 |\n")
+        result = engine.parse_response(final(table))
+        result.update({"private": True, "pronote": [{"child": "Alex", "period": "Trimestre 1",
+                                                     "retrieved_at": "2026-10-12T01:30:00+02:00"}]})
+        snapshot = json.dumps(result, ensure_ascii=False)
+        with patch.object(pn, "backend", return_value=self.local), patch.object(engine, "answer", return_value=result):
+            terminal = chat.call_answer("persona", [{"role": "user", "content": "Notes Alex ?"}],
+                                        "fr", ("conversations", True, 20), "")
+            with (patch.object(admin, "llm_provider", return_value="mistral"),
+                  patch.object(admin, "mistral_key", return_value="test-secret-key"),
+                  patch.object(admin, "read_env", return_value={})):
+                preview = admin.llm_answer("persona", "Notes Alex ?")
+        self.assertEqual(preview, terminal["display"])
+        self.assertNotIn("|", preview)
+        self.assertIn("Note: 17,5/20", preview)
+        self.assertIn("Coefficient: 0,5", preview)
+        self.assertIn("Non noté", preview)
+        self.assertIn("Periode: Trimestre 1", preview)
+        self.assertTrue(all(len(line) <= 39 for line in preview.splitlines()))
+        self.assertEqual(terminal["turn"]["content"], table)
+        self.assertEqual(json.dumps(result, ensure_ascii=False), snapshot)
+        uart = FakeSerial(fn(chat.K_SUITE) * 10)
+        term = object.__new__(chat.Term)
+        term.s = uart
+        with patch.object(chat.time, "sleep"):
+            self.assertEqual(chat.show_response(term, chat.safe_display(preview), "fr"), "done")
+        output = screen_text(uart.output)
+        self.assertIn("17,5/20", output)
+        self.assertIn("Non note", output)
+        self.assertIn("Trimestre 1", output)
+
+    def test_table_conversion_retains_escaped_pipes_code_blocks_and_long_word_tails(self):
+        text = ("Subject | Grade\n--- | ---\nMaths\\|Physics | Absent\n\n"
+                "```\n| literal | table |\n| --- | --- |\n| keep | code |\n```\n" + "Z" * 85)
+        formatted = pa.narrow_text(text)
+        self.assertIn("Subject: Maths|Physics", formatted)
+        self.assertIn("Grade: Absent", formatted)
+        self.assertIn("| literal | table |\n| --- | --- |\n| keep | code |", formatted)
+        self.assertEqual(formatted.count("Z"), 85)
+        self.assertTrue(all(len(line) <= 39 for line in formatted.splitlines()))
+        public = engine.parse_response(final(text))
+        self.assertEqual(pa.render(public, "fr"), text)
+
+    def test_period_and_table_instructions_and_period_receipt_are_shared(self):
+        self.local.execute.return_value["period"] = "Trimestre 2"
+        result, requests = self.request([{"outputs": [call("pronote_get_grades", arguments={"child": "Alex"})]}, final()])
+        prompt = requests[0].kwargs["json"]["instructions"]
+        self.assertIn("OMIT period", prompt)
+        self.assertIn("Never use Markdown tables", prompt)
+        self.assertIn("Periode: Trimestre 2", pa.render(result, "fr"))
+
 
 class AdminPronoteTests(unittest.TestCase):
     def setUp(self):

@@ -437,7 +437,7 @@ def call_answer(system_prompt, history, language, options, knowledge):
             # Operational notices are not successful factual turns. Do not
             # display an unverified current answer as a successful lookup.
             return {"display": notice, "turn": None}
-        return {"display": mistral_answers.render(result) + pronote_answers.footer(result, language), "turn": {
+        return {"display": pronote_answers.render(result, language), "turn": {
             "role": "assistant", "content": result["text"],
             "chunks": result["chunks"], "references": result["references"],
             **({"private": True} if result.get("private") else {}),

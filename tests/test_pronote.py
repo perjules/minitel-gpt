@@ -115,6 +115,58 @@ class PronoteTests(unittest.TestCase):
         unknown = self.local.execute("pronote_get_grades", {"child": "Alex", "period": "Unknown"})
         self.assertEqual(unknown, {"error": "select_period", "periods": ["Trimestre 1"]})
 
+    def test_default_grade_period_is_latest_started_and_explicit_choice_is_preserved(self):
+        base = self.client().periods[0]
+        annual = Obj(name="Annee", start=base.start - timedelta(days=30), end=base.end + timedelta(days=180),
+                     grades=base.grades)
+        recent = Obj(name="Periode recente", start=base.start + timedelta(days=5), end=base.end,
+                     grades=base.grades)
+        future = Obj(name="Trimestre futur", start=base.end + timedelta(days=1), end=base.end + timedelta(days=90),
+                     grades=base.grades)
+
+        def login(**credentials):
+            client = self.client(**credentials)
+            client.periods = [future, annual, recent]
+            del client.current_period  # Default must not depend on the SDK's parent metadata.
+            return client
+
+        self.factory.token_login.side_effect = login
+        for args in ({}, {"period": "current"}, {"period": "latest"}, {"period": None}, {"period": " "}):
+            result = self.local.execute("pronote_get_grades", {"child": "Alex", **args})
+            self.assertEqual(result["period"], "Periode recente")
+            self.assertNotIn("error", result)
+        self.factory.token_login.assert_called_once()
+        explicit = self.local.execute("pronote_get_grades", {"child": "Alex", "period": "Annee"})
+        self.assertEqual(explicit["period"], "Annee")
+        self.assertEqual(self.factory.token_login.call_count, 2)
+
+    def test_overlapping_and_finished_periods_are_selected_without_extra_reads(self):
+        start = datetime.combine(self.day - timedelta(days=20), datetime.min.time())
+        short = Obj(name="Trimestre", start=start, end=start + timedelta(days=40))
+        semester = Obj(name="Semestre", start=start, end=start + timedelta(days=100))
+        annual = Obj(name="Annee", start=start, end=start + timedelta(days=300))
+        for periods in ([annual, semester, short], [short, semester, annual]):
+            self.assertIs(pn.latest_grade_period(periods), short)
+        old = Obj(name="Ancienne", start=start - timedelta(days=100), end=start - timedelta(days=80))
+        last = Obj(name="Derniere", start=start - timedelta(days=30), end=start - timedelta(days=1))
+        future = Obj(name="Future", start=start + timedelta(days=30), end=start + timedelta(days=60))
+        self.assertIs(pn.latest_grade_period([future, old, last]), last)
+        broad_year = Obj(name="Annee en cours", start=last.start - timedelta(days=20), end=start + timedelta(days=200))
+        self.assertIs(pn.latest_grade_period([broad_year, last]), last)
+        self.assertIsNone(pn.latest_grade_period([future]))
+        self.assertIsNone(pn.latest_grade_period([]))
+
+    def test_empty_latest_period_does_not_silently_substitute_old_grades(self):
+        client = self.client()
+        older = client.periods[0]
+        latest = Obj(name="Recente sans notes", start=older.start + timedelta(days=5), end=older.end, grades=[])
+        client.periods = [older, latest]
+        self.factory.token_login.side_effect = None
+        self.factory.token_login.return_value = client
+        result = self.local.execute("pronote_get_grades", {"child": "Alex"})
+        self.assertEqual(result["period"], "Recente sans notes")
+        self.assertEqual(result["items"], [])
+
     def test_cache_invalidated_by_mapping_change_and_missing_or_duplicate_child(self):
         self.read()
         self.local.configure(True, {"Alex": {"account": "famille", "name": "MISSING"}})

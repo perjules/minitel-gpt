@@ -60,7 +60,9 @@ Do not upgrade only the package: the adapter's strict version check must match.
    is implicitly allowed. No terminal restart is needed for mapping changes.
 5. Test in the admin personality preview, then on the Minitel:
    `Quels sont les devoirs d'Alex pour demain ?`
-   `Quelles sont les notes de Sam ce trimestre ?`
+   `Quelles sont les notes de Sam ?`
+   An unspecified period selects the most recent one that has started; the
+   answer names the period used. You can still request another exact period.
    An ambiguous child prompts a choice instead of selecting the first child.
    Function keys remain **ENVOI, SUITE, SOMMAIRE**, in either language.
 
@@ -107,10 +109,18 @@ Only three functions are offered to the model:
 | `pronote_get_grades(child, period)` | Published grade strings, scales, coefficients, dates and comments |
 
 Homework defaults to today through seven days from today, using **Europe/Paris**
-for school dates, and accepts at most 31 inclusive days. Grades default to
-PRONOTE's current period. If a period cannot be resolved uniquely, available
+for school dates, and accepts at most 31 inclusive days. Grades default to the
+period with the latest start date on or before today. Future periods are never
+chosen implicitly. If annual/semester/trimester ranges share a start date, the
+shorter interval wins, with the name breaking any remaining tie consistently.
+This does not depend on the SDK's sometimes missing parent `current_period`
+metadata and requires no probing of multiple grade endpoints. Omitted, null,
+blank and symbolic `current`/`latest` selectors all use this default. If there
+are no started periods, or an explicitly requested name is unavailable, actual
 period names are returned for clarification. An explicit period must match an
-actual name; no invented trimester IDs. Grade strings such as `Absent` and
+actual name; no invented trimester IDs and no substitution of another period.
+An empty latest period stays empty rather than silently fetching older grades.
+Grade strings such as `Absent` and
 `Non noté` and decimal coefficients stay strings; no averages are computed.
 Attachment downloads, attachment URLs, teacher identities, account metadata,
 other students and class averages are excluded. Links in descriptions are
@@ -136,6 +146,17 @@ cache. Each process has its own cache. Results are bounded to 100 records,
 24,000 JSON characters and 2,000 characters per homework description;
 truncation is declared in the display footer. Cached/live state and retrieval
 time are added locally, so the model cannot silently omit them.
+
+School answers are displayed identically in the admin preview and on the
+terminal: plain vertical lists wrapped to 39 characters, leaving the terminal's
+40th column free to avoid automatic wrapping. The prompt forbids Markdown
+tables and aligned columns. A local display formatter also converts any table
+the model still emits into labelled vertical rows, keeping every cell, grade
+string, coefficient and date. Ordinary prose and literal code blocks are
+retained; long-word tails are wrapped rather than dropped. The selected period
+is shown in the local footer. Only display text is reformatted: factual history
+and normalized school results are unchanged. Public factual answers retain
+their existing rendering and full browser URLs.
 
 School questions first use a tool-only Conversations request with web search
 absent. Functions execute locally; only sanitized school results reach Mistral,

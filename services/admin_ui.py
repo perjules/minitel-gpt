@@ -511,7 +511,7 @@ def llm_answer(system_prompt, user_message, knowledge=""):
                                         options[1], options[2], knowledge,
                                         **({"pronote": pronote.backend()} if pronote.backend().tools() else {}))
         return (mistral_answers.notice(result["status"], "fr")
-                or mistral_answers.render(result, full_urls=True) + pronote_answers.footer(result, "fr"))
+                or pronote_answers.render(result, "fr", full_urls=True))
     messages = [{"role": "system", "content": system_prompt}] + history
     r = requests.post(
         "https://api.mistral.ai/v1/chat/completions",

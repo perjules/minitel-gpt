@@ -62,6 +62,18 @@ def today():
     return datetime.now(ZoneInfo("Europe/Paris")).date()
 
 
+def latest_grade_period(periods):
+    """Choose the latest started period; never select future dates.
+
+    Annual, semester and trimester ranges may overlap. Prefer the later start,
+    then the shorter interval, rather than asking the user to disambiguate.
+    """
+    day = today()
+    started = [p for p in periods if p.start.date() <= day]
+    return max(started, key=lambda p: (p.start.date(), -(p.end - p.start).days,
+                                      p.name.casefold()), default=None)
+
+
 def slug(value):
     if not isinstance(value, str):
         raise PronoteError("invalid_account")
@@ -372,7 +384,7 @@ class Pronote:
             ("pronote_list_children", "List the allowed child aliases, never account identities.", {}),
             ("pronote_get_homework", "Read homework, inclusive ISO dates. Default today through 7 days. Max 31 days.",
              {"child": child, "from": {"type": "string"}, "to": {"type": "string"}}),
-            ("pronote_get_grades", "Read published grades. Default current period; specify exact period name if known.",
+            ("pronote_get_grades", "Read published grades. Omit period or use current/latest for the most recent started period. Only use an exact period name when the user explicitly requests it.",
              {"child": child, "period": {"type": "string"}}),
         ]
         return [{"type": "function", "function": {"name": name, "description": description,
@@ -413,9 +425,13 @@ class Pronote:
                     raise PronoteError("invalid_date_range")
                 args.update({"from": start.isoformat(), "to": end.isoformat()})
             else:
-                period = arguments.get("period", "current")
+                period = arguments.get("period")
+                if period is None or (isinstance(period, str) and not period.strip()):
+                    period = "current"
                 if not isinstance(period, str) or not 1 <= len(period) <= 100:
                     raise PronoteError("invalid_period")
+                if period.strip().casefold() in ("current", "latest"):
+                    period = "current"
                 args["period"] = period
             mapping = config["children"][child]
             credentials_path = self.credentials_path(mapping["account"])
@@ -442,13 +458,9 @@ class Pronote:
                     else:
                         periods = client.periods
                         if args["period"] == "current":
-                            try:
-                                selected = client.current_period
-                            except (KeyError, IndexError):
-                                choices = [p for p in periods if p.start.date() <= today() <= p.end.date()]
-                                if len(choices) != 1:
-                                    return {"error": "select_period", "periods": [clean(p.name, 100) for p in periods]}
-                                selected = choices[0]
+                            selected = latest_grade_period(periods)
+                            if selected is None:
+                                return {"error": "select_period", "periods": [clean(p.name, 100) for p in periods]}
                         else:
                             choices = [p for p in periods if p.name == args["period"]]
                             if len(choices) != 1:
