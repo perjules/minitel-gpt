@@ -1291,7 +1291,7 @@ Intégration : {{ 'active' if status.enabled else 'désactivée' }}.</p>
 {% for child in children %}<li>{{ child }}</li>{% endfor %}</ul>{% endif %}
 <form method="post" autocomplete="off"><input type="hidden" name="csrf" value="{{ csrf }}">
 <fieldset><legend>Connecter un compte parent</legend>
-<label>Nom local du compte (ex. famille)<input name="account" required pattern="[a-z0-9][a-z0-9_-]{0,39}" maxlength="40"></label>
+<label>Nom local du compte (ex. famille)<input name="account" required pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,39}" maxlength="40" autocapitalize="none" autocorrect="off" spellcheck="false"></label>
 <label>Données du QR PRONOTE parent (JSON : url, login, jeton)
 <textarea name="qr" required rows="5" maxlength="12000"></textarea></label>
 <label>Code QR à 4 chiffres<input name="pin" type="password" required inputmode="numeric" pattern="[0-9]{4}"></label>
@@ -1307,7 +1307,7 @@ Aucun enfant n'est autorisé automatiquement. Les alias seuls sont envoyés à M
 <label><input name="enabled" type="checkbox" {% if status.enabled %}checked{% endif %}> Activer pour Mistral Conversations</label>
 <button name="action" value="configure">Enregistrer</button></fieldset></form>
 <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}">
-<label>Nom local du compte<input name="account" required></label>
+<label>Nom local du compte<input name="account" required autocapitalize="none" autocorrect="off" spellcheck="false"></label>
 <button name="action" value="children">Relire les noms des enfants</button></form>
 <p>Exemple de configuration : <code>{"Alex":{"account":"famille","name":"NOM Prénom"}}</code>.</p>
 </html>"""

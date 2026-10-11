@@ -161,6 +161,8 @@ class AdminPronoteTests(unittest.TestCase):
         self.assertEqual(self.client.get("/pronote").status_code, 302)
         response = self.login()
         self.assertIn("no-store", response.headers["Cache-Control"])
+        self.assertIn(b'autocapitalize="none"', response.data)
+        self.assertIn(b'pattern="[A-Za-z0-9]', response.data)
         self.assertEqual(self.client.post("/pronote", data={"action": "configure"}).status_code, 403)
         with patch.object(self.local, "enroll", return_value=["PRIVATE CHILD"]) as enroll:
             response = self.client.post("/pronote", data={"csrf": self.csrf, "action": "enroll",

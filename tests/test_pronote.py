@@ -150,6 +150,42 @@ class PronoteTests(unittest.TestCase):
             self.local.enroll("new-account", qr, "1234")
         self.assertEqual(pn.read_json(self.local.credentials_path("new-account"))["password"], "NEW TOKEN 0")
 
+    def test_real_mobile_qr_metadata_is_ignored_without_changing_connection_fields(self):
+        # Synthetic credentials only; never retain a real QR payload in fixtures.
+        core = {"url": "https://school.example/pronote/mobile.parent.html",
+                "login": "AB" * 16, "jeton": "CD" * 32}
+        qr = {"avecPageConnexion": False, **core, "futureMobileOption": {"enabled": True}}
+        snapshot = json.loads(json.dumps(qr))
+        self.factory.qrcode_login.return_value = self.client()
+        self.local.enroll(" Famille ", qr, "1234")
+        self.assertEqual(self.factory.qrcode_login.call_args.args[0], core)
+        self.assertEqual(qr, snapshot)
+        self.assertEqual(self.local.credentials_path(" FAMILLE "), self.local.credentials_path("famille"))
+        self.assertNotIn("avecPageConnexion", json.dumps(pn.read_json(self.local.credentials_path("famille"))))
+
+    def test_mobile_account_capitalization_is_canonical_in_configuration(self):
+        children = {"Alex": {"account": " Famille ", "name": "NOM Alex"}}
+        self.local.configure(True, children)
+        self.assertEqual(children["Alex"]["account"], " Famille ")
+        self.assertEqual(self.local.config()["children"]["Alex"]["account"], "famille")
+        self.assertNotIn("error", self.read())
+        pn.atomic_json(self.local.config_path, {"enabled": True, "children": children})
+        self.assertEqual(self.local.config()["children"]["Alex"]["account"], "famille")
+        for unsafe in ("../famille", "famille/other", "", "name with spaces"):
+            with self.assertRaises(pn.PronoteError):
+                pn.slug(unsafe)
+
+    def test_missing_empty_or_malformed_required_qr_fields_reject_before_login(self):
+        core = {"url": "https://school.example/parent.html", "login": "AB" * 16, "jeton": "CD" * 32}
+        for field in core:
+            for bad in (None, False, "", {}):
+                with self.assertRaisesRegex(pn.PronoteError, "invalid_qr"):
+                    self.local.enroll("famille", {**core, field: bad, "avecPageConnexion": False}, "1234")
+            missing = {key: value for key, value in core.items() if key != field}
+            with self.assertRaisesRegex(pn.PronoteError, "invalid_qr"):
+                self.local.enroll("famille", missing, "1234")
+        self.factory.qrcode_login.assert_not_called()
+
     def test_lock_busy_and_atomic_save_failure_preserve_previous_token(self):
         with self.local.lock("famille", time.monotonic() + 1):
             other = pn.Pronote(self.root, lambda: self.factory)

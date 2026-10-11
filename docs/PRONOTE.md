@@ -23,11 +23,14 @@ PRONOTE is disabled until you enable it in its admin page.
 
 1. Open **Paramètres → PRONOTE** in the existing admin UI, or `/pronote`.
 2. Generate a new mobile-app connection QR in your PRONOTE **parent** space.
-   Decode it locally and paste its JSON (`url`, `login`, `jeton`); enter the
+   Decode it locally and paste its complete JSON (`url`, `login`, `jeton`;
+   optional fields such as `avecPageConnexion` are accepted and ignored); enter the
    four-digit confirmation code you chose when generating it. Do not paste
    these data into the Minitel, a chat, or a public QR-decoding website.
    This page accepts decoded JSON, not a photograph or a mobile-app export.
-3. Choose a local account name, e.g. `famille`, and connect it. If your account
+3. Choose a local account name, e.g. `famille`, and connect it. Leading/trailing
+   whitespace is removed and uppercase letters normalized to lowercase, including
+   account names in the child configuration. If your account
    requires a separate security PIN, supply it in the optional field.
    Enrollment checks token login and device registration immediately.
 4. The page displays the account's exact child names locally. Add an explicit

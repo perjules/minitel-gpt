@@ -41,7 +41,10 @@ def today():
 
 
 def slug(value):
-    if not isinstance(value, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,39}", value):
+    if not isinstance(value, str):
+        raise PronoteError("invalid_account")
+    value = value.strip().lower()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,39}", value):
         raise PronoteError("invalid_account")
     return value
 
@@ -168,7 +171,7 @@ class Pronote:
                     or any(ord(c) < 32 for c in alias) or not isinstance(mapping, dict)
                     or not isinstance(mapping.get("name"), str) or not 1 <= len(mapping["name"]) <= 160):
                 raise PronoteError("configuration_error")
-            slug(mapping.get("account"))
+            mapping["account"] = slug(mapping.get("account"))
         return data
 
     def configure(self, enabled, children):
@@ -184,6 +187,10 @@ class Pronote:
             slug(mapping.get("account"))
         if len(children) > 20:
             raise PronoteError("configuration_error")
+        candidate["children"] = {
+            alias: {**mapping, "account": slug(mapping["account"])}
+            for alias, mapping in children.items()
+        }
         with self.lock("settings", time.monotonic() + 20):
             atomic_json(self.config_path, candidate)
         self.cache.clear()
@@ -258,11 +265,15 @@ class Pronote:
                     DEADLINE.reset(deadline_token)
 
     def enroll(self, account, qr, pin, account_pin=None):
-        slug(account)
-        if (not isinstance(qr, dict) or set(qr) != {"url", "login", "jeton"}
-                or not all(isinstance(value, str) for value in qr.values())
+        account = slug(account)
+        required = {"url", "login", "jeton"}
+        if (not isinstance(qr, dict) or not required.issubset(qr)
+                or not all(isinstance(qr[key], str) and qr[key] for key in required)
                 or not re.fullmatch(r"\d{4}", pin or "")):
             raise PronoteError("invalid_qr")
+        # Real mobile QR codes include optional flags, e.g. avecPageConnexion.
+        # Pass only the SDK's three connection fields; never change their bytes.
+        qr = {key: qr[key] for key in required}
         url = urlsplit(qr["url"])
         if (url.scheme != "https" or not url.hostname or url.username or url.password
                 or not url.path.endswith(("parent.html", "mobile.parent.html"))):
