@@ -1,0 +1,19 @@
+{
+  "_fixture_note": "Synthetic contract fixture, NOT a captured live response. SDK schema checked 11 October 2026.",
+  "conversation_id": "ignored-local-history",
+  "outputs": [
+    {"type": "message.output", "role": "assistant", "content": "Intermediate activity, not answer prose."},
+    {"type": "tool.execution", "name": "web_search", "arguments": "{\"query\":\"current example\"}", "completed_at": "2026-10-11T10:00:00Z"},
+    {"type": "message.output", "role": "assistant", "content": [
+      {"type": "thinking", "thinking": [{"type": "text", "text": "Private reasoning"}]},
+      {"type": "text", "text": "The value is 17.25 EUR, with uncertainty "},
+      {"type": "tool_reference", "tool": "web_search", "title": "First source", "url": "https://example.org/first?x=1"},
+      {"type": "text", "text": ".\nCode:\n    return 17.25\nAnother source "},
+      {"type": "tool_reference", "tool": "web_search", "title": "Second source", "url": "https://example.net/second"},
+      {"type": "text", "text": " and repeated "},
+      {"type": "tool_reference", "tool": "web_search", "title": "Duplicate title", "url": "https://example.org/first?x=1"},
+      {"type": "text", "text": "."}
+    ]}
+  ],
+  "usage": {"prompt_tokens": 120, "completion_tokens": 60, "total_tokens": 180, "connector_tokens": 25, "connectors": {"web_search": 1}}
+}

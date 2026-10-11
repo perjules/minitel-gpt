@@ -14,6 +14,11 @@ from flask import (Flask, render_template_string, request, redirect,
                    url_for, session, jsonify, send_from_directory)
 from werkzeug.utils import secure_filename
 
+try:
+    from . import mistral_answers
+except ImportError:
+    import mistral_answers
+
 PROJ_DIR = Path(__file__).parent.parent
 ASSETS_DIR = PROJ_DIR / "assets"
 PROMPTS_FILE = PROJ_DIR / "config" / "prompts.json"
@@ -433,7 +438,7 @@ def generate_prompt(description):
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"].strip()
 
-def llm_answer(system_prompt, user_message):
+def llm_answer(system_prompt, user_message, knowledge=""):
     """Interroge le LLM configuré comme le ferait le terminal (system + question).
     Retourne le texte de la réponse."""
     import requests
@@ -481,6 +486,12 @@ def llm_answer(system_prompt, user_message):
     key = mistral_key()
     if not is_real_key(key):
         raise RuntimeError("Clé Mistral absente")
+    options = mistral_answers.settings({**os.environ, **read_env()})
+    if options[0] == "conversations":
+        result = mistral_answers.answer(history, "fr", key, mistral_model(),
+                                        options[1], options[2], knowledge)
+        return (mistral_answers.notice(result["status"], "fr")
+                or mistral_answers.render(result, full_urls=True))
     messages = [{"role": "system", "content": system_prompt}] + history
     r = requests.post(
         "https://api.mistral.ai/v1/chat/completions",
@@ -1095,8 +1106,11 @@ def test_preset_route():
         system += ("\n\nCONNAISSANCES DE REFERENCE (utilise ces informations "
                    "en priorite pour repondre) :\n" + kb)
     try:
-        answer = llm_answer(system, msg)
-        return jsonify(ok=True, answer=to_minitel_ascii(answer))
+        answer = llm_answer(system, msg, knowledge=kb)
+        # The browser preview retains exact URLs, including Unicode paths.
+        conversations = (llm_provider() == "mistral" and
+                         mistral_answers.settings({**os.environ, **read_env()})[0] == "conversations")
+        return jsonify(ok=True, answer=answer if conversations else to_minitel_ascii(answer))
     except Exception as e:
         return jsonify(ok=False, error=str(e))
 

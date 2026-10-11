@@ -14,9 +14,16 @@ import re
 import subprocess
 import textwrap
 import unicodedata
+import threading
+from queue import Queue, Empty
 from pathlib import Path
 from dotenv import load_dotenv
 import requests
+
+try:  # Support both systemd's direct script and package imports in tests.
+    from . import mistral_answers
+except ImportError:
+    import mistral_answers
 
 # Translittération vers ASCII affichable sur Minitel (é→e, œ→oe, …) :
 # évite les « ? » que produisait encode('ascii','replace').
@@ -281,6 +288,15 @@ def load_preset():
                 "Posez votre question :", "Consultation en cours...", TITLE_ART_DEFAULT)
 
 
+def factual_knowledge():
+    """Keep the preset's reference files, without copying its personality prompt."""
+    try:
+        with PROMPTS_FILE.open(encoding="utf-8") as source:
+            return load_knowledge(json.load(source)["active"])
+    except (OSError, ValueError, KeyError):
+        return ""
+
+
 # ── ASCII title (pyfiglet) ───────────────────────────────────────────────
 # Chaque preset peut composer son propre titre d'accueil : une liste de
 # segments {text, font}, chacun rendu via pyfiglet (voir admin, onglet
@@ -400,19 +416,85 @@ class Term:
 def wrap(text, width=COLS):
     out = []
     for para in text.split("\n"):
-        if not para.strip():
-            out.append("")
-            continue
-        cur = ""
-        for word in para.split():
-            if len(cur) + len(word) + (1 if cur else 0) <= width:
-                cur = (cur + " " + word).strip()
-            else:
-                out.append(cur)
-                cur = word[:width]
-        if cur:
-            out.append(cur)
+        # Break long URLs/code rather than dropping their tails. Indentation and
+        # embedded whitespace remain meaningful; avoid the terminal's column-40
+        # auto-wrap followed by an extra CR/LF.
+        out.extend(textwrap.wrap(para, width=width - 1, replace_whitespace=False,
+                                 break_on_hyphens=False) or [""])
     return out
+
+
+def call_answer(system_prompt, history, language, options, knowledge):
+    api, web_search, timeout = options
+    if PROVIDER == "mistral" and api == "conversations":
+        result = mistral_answers.answer(history, language, MISTRAL_KEY,
+                                        MISTRAL_MODEL, web_search, timeout, knowledge)
+        notice = mistral_answers.notice(result["status"], language)
+        if notice:
+            # Operational notices are not successful factual turns. Do not
+            # display an unverified current answer as a successful lookup.
+            return {"display": notice, "turn": None}
+        return {"display": mistral_answers.render(result), "turn": {
+            "role": "assistant", "content": result["text"],
+            "chunks": result["chunks"], "references": result["references"],
+        }}
+    # Explicit rollback and other providers retain their existing adapters.
+    plain_history = [{"role": turn["role"], "content": turn["content"]} for turn in history]
+    answer = call_llm(system_prompt, plain_history)
+    return {"display": answer, "turn": {"role": "assistant", "content": answer}}
+
+
+def start_answer(system_prompt, history, language, options, knowledge):
+    """One daemon worker. It never touches the UART or session memory."""
+    output = Queue(maxsize=1)
+
+    def request():
+        try:
+            output.put((call_answer(system_prompt, history, language, options, knowledge), None))
+        except Exception as error:
+            output.put((None, error))
+
+    worker = threading.Thread(target=request, daemon=True)
+    started = time.monotonic()
+    worker.start()
+    return worker, output, started
+
+
+def wait_answer(t, pending, timeout):
+    """Reset stops local waiting; provider work/billing may continue."""
+    _, output, started = pending
+    deadline = started + timeout
+    while time.monotonic() < deadline:
+        try:
+            result, error = output.get_nowait()
+        except Empty:
+            kind, code = t.read_key(min(0.1, max(0, deadline - time.monotonic())))
+            if kind == 'fn' and code in (K_SOMMAIRE, K_GUIDE):
+                return None, 'guide' if code == K_GUIDE else 'sommaire'
+            continue
+        if error:
+            log.warning("answer status=api_error error=%s", type(error).__name__)
+            return None, 'error'
+        return result, 'done'
+    log.warning("answer status=deadline elapsed=%.2f", time.monotonic() - started)
+    return None, 'deadline'
+
+
+def safe_display(text):
+    """Keep controls out of Videotex and avoid silently losing technical symbols."""
+    symbols = {"−": "-", "µ": "u", "μ": "u", "°": "deg", "±": "+/-",
+               "≤": "<=", "≥": ">=", "≠": "!=", "×": "x", "÷": "/", "Ω": "ohm"}
+    output = []
+    for char in unicodedata.normalize("NFC", text):
+        if char not in "\n\t" and (ord(char) < 32 or ord(char) == 127):
+            output.append(f"\\x{ord(char):02x}")
+        else:
+            mapped = symbols.get(char, to_ascii(char))
+            # Remaining unsupported glyphs get a visible code point rather than
+            # disappearing from a number, unit or code expression.
+            output.append(mapped or (f"\\u{ord(char):04x}" if ord(char) <= 0xffff
+                                     else f"\\U{ord(char):08x}"))
+    return "".join(output)
 
 
 # ── Écrans ───────────────────────────────────────────────────────────────
@@ -616,12 +698,16 @@ def show_response(t: Term, text: str, language="fr"):
 def run():
     t = Term()
     log.info(f"Démarré sur {PORT} (fournisseur {PROVIDER}, modèle {MODEL})")
+    options = (mistral_answers.settings(os.environ) if PROVIDER == "mistral"
+               else ("chat_completions", False, 60))
+    pending = None
 
     while True:  # boucle sommaire
         # Recharger le preset à chaque retour au sommaire (prise en compte des édits)
         system_prompt, title_msg, question_msg, loading_msg, title_art = load_preset()
         title_lines = build_title(title_art)
         history = []
+        knowledge = factual_knowledge()
         show_home(t, title_lines, title_msg)
         choice, action = read_question(t, allow_empty=True)
         if action == 'guide':
@@ -655,20 +741,32 @@ def run():
             if action in ('sommaire', 'timeout'):
                 break
 
-            history.append({"role": "user", "content": question})
-            log.info(f"Q: {question!r}")
-
             t.w(bytes([CR, LF]))
             t.w(FG_CYAN); t.line(""); t.center(loading_msg)
-            try:
-                answer = call_llm(system_prompt, history)
-                history.append({"role": "assistant", "content": answer})
-                answer = to_ascii(answer)
-            except Exception as e:
-                log.error(f"API: {e}")
+            # Do not pile up paid calls while a locally abandoned HTTP request
+            # is still running. Its isolated queue is discarded when it ends.
+            if pending is not None and pending[0].is_alive():
+                answer = ("Previous request still finishing. Try again shortly." if language == "en"
+                          else "Requete precedente en cours. Reessayez bientot.")
+            else:
+                candidate = history + [{"role": "user", "content": question}]
+                pending = start_answer(system_prompt, candidate, language, options, knowledge)
+                response, action = wait_answer(t, pending, options[2])
+                if action == 'guide':
+                    show_guide(t, language)
+                    break
+                if action == 'sommaire':
+                    break
                 answer = UI[language]["connection_error"]
+                if action == 'deadline':
+                    answer = ("Request timed out. Information unverified." if language == "en"
+                              else "Delai depasse. Information non verifiee.")
+                elif response is not None:
+                    answer = response["display"]
+                    if response["turn"] is not None:
+                        history = mistral_answers.bound_history(candidate + [response["turn"]])
 
-            result = show_response(t, answer, language)
+            result = show_response(t, safe_display(answer), language)
             if result in ('sommaire', 'timeout'):
                 break
 
@@ -677,10 +775,6 @@ def run():
             t.w(FG_WHITE)
             t.center(UI[language]["follow_up"])
             t.w(bytes([CR, LF]))
-
-            if len(history) > 20:
-                history = history[-20:]
-
 
 if __name__ == "__main__":
     run()

@@ -2,6 +2,7 @@
 import unittest
 from collections import deque
 from pathlib import Path
+from queue import Queue
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
@@ -102,13 +103,26 @@ def render_videotex(data):
 
 
 class StartupTests(unittest.TestCase):
-    def run_session(self, keys, boot_text=None, boot_error=None, preset=None):
+    def run_session(self, keys, boot_text=None, boot_error=None, preset=None,
+                    factual_reply=None):
         uart = FakeSerial(keys)
         calls = []
 
         def reply(system, history):
             calls.append((system, [dict(turn) for turn in history], bytes(uart.consumed)))
             return "17 x 23 = 391."
+
+        def start(system, history, language, options, knowledge):
+            # UART fixtures contain already queued future input: complete the
+            # mocked request before reading those keys. Worker races/reset are
+            # exercised separately with a real blocked thread.
+            output = Queue()
+            try:
+                result = chat.call_answer(system, history, language, options, knowledge)
+                output.put((result, None))
+            except (ValueError, TypeError, RuntimeError, chat.requests.RequestException) as error:
+                output.put((None, error))
+            return Mock(is_alive=lambda: False), output, chat.time.monotonic()
 
         real_read_key = chat.Term.read_key
 
@@ -135,6 +149,10 @@ class StartupTests(unittest.TestCase):
             )),
             patch.object(chat, "build_title", return_value=["LOGO"]),
             patch.object(chat, "call_llm", side_effect=reply),
+            patch.object(chat, "start_answer", side_effect=start),
+            patch.object(chat.mistral_answers, "answer", side_effect=factual_reply),
+            patch.dict(chat.os.environ, {"MISTRAL_ANSWER_API": (
+                "conversations" if factual_reply else "chat_completions")}),
             patch.object(chat.requests, "post", post),
             patch.object(chat, "MISTRAL_KEY", "test-key" if boot_text or boot_error else ""),
             patch.object(chat, "ANTHROPIC_KEY", ""),

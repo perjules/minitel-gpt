@@ -113,7 +113,7 @@ and service restart independently of the locally stored chat personality.
 ## Planned direction
 
 - Develop and play-test the character without requiring a physical terminal.
-- Separate factual reasoning and conversation history from fictional performance.
+- Extend the new neutral Mistral factual path with separately reviewed performance, if desired.
 - Add coherent startup/recovery/shutdown diagnostics, reviewed situation-dependent
   messages and optional fictional idle scenes beyond the initial generated startup.
 - Preserve useful answers, uncertainty, technical details and honest real status.
@@ -123,9 +123,10 @@ and service restart independently of the locally stored chat personality.
   environment, and use Ruff plus proportionate integration/regression checks.
 
 These further steps are plans, not implemented features. Fictional hacking and telemetry never
-grant real permissions or establish real access. The current preset is a simple
-single-prompt implementation; it does not yet provide structural separation of
-factual reasoning and presentation.
+grant real permissions or establish real access. The Mistral Conversations answer path now separates neutral factual reasoning
+from preset presentation; styled factual prose and the independent idle/actor lab
+remain future integration work. Explicit Chat Completions rollback retains the
+previous single-prompt behavior.
 
 Development takes place on `develop`. Stable changes reach `main` after physical
 Minitel validation. Valuable upstream fixes and improvements will be considered
@@ -146,3 +147,102 @@ screen dimensions, variable-length boot scrolling, mode restoration and protocol
 acknowledgements, session resets, factual-history isolation, completion reasons,
 timeouts and fallback behavior. They make no live API calls and do not replace
 live-model review or validation on the physical Minitel.
+
+## Hosted Mistral web search
+
+Normal Mistral answers now use `POST /v1/conversations` with neutral factual
+instructions (`config/factual_prompt.txt`), the actual date, locally owned factual
+history, `store: false` and basic `web_search`. The configured model is retained.
+Mistral decides when useful searches run and handles them remotely; enabling the
+tool does not guarantee a search. There is no local search engine, scraper,
+routing model or tool framework. `store: false` controls saved conversation
+history, not every kind of provider retention.
+
+The terminal keeps at most ten complete factual turns and 60,000 serialized
+characters, including ordered real source metadata. Oldest pairs are dropped;
+a single oversized pair is displayed but not retained. Each request starts a new
+unstored provider conversation with this context. No conversation IDs, raw search
+results, boot text, personality prompt, waiting theater or source footers enter
+factual memory. Preset knowledge files remain user-supplied factual reference
+material; put fictional world-building in the personality prompt, not those files.
+Source follow-ups retain the preceding answer's ordered real references; Mistral
+may search again because previous tool execution state is not replayed.
+
+Factual prose is passed through unchanged before the terminal's existing ASCII
+transliteration and wrapping. Python adds numbered markers at source chunks and a
+complete numbered domain footer; exact-URL duplicates share one number. Unicode
+domains use their ASCII IDNA spelling. Common technical symbols get readable ASCII
+equivalents; unsupported glyphs get visible code points instead of disappearing. Long words,
+URLs and code now wrap without tail truncation. The browser's existing preset test
+shows titles and exact full URLs, including Unicode paths, as plain text. No new
+export surface is added. The preset still supplies the logo, question/waiting
+messages and Minitel 722079V / ALCATEL MF-83 boot theater. It no longer styles or
+rewrites the neutral Mistral factual answer. Other provider adapters and generated
+startup calls retain their existing APIs; startup never receives a search tool.
+
+Installation settings in `.env` (restart the chat service after changes):
+
+```dotenv
+MISTRAL_ANSWER_API=conversations
+MISTRAL_WEB_SEARCH=1
+MISTRAL_REQUEST_TIMEOUT=60
+```
+
+`MISTRAL_WEB_SEARCH=0` keeps Conversations but removes the tool. Explicit search
+requests then receive an honest unverified notice. `MISTRAL_ANSWER_API=chat_completions`
+is an explicit rollback to the existing personality-prompt answer path without
+search. There is no automatic endpoint/model fallback or retry. The 60-second local
+deadline is provisional: live search latency must be measured before tuning it.
+
+A single background answer worker leaves SOMMAIRE and GUIDE responsive. Reset or
+deadline discards that request's local result; it cannot update a new session. If
+an abandoned HTTP call is still running, another question gets a short recoverable
+busy notice instead of queuing another paid request. This does not cancel provider
+work or billing. Completed requests, failed requests and verification notices are
+handled separately; only successful user/assistant pairs enter factual history.
+Explicit search without observed execution, unfinished/failed execution or missing
+traceable references produces an unverified notice, not a fabricated current answer.
+The explicit-search check covers common English/French requests; it is not a full
+semantic classifier. The model is also instructed to report missing evidence.
+
+Logs record endpoint/model, elapsed time, observed search, reference count, status
+and allowlisted token counters. They omit questions, credentials and arbitrary
+provider diagnostics. No premium tool, new account or runtime dependency is needed.
+
+### Validation and remaining checks
+
+Offline fixtures are **synthetic contract fixtures**, not captured live responses.
+The request/input/output fields were checked against Mistral's official Python SDK
+and [web-search documentation](https://docs.mistral.ai/studio/agents/agent-tools/websearch).
+The parser ignores assistant activity before the last tool execution and requires
+one final assistant entry afterward (or one ordinary assistant entry). Ambiguous
+multiple final entries fail recoverably; verify this rule with a real response
+before relaxing it. Failed search `info` metadata varies by provider: recognized
+error/status fields and missing completion timestamps are treated conservatively.
+
+Mocked API and simulated UART tests cover neutral payloads, local source follow-ups,
+fiction isolation, ordinary/off paths, mixed chunks, duplicate sources, malformed
+responses, preserved code/URLs, recoverable errors, deadlines, reset while blocked,
+late replies and prevention of overlapping requests. Existing startup tests remain
+passing. All 43 tests pass. Ruff passes on new Python code and tests; error checks (`--select F`)
+pass on the modified existing services, whose legacy style is left intact. These
+checks do not establish live tool/model compatibility or hardware usability.
+
+There is no API key in the implementation workspace, so no live calls or cost
+measurement were made. Before the paid Pi probe, check current basic-tool pricing,
+account/model availability and the existing provider spending cap in Mistral's
+console. One HTTP request may involve multiple billed model/search steps. Run from
+the repository with its normal Python dependencies:
+
+```bash
+python3 scripts/smoke_mistral_search.py --capture-dir /tmp/minitel-search-check
+```
+
+This makes at most three requests: an explicit current question with official
+sources, a source follow-up, and an ordinary explanation. It stops on an error or
+unverified result, with no retry. It prints observed latency/search/reference/usage
+counts and full sources. The optional capture strips credentials, IDs, arguments
+and private reasoning; review it before sharing. Its HTTP timeout is an inactivity
+limit; the terminal independently enforces its total local deadline. Real fixture
+review, live search/model/cost validation and Julian's physical citation/pagination,
+waiting/reset/recovery check remain outstanding. Development takes place on `develop`; keep `main` behind physical validation.
