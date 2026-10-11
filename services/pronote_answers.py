@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 
 MAX_ROUNDS = 2
 MAX_CALLS = 4
+TOOL_NAMES = {"pronote_list_children", "pronote_get_homework", "pronote_get_grades"}
 
 
 def public_history(history):
@@ -56,6 +57,7 @@ def answer(history, language, key, model, web_search, timeout, knowledge, backen
         "Only data returned by tools verifies a school fact. Empty records mean no published items "
         "in that child/range/period, not no schoolwork ever. Say when results are truncated. "
         "For errors, explain that records are unavailable or ask for the child/period indicated; do not guess. "
+        "Never retry a failed lookup or repeat an identical function call in this answer. "
         "Cached data has the returned retrieval time; stale data must be described as potentially outdated. "
         "Give a concise factual answer in the requested language. Do not add theatrical machinery. "
         "For public questions, do not use school data; web search will run separately if needed."
@@ -64,13 +66,27 @@ def answer(history, language, key, model, web_search, timeout, knowledge, backen
     calls_count = 0
     receipts = []
     identifiers = set()
+    seen_calls = {}
+    force_final = False
     for round_index in range(MAX_ROUNDS + 1):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError("PRONOTE answer deadline")
+        request = {**payload, "inputs": list(transcript)}
+        if force_final or round_index == MAX_ROUNDS or calls_count >= MAX_CALLS:
+            # The last request must synthesize what we already have. Leaving
+            # tools available here lets the model turn a useful result/error
+            # into another call and lose it behind the local limit exception.
+            request["tools"] = []
+            request["completion_args"] = {**payload["completion_args"], "tool_choice": "none"}
+            request["instructions"] += (
+                "\nNo further tools are available. Answer using the returned records only. "
+                "If a tool failed, state that failure or ask the required clarification. "
+                "Do not invent school records, retry, or claim successful verification."
+            )
         response = requests.post(engine.URL, headers={"Authorization": f"Bearer {key}",
                                                        "Content-Type": "application/json"},
-                                 json={**payload, "inputs": list(transcript)}, timeout=remaining)
+                                 json=request, timeout=remaining)
         response.raise_for_status()
         data = response.json()
         if not isinstance(data, dict) or not isinstance(data.get("outputs"), list):
@@ -95,7 +111,8 @@ def answer(history, language, key, model, web_search, timeout, knowledge, backen
             result["pronote"] = receipts
             log.info("endpoint=conversations local=pronote calls=%d status=complete", calls_count)
             return result
-        if round_index == MAX_ROUNDS or calls_count + len(calls) > MAX_CALLS:
+        if request["tools"] == [] or calls_count + len(calls) > MAX_CALLS:
+            log.warning("local=pronote status=call_limit calls=%d round=%d", calls_count, round_index)
             raise ValueError("Local tool call limit")
         # Reject unexpected hosted activity before executing any local function.
         if any(not isinstance(e, dict) or e.get("type") not in ("function.call", "message.output")
@@ -108,9 +125,29 @@ def answer(history, language, key, model, web_search, timeout, knowledge, backen
                     or not isinstance(call.get("arguments"), (dict, str))):
                 raise ValueError("Malformed local function call")
             identifiers.add(identifier)
-            result = backend.execute(name, call.get("arguments"), deadline=deadline)
+            arguments = call["arguments"]
+            if isinstance(arguments, str):
+                try:
+                    normalized_arguments = json.loads(arguments)
+                except ValueError:
+                    normalized_arguments = arguments
+            else:
+                normalized_arguments = arguments
+            fingerprint = json.dumps([name, normalized_arguments], sort_keys=True)
+            repeated = fingerprint in seen_calls
+            if repeated:
+                result = seen_calls[fingerprint]
+                force_final = True
+            else:
+                result = backend.execute(name, arguments, deadline=deadline)
+                seen_calls[fingerprint] = result
+            if "error" in result:
+                force_final = True
             calls_count += 1
-            log.info("local=pronote call=%d status=%s", calls_count,
+            # Fixed tool names and fixed classifications only; no arguments,
+            # child aliases, school records or arbitrary error descriptions.
+            log.info("local=pronote call=%d tool=%s repeated=%s status=%s", calls_count,
+                     name if name in TOOL_NAMES else "unsupported", repeated,
                      "error" if "error" in result else "stale" if result.get("stale") else "ok")
             # Never replay provider diagnostics, IDs, intermediate prose or reasoning.
             transcript.append({"type": "function.call", "name": name,

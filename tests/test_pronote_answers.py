@@ -107,7 +107,48 @@ class LocalAnswerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "call limit"):
             self.request([{"outputs": [call(identifier="1")]}, {"outputs": [call(identifier="2")]},
                           {"outputs": [call(identifier="3")]}])
+        self.assertEqual(self.local.execute.call_count, 1)
+
+    def test_two_rounds_finish_with_tools_disabled_instead_of_requesting_again(self):
+        listed = call("pronote_list_children", identifier="list", arguments="{}")
+        result, requests = self.request([{"outputs": [listed]}, {"outputs": [call()]}, final()])
+        self.assertTrue(result["private"])
         self.assertEqual(self.local.execute.call_count, 2)
+        self.assertEqual(requests[-1].kwargs["json"]["tools"], [])
+        self.assertEqual(requests[-1].kwargs["json"]["completion_args"]["tool_choice"], "none")
+        self.assertNotIn("web_search", json.dumps(requests[-1].kwargs["json"]["tools"]))
+
+    def test_identical_calls_reuse_result_without_another_local_lookup(self):
+        args = {"to": "2026-10-12", "child": "Alex", "from": "2026-10-12"}
+        repeated = call(identifier="call-2", arguments=json.dumps(args))
+        result, requests = self.request([{"outputs": [call()]}, {"outputs": [repeated]}, final()])
+        self.local.execute.assert_called_once()
+        self.assertEqual(requests[-1].kwargs["json"]["tools"], [])
+        self.assertEqual(result["text"], "Maths : exercice 2 pour demain.")
+        results = [entry["result"] for entry in requests[-1].kwargs["json"]["inputs"]
+                   if entry.get("type") == "function.result"]
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0], results[1])
+
+    def test_failed_tool_finishes_immediately_and_keeps_underlying_error_visible(self):
+        self.local.execute.return_value = {"error": "child_unavailable"}
+        result, requests = self.request([{"outputs": [call()]}, final("Les donnees ne sont pas disponibles.")])
+        self.local.execute.assert_called_once()
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(requests[-1].kwargs["json"]["tools"], [])
+        self.assertEqual(requests[-1].kwargs["json"]["completion_args"]["tool_choice"], "none")
+        self.assertIn("child_unavailable", pa.footer(result, "fr"))
+
+    def test_four_calls_leave_no_tools_for_final_response_and_logs_exclude_records(self):
+        batch = [call(identifier=str(i), arguments={"child": "Alex", "from": f"2026-10-{12 + i}",
+                                                    "to": f"2026-10-{12 + i}"}) for i in range(4)]
+        with self.assertLogs(pa.log, level="INFO") as logs:
+            result, requests = self.request([{"outputs": batch}, final()])
+        self.assertEqual(self.local.execute.call_count, 4)
+        self.assertEqual(requests[-1].kwargs["json"]["tools"], [])
+        self.assertNotIn("PRIVATE", str(logs.output))
+        self.assertNotIn("Alex", str(logs.output))
+        self.assertTrue(result["private"])
 
     def test_unknown_mutation_is_only_error_result_no_arbitrary_dispatch(self):
         with tempfile.TemporaryDirectory() as directory:

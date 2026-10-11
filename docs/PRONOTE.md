@@ -142,7 +142,14 @@ absent. Functions execute locally; only sanitized school results reach Mistral,
 using `store=false`. Enrollment, tokens, PINs, full child names from configuration,
 account URLs and raw SDK objects never enter model payloads or logs.
 There are at most two function rounds/four calls under the existing total
-answer deadline. Tool descriptions and homework are evidence, not instructions.
+answer deadline. The final synthesis request has no tools and explicitly sets
+`completion_args.tool_choice=none`, so the model must answer from the results
+already returned. A tool error goes straight to this final synthesis instead
+of being retried; its original error code remains visible in the local footer.
+Repeated identical calls reuse the first result without repeating the local
+lookup and then force final synthesis. A provider response requesting tools
+despite that restriction is still rejected. The limits are not raised.
+Tool descriptions and homework are evidence, not instructions.
 Public questions pass to the existing factual/web adapter after the local
 planner returns without a school call. The public request removes prior school
 answers and their paired questions. This adds one planning request to public
@@ -185,6 +192,15 @@ retry are still needed to confirm enrollment on a particular school server.
 - `select_period`: choose one returned period name.
 - `busy`, `timeout`, `unavailable`: wait or check the Pi's network/school
   service. These errors expose no credential-bearing SDK exception text.
+
+For a chat lookup failure, inspect `logs/chatgpt.log`. It reports the fixed tool
+name, call count, repetition flag and success/error classification, plus safe
+PRONOTE stage/exception diagnostics when the local server read fails. It does
+not log the question, tool arguments, child alias, school records or tokens.
+The old `Local tool call limit` could mask a successful result or an earlier
+read error because the final model request still allowed another function call.
+Use the returned PRONOTE error code and safe log metadata to identify any
+remaining read issue; reaching the limit alone did not prove a successful read.
 
 ## Validation and design provenance
 
