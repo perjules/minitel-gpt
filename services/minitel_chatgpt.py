@@ -21,9 +21,11 @@ from dotenv import load_dotenv
 import requests
 
 try:  # Support both systemd's direct script and package imports in tests.
-    from . import mistral_answers
+    from . import mistral_answers, pronote, pronote_answers
 except ImportError:
     import mistral_answers
+    import pronote
+    import pronote_answers
 
 # Translittération vers ASCII affichable sur Minitel (é→e, œ→oe, …) :
 # évite les « ? » que produisait encode('ascii','replace').
@@ -428,18 +430,20 @@ def call_answer(system_prompt, history, language, options, knowledge):
     api, web_search, timeout = options
     if PROVIDER == "mistral" and api == "conversations":
         result = mistral_answers.answer(history, language, MISTRAL_KEY,
-                                        MISTRAL_MODEL, web_search, timeout, knowledge)
+                                        MISTRAL_MODEL, web_search, timeout, knowledge,
+                                        **({"pronote": pronote.backend()} if pronote.backend().tools() else {}))
         notice = mistral_answers.notice(result["status"], language)
         if notice:
             # Operational notices are not successful factual turns. Do not
             # display an unverified current answer as a successful lookup.
             return {"display": notice, "turn": None}
-        return {"display": mistral_answers.render(result), "turn": {
+        return {"display": mistral_answers.render(result) + pronote_answers.footer(result, language), "turn": {
             "role": "assistant", "content": result["text"],
             "chunks": result["chunks"], "references": result["references"],
+            **({"private": True} if result.get("private") else {}),
         }}
     # Explicit rollback and other providers retain their existing adapters.
-    plain_history = [{"role": turn["role"], "content": turn["content"]} for turn in history]
+    plain_history = [{"role": turn["role"], "content": turn["content"]} for turn in pronote_answers.public_history(history)]
     answer = call_llm(system_prompt, plain_history)
     return {"display": answer, "turn": {"role": "assistant", "content": answer}}
 

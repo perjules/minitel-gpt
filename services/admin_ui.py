@@ -6,6 +6,8 @@ Navigation par onglets : Tableau de bord · Personnalités · Paramètres.
 import json
 import os
 import re
+import secrets
+import hmac
 import subprocess
 import unicodedata
 from pathlib import Path
@@ -15,9 +17,11 @@ from flask import (Flask, render_template_string, request, redirect,
 from werkzeug.utils import secure_filename
 
 try:
-    from . import mistral_answers
+    from . import mistral_answers, pronote, pronote_answers
 except ImportError:
     import mistral_answers
+    import pronote
+    import pronote_answers
 
 PROJ_DIR = Path(__file__).parent.parent
 ASSETS_DIR = PROJ_DIR / "assets"
@@ -27,7 +31,22 @@ KNOWLEDGE_DIR = PROJ_DIR / "config" / "knowledge"
 ENV_FILE = PROJ_DIR / ".env"
 LOGS_DIR = PROJ_DIR / "logs"
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "mistral")
-SECRET_KEY = os.getenv("FLASK_SECRET", "minitel-secret-1985")
+def admin_session_secret():
+    configured = os.getenv("FLASK_SECRET", "")
+    if configured and configured != "minitel-secret-1985":
+        return configured
+    secret_file = PROJ_DIR / "config" / "admin-session.key"
+    try:
+        descriptor = os.open(secret_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return secret_file.read_text().strip()
+    with os.fdopen(descriptor, "w") as stream:
+        value = secrets.token_hex(32)
+        stream.write(value)
+    return value
+
+
+SECRET_KEY = admin_session_secret()
 
 DEFAULTS = {
     "title_msg": "*** MINITEL GPT ***",
@@ -489,9 +508,10 @@ def llm_answer(system_prompt, user_message, knowledge=""):
     options = mistral_answers.settings({**os.environ, **read_env()})
     if options[0] == "conversations":
         result = mistral_answers.answer(history, "fr", key, mistral_model(),
-                                        options[1], options[2], knowledge)
+                                        options[1], options[2], knowledge,
+                                        **({"pronote": pronote.backend()} if pronote.backend().tools() else {}))
         return (mistral_answers.notice(result["status"], "fr")
-                or mistral_answers.render(result, full_urls=True))
+                or mistral_answers.render(result, full_urls=True) + pronote_answers.footer(result, "fr"))
     messages = [{"role": "system", "content": system_prompt}] + history
     r = requests.post(
         "https://api.mistral.ai/v1/chat/completions",
@@ -697,6 +717,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 
 <!-- PARAMETRES -->
 <section class=panel id=params>
+  <div class=block><h2>PRONOTE</h2><p><a href="/pronote">Connexion parent et enfants autorisés</a></p></div>
   <div class=block>
     <h2>Fournisseur d'IA (LLM)</h2>
     <p class=sub>Choisissez le moteur d'IA et son modèle. Le terminal et la génération
@@ -1252,6 +1273,92 @@ def rollback_route():
                         if ok else "Échec : " + msg)
     session["flash_ok"] = ok
     return redirect(url_for("index"))
+
+
+PRONOTE_HTML = """<!doctype html><html lang="fr"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PRONOTE — 3615 IA</title><style>
+body{font:16px system-ui;max-width:800px;margin:24px auto;padding:16px;background:#111;color:#eee}
+a{color:#7cf}input,textarea,select,button{box-sizing:border-box;width:100%;padding:10px;margin:6px 0 16px}
+input[type=checkbox]{width:auto}label{display:block}fieldset{margin:24px 0}pre{white-space:pre-wrap}
+</style><a href="/">Retour administration</a><h1>PRONOTE</h1>
+<p>Lecture seule : devoirs et notes. Les identifiants restent sur ce Pi.
+Les résultats scolaires minimaux sont transmis à Mistral pour répondre.</p>
+<p>Dépendance installée : {{ 'oui' if status.dependency_ready else 'non — installer scripts/install_pronote.sh' }}.
+Intégration : {{ 'active' if status.enabled else 'désactivée' }}.</p>
+{% if message %}<p role="status">{{ message }}</p>{% endif %}
+{% if children %}<p>Enfants de ce compte (administration uniquement) :</p><ul>
+{% for child in children %}<li>{{ child }}</li>{% endfor %}</ul>{% endif %}
+<form method="post" autocomplete="off"><input type="hidden" name="csrf" value="{{ csrf }}">
+<fieldset><legend>Connecter un compte parent</legend>
+<label>Nom local du compte (ex. famille)<input name="account" required pattern="[a-z0-9][a-z0-9_-]{0,39}" maxlength="40"></label>
+<label>Données du QR PRONOTE parent (JSON : url, login, jeton)
+<textarea name="qr" required rows="5" maxlength="12000"></textarea></label>
+<label>Code QR à 4 chiffres<input name="pin" type="password" required inputmode="numeric" pattern="[0-9]{4}"></label>
+<label>Code de sécurité du compte si demandé (distinct du code QR)
+<input name="account_pin" type="password"></label>
+<button name="action" value="enroll">Connecter et vérifier le jeton</button>
+</fieldset></form>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}">
+<fieldset><legend>Autoriser les enfants</legend>
+<p>Un alias utilisé sur le Minitel → un compte et le nom PRONOTE exact.
+Aucun enfant n'est autorisé automatiquement. Les alias seuls sont envoyés à Mistral.</p>
+<label>Configuration JSON<textarea name="children" rows="8" required>{{ mapping }}</textarea></label>
+<label><input name="enabled" type="checkbox" {% if status.enabled %}checked{% endif %}> Activer pour Mistral Conversations</label>
+<button name="action" value="configure">Enregistrer</button></fieldset></form>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}">
+<label>Nom local du compte<input name="account" required></label>
+<button name="action" value="children">Relire les noms des enfants</button></form>
+<p>Exemple de configuration : <code>{"Alex":{"account":"famille","name":"NOM Prénom"}}</code>.</p>
+</html>"""
+
+
+@app.route("/pronote", methods=["GET", "POST"])
+@require_login
+def pronote_admin():
+    # Explicit random nonce is required even with the legacy Flask secret.
+    session.setdefault("pronote_csrf", secrets.token_urlsafe(32))
+    local = pronote.backend()
+    message, children = "", []
+    try:
+        if request.method == "POST":
+            supplied = request.form.get("csrf", "")
+            if not hmac.compare_digest(supplied, session["pronote_csrf"]):
+                return "Requête refusée", 403
+            action = request.form.get("action")
+            if action == "enroll":
+                qr_text = request.form.get("qr", "")
+                if len(qr_text) > 12000:
+                    raise pronote.PronoteError("invalid_qr")
+                children = local.enroll(request.form.get("account", ""), json.loads(qr_text),
+                                        request.form.get("pin", ""),
+                                        request.form.get("account_pin") or None)
+                message = "Compte connecté. Autorisez les enfants ci-dessous."
+            elif action == "children":
+                children = local.admin_children(request.form.get("account", ""))
+            elif action == "configure":
+                mapping_text = request.form.get("children", "{}")
+                if len(mapping_text) > 16000:
+                    raise pronote.PronoteError("configuration_error")
+                local.configure("enabled" in request.form, json.loads(mapping_text))
+                message = "Configuration enregistrée."
+            else:
+                return "Action inconnue", 400
+    except (pronote.PronoteError, ValueError, TypeError) as error:
+        message = (str(error) if isinstance(error, pronote.PronoteError) else "invalid_arguments")
+    try:
+        config = local.config()
+        status = local.status()
+    except pronote.PronoteError as error:
+        message = str(error)
+        config = {"enabled": False, "children": {}}
+        status = {"enabled": False, "dependency_ready": False}
+    response = app.make_response(render_template_string(
+        PRONOTE_HTML, csrf=session["pronote_csrf"], message=message, children=children,
+        status=status, mapping=json.dumps(config["children"], ensure_ascii=False, indent=2)))
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 if __name__ == "__main__":

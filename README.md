@@ -320,3 +320,8 @@ install.sh             installation
 ---
 
 *Projet personnel de Jérôme Hérard.*
+
+## PRONOTE (optionnel)
+
+Lecture locale des devoirs et notes via un compte parent connecté par QR.
+Installation, autorisation des enfants et tests : [docs/PRONOTE.md](docs/PRONOTE.md).

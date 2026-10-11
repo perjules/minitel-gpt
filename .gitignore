@@ -8,3 +8,6 @@ config/knowledge/
 config/prompts.json
 config/prompts.before-workshop.json
 .last_version
+config/pronote/
+.venv/
+config/admin-session.key

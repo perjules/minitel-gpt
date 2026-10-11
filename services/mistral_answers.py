@@ -1,4 +1,4 @@
-"""Mistral's hosted factual engine. No local tools or theatrical context."""
+"""Mistral's hosted factual engine. No theatrical context; optional local school tools."""
 import json
 import logging
 import re
@@ -144,8 +144,20 @@ def request_payload(history, language, model, web_search=True, knowledge=""):
             "completion_args": {"max_tokens": 700}}
 
 
-def answer(history, language, key, model, web_search=True, timeout=60, knowledge=""):
+def answer(history, language, key, model, web_search=True, timeout=60, knowledge="", pronote=None):
     """One complete request; no retry, stored session or endpoint fallback."""
+    if pronote is not None and pronote.tools():
+        try:
+            from . import pronote_answers
+        except ImportError:
+            import pronote_answers
+        return pronote_answers.answer(history, language, key, model, web_search, timeout, knowledge, pronote)
+    if any(turn.get("private") for turn in history):
+        try:
+            from .pronote_answers import public_history
+        except ImportError:
+            from pronote_answers import public_history
+        history = public_history(history)
     payload = request_payload(history, language, model, web_search, knowledge)
     started = time.monotonic()
     status, result = "api_error", None
