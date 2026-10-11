@@ -194,3 +194,14 @@ class AdminPronoteTests(unittest.TestCase):
               patch.object(engine, "answer", return_value=result) as answer):
             self.assertEqual(admin.llm_answer("fiction", "Devoirs Alex ?"), "Devoir exact")
         self.assertIs(answer.call_args.kwargs["pronote"], self.local)
+
+    def test_enrollment_page_shows_secret_free_failure_stage(self):
+        self.login()
+        error = pn.PronoteError("enrollment_failed", {"stage": "token_login", "error": "MFAError", "code": 25})
+        with patch.object(self.local, "enroll", side_effect=error):
+            response = self.client.post("/pronote", data={"csrf": self.csrf, "action": "enroll",
+                                                         "account": "famille", "qr": '{"jeton":"SECRET QR"}',
+                                                         "pin": "SECRET PIN"})
+        self.assertIn(b"stage=token_login", response.data)
+        self.assertIn(b"error=MFAError", response.data)
+        self.assertNotIn(b"SECRET", response.data)

@@ -53,7 +53,7 @@ def main():
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 1 if isinstance(result, dict) and result.get("error") else 0
     except (PronoteError, OSError, ValueError, KeyError, TypeError) as error:
-        print(str(error) if isinstance(error, PronoteError) else "invalid_configuration", file=sys.stderr)
+        print(error.admin_message() if isinstance(error, PronoteError) else "invalid_configuration", file=sys.stderr)
         return 1
 
 

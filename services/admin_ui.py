@@ -1345,7 +1345,7 @@ def pronote_admin():
             else:
                 return "Action inconnue", 400
     except (pronote.PronoteError, ValueError, TypeError) as error:
-        message = (str(error) if isinstance(error, pronote.PronoteError) else "invalid_arguments")
+        message = (error.admin_message() if isinstance(error, pronote.PronoteError) else "invalid_arguments")
     try:
         config = local.config()
         status = local.status()

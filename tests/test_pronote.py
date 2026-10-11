@@ -150,6 +150,44 @@ class PronoteTests(unittest.TestCase):
             self.local.enroll("new-account", qr, "1234")
         self.assertEqual(pn.read_json(self.local.credentials_path("new-account"))["password"], "NEW TOKEN 0")
 
+    def test_enrollment_diagnostics_distinguish_qr_and_token_failures_without_secrets(self):
+        from pronotepy.exceptions import MFAError, QRCodeDecryptError
+
+        qr = {"url": "https://school.example/parent.html", "login": "AB" * 16, "jeton": "CD" * 32}
+        self.factory.qrcode_login.side_effect = QRCodeDecryptError("SECRET QR PIN AND TOKEN")
+        with self.assertLogs(pn.log, level="WARNING") as logs, self.assertRaises(pn.PronoteError) as caught:
+            self.local.enroll("famille", qr, "1234")
+        self.assertEqual(caught.exception.diagnostic, {"stage": "qr_login", "error": "QRCodeDecryptError"})
+        self.assertNotIn("SECRET", str(logs.output) + caught.exception.admin_message())
+        self.assertNotIn(qr["jeton"], str(logs.output))
+        self.factory.qrcode_login.side_effect = None
+        self.factory.qrcode_login.return_value = self.client()
+        self.factory.token_login.side_effect = MFAError("SECRET ACCOUNT PIN", pronote_error_code=25,
+                                                       pronote_error_msg="SECRET SERVER BODY")
+        with self.assertLogs(pn.log, level="WARNING") as logs, self.assertRaises(pn.PronoteError) as caught:
+            self.local.enroll("famille", qr, "1234")
+        self.assertEqual(caught.exception.diagnostic, {"stage": "token_login", "error": "MFAError", "code": 25})
+        self.assertEqual(pn.read_json(self.local.credentials_path("famille"))["password"], "NEW TOKEN 0")
+        self.assertNotIn("SECRET", str(logs.output) + caught.exception.admin_message())
+
+    def test_credential_save_failure_is_distinct_from_authentication_failure(self):
+        qr = {"url": "https://school.example/parent.html", "login": "AB" * 16, "jeton": "CD" * 32}
+        self.factory.qrcode_login.return_value = self.client()
+        with (patch.object(pn, "atomic_json", side_effect=PermissionError("SECRET ACCOUNT PATH")),
+              self.assertLogs(pn.log, level="WARNING") as logs,
+              self.assertRaises(pn.PronoteError) as caught):
+            self.local.enroll("famille", qr, "1234")
+        self.assertEqual(str(caught.exception), "credential_storage_failed")
+        self.assertEqual(caught.exception.diagnostic, {"stage": "credential_save", "error": "PermissionError"})
+        self.assertNotIn("SECRET", str(logs.output) + caught.exception.admin_message())
+        self.factory.token_login.assert_not_called()
+
+    def test_read_tool_errors_exclude_admin_diagnostic_details(self):
+        self.factory.token_login.side_effect = pn.PronoteError("authentication_required")
+        with self.assertLogs(pn.log, level="WARNING"):
+            result = self.read()
+        self.assertEqual(result, {"error": "authentication_required"})
+
     def test_real_mobile_qr_metadata_is_ignored_without_changing_connection_fields(self):
         # Synthetic credentials only; never retain a real QR payload in fixtures.
         core = {"url": "https://school.example/pronote/mobile.parent.html",

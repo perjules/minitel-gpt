@@ -141,6 +141,23 @@ school turns before public search.
 
 ## Error codes
 
+Enrollment failures show a secret-free diagnostic on the admin page and CLI,
+and write the same diagnostic to `logs/admin.log`: `stage` (QR login, token
+login, credential save or child listing), exception class, last SDK request
+name when available, and an integer PRONOTE error code when supplied. Exception
+messages, response bodies, traceback locals, QR/PIN/token data and account
+identities are omitted. The ordinary model tools still return error codes only.
+
+```bash
+tail -n 100 /home/minitel/minitel-gpt/logs/admin.log
+```
+
+`qr_login` with `QRCodeDecryptError` indicates QR decryption failure: check the
+four-digit confirmation code and use a fresh QR. `token_login` with `MFAError`
+indicates a problem during the immediate token/device check; supply the account
+security PIN if required. A generic `enrollment_failed` by itself does not
+identify the cause. Report the diagnostic, not the QR or credentials.
+
 - `dependency_missing` / `dependency_version`: run the optional installer;
   do not upgrade PronotePy independently of its tested adapter.
 - `not_enrolled`, `authentication_required`, `enrollment_failed`: regenerate

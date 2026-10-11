@@ -29,11 +29,33 @@ MAX_RESULT_CHARACTERS = 24000
 LOCK = threading.Lock()
 DEADLINE = ContextVar("pronote_deadline", default=0)
 SAVE = ContextVar("pronote_save", default=None)
+REQUEST_STEP = ContextVar("pronote_request_step", default="")
 _CLIENT = None
+log = logging.getLogger(__name__)
 
 
 class PronoteError(Exception):
     """Public, secret-free error code; never expose SDK exception messages."""
+
+    def __init__(self, code, diagnostic=None):
+        super().__init__(code)
+        self.diagnostic = diagnostic or {}
+
+    def admin_message(self):
+        details = ", ".join(f"{key}={value}" for key, value in self.diagnostic.items())
+        return str(self) + (f" ({details})" if details else "")
+
+
+def failure_diagnostic(stage, error):
+    """Allowlisted context only: no exception text, traceback or response body."""
+    diagnostic = {"stage": stage, "error": type(error).__name__}
+    if REQUEST_STEP.get() and stage != "setup":
+        diagnostic["request"] = REQUEST_STEP.get()
+    code = getattr(error, "pronote_error_code", None)
+    if type(code) is int:
+        diagnostic["code"] = code
+    log.warning("pronote failure %s", json.dumps(diagnostic))
+    return diagnostic
 
 
 def today():
@@ -116,6 +138,10 @@ def client_class():
             self.session.mount("https://", TimedAdapter())
             self.session.mount("http://", TimedAdapter())
 
+        def initialise(self, *args, **kwargs):
+            REQUEST_STEP.set("initialise")
+            return super().initialise(*args, **kwargs)
+
     clients._Communication = TimedCommunication
 
     class ReadOnlyParent(pronotepy.ParentClient):
@@ -133,6 +159,7 @@ def client_class():
                        "PageCahierDeTexte", "DernieresNotes"}
             if function_name not in allowed:
                 raise PronoteError("read_only")
+            REQUEST_STEP.set(function_name)
             # The SDK has already replaced password with the next token here.
             # Save before parsing user/child data can fail in the constructor.
             if function_name == "ParametresUtilisateur" and SAVE.get():
@@ -227,31 +254,57 @@ class Pronote:
         with self.lock(account, deadline):
             deadline_token = DEADLINE.set(deadline)
             path = self.credentials_path(account)
-            save_token = SAVE.set(lambda creds: atomic_json(path, creds))
+
+            def persist(credentials):
+                try:
+                    atomic_json(path, credentials)
+                except (OSError, TypeError, ValueError) as error:
+                    raise PronoteError("credential_storage_failed",
+                                       failure_diagnostic("credential_save", error)) from None
+
+            save_token = SAVE.set(persist)
+            step_token = REQUEST_STEP.set("")
             client = None
+            stage = "dependency"
             try:
                 factory = self.factory()
                 if qr is not None:
+                    stage = "qr_login"
                     client = factory.qrcode_login(qr, pin, str(uuid.uuid4()),
                                                   account_pin=account_pin,
                                                   device_name="Minitel 722079V", skip_2fa=True)
                     if not client.logged_in:
                         raise PronoteError("authentication_required")
-                    atomic_json(path, client.export_credentials())
+                    stage = "credential_save"
+                    persist(client.export_credentials())
                     # Validate the token and device registration now. Save the QR
                     # token first so even a failed second login is recoverable.
                     client.communication.session.close()
                     client = None
+                    stage = "token_login"
+                    REQUEST_STEP.set("")
                     client = factory.token_login(**read_json(path), account_pin=account_pin,
                                                  device_name="Minitel 722079V")
                 else:
                     if not path.exists():
                         raise PronoteError("not_enrolled")
+                    stage = "token_login"
                     client = factory.token_login(**read_json(path))
                 if not client.logged_in:
                     raise PronoteError("authentication_required")
-                atomic_json(path, client.export_credentials())
+                stage = "credential_save"
+                persist(client.export_credentials())
+                stage = "children" if qr is not None else "read"
                 yield client
+            except Exception as error:
+                diagnostic = (error.diagnostic if isinstance(error, PronoteError) else {})
+                diagnostic = diagnostic or failure_diagnostic(stage, error)
+                if isinstance(error, PronoteError):
+                    error.diagnostic = diagnostic
+                    raise
+                if qr is not None:
+                    raise PronoteError("enrollment_failed", diagnostic) from None
+                raise
             finally:
                 try:
                     if client is not None:
@@ -262,6 +315,7 @@ class Pronote:
                         Period.instances.clear()
                 finally:
                     SAVE.reset(save_token)
+                    REQUEST_STEP.reset(step_token)
                     DEADLINE.reset(deadline_token)
 
     def enroll(self, account, qr, pin, account_pin=None):
@@ -285,8 +339,8 @@ class Pronote:
             return children  # ADMIN ONLY; names are not returned by public tools.
         except PronoteError:
             raise
-        except Exception:  # noqa: BLE001 -- SDK exceptions must never expose secrets
-            raise PronoteError("enrollment_failed") from None
+        except Exception as error:  # noqa: BLE001 -- SDK failure details are allowlisted
+            raise PronoteError("enrollment_failed", failure_diagnostic("setup", error)) from None
 
     def admin_children(self, account):
         try:
