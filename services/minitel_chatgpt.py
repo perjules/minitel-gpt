@@ -21,18 +21,19 @@ from dotenv import load_dotenv
 import requests
 
 try:  # Support both systemd's direct script and package imports in tests.
-    from . import mistral_answers, pronote, pronote_answers
+    from . import mistral_answers, pronote, pronote_answers, gmail_mail
 except ImportError:
     import mistral_answers
     import pronote
     import pronote_answers
+    import gmail_mail
 
 # Translittération vers ASCII affichable sur Minitel (é→e, œ→oe, …) :
 # évite les « ? » que produisait encode('ascii','replace').
 _ASCII_REPL = {
     "œ": "oe", "Œ": "OE", "æ": "ae", "Æ": "AE", "€": "EUR",
     "’": "'", "‘": "'", "“": '"', "”": '"', "«": '"', "»": '"',
-    "–": "-", "-": "-", "…": "...", " ": " ", "·": ".", "•": "-",
+    "—": "-", "–": "-", "-": "-", "…": "...", " ": " ", "·": ".", "•": "-",
 }
 
 def to_ascii(s: str) -> str:
@@ -426,8 +427,12 @@ def wrap(text, width=COLS):
     return out
 
 
-def call_answer(system_prompt, history, language, options, knowledge):
+def call_answer(system_prompt, history, language, options, knowledge, mail=None, review_ticket=None):
     api, web_search, timeout = options
+    if mail is not None and mail.interested(history[-1]["content"]):
+        response = mail.handle(history[-1]["content"], review_ticket, timeout)
+        if not response.get("passthrough"):
+            return response
     if PROVIDER == "mistral" and api == "conversations":
         result = mistral_answers.answer(history, language, MISTRAL_KEY,
                                         MISTRAL_MODEL, web_search, timeout, knowledge,
@@ -448,13 +453,14 @@ def call_answer(system_prompt, history, language, options, knowledge):
     return {"display": answer, "turn": {"role": "assistant", "content": answer}}
 
 
-def start_answer(system_prompt, history, language, options, knowledge):
+def start_answer(system_prompt, history, language, options, knowledge, mail=None, review_ticket=None):
     """One daemon worker. It never touches the UART or session memory."""
     output = Queue(maxsize=1)
 
     def request():
         try:
-            output.put((call_answer(system_prompt, history, language, options, knowledge), None))
+            optional = {"mail": mail, "review_ticket": review_ticket} if mail is not None else {}
+            output.put((call_answer(system_prompt, history, language, options, knowledge, **optional), None))
         except Exception as error:
             output.put((None, error))
 
@@ -705,11 +711,16 @@ def run():
     options = (mistral_answers.settings(os.environ) if PROVIDER == "mistral"
                else ("chat_completions", False, 60))
     pending = None
+    mail = None
 
     while True:  # boucle sommaire
         # Recharger le preset à chaque retour au sommaire (prise en compte des édits)
         system_prompt, title_msg, question_msg, loading_msg, title_art = load_preset()
         title_lines = build_title(title_art)
+        if mail is not None:
+            mail.reset()
+        mail = gmail_mail.MailSession() if gmail_mail.enabled() else None
+        review_ticket = None
         history = []
         knowledge = factual_knowledge()
         show_home(t, title_lines, title_msg)
@@ -749,12 +760,14 @@ def run():
             t.w(FG_CYAN); t.line(""); t.center(loading_msg)
             # Do not pile up paid calls while a locally abandoned HTTP request
             # is still running. Its isolated queue is discarded when it ends.
+            response = None
             if pending is not None and pending[0].is_alive():
                 answer = ("Previous request still finishing. Try again shortly." if language == "en"
                           else "Requete precedente en cours. Reessayez bientot.")
             else:
                 candidate = history + [{"role": "user", "content": question}]
-                pending = start_answer(system_prompt, candidate, language, options, knowledge)
+                optional = {"mail": mail, "review_ticket": review_ticket} if mail is not None else {}
+                pending = start_answer(system_prompt, candidate, language, options, knowledge, **optional)
                 response, action = wait_answer(t, pending, options[2])
                 if action == 'guide':
                     show_guide(t, language)
@@ -774,11 +787,18 @@ def run():
             if result in ('sommaire', 'timeout'):
                 break
 
+            if mail is not None and response and response.get("review_ticket"):
+                review_ticket = response["review_ticket"]
+                mail.acknowledge(review_ticket)
+
             # Invite pour rebondir
             t.w(bytes([CR, LF]))
             t.w(FG_WHITE)
             t.center(UI[language]["follow_up"])
             t.w(bytes([CR, LF]))
+
+        if mail is not None:
+            mail.reset()
 
 if __name__ == "__main__":
     run()

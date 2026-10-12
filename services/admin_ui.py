@@ -9,7 +9,10 @@ import re
 import secrets
 import hmac
 import subprocess
+import threading
+import time
 import unicodedata
+from collections import OrderedDict
 from pathlib import Path
 from functools import wraps
 from flask import (Flask, render_template_string, request, redirect,
@@ -17,11 +20,12 @@ from flask import (Flask, render_template_string, request, redirect,
 from werkzeug.utils import secure_filename
 
 try:
-    from . import mistral_answers, pronote, pronote_answers
+    from . import mistral_answers, pronote, pronote_answers, gmail_mail
 except ImportError:
     import mistral_answers
     import pronote
     import pronote_answers
+    import gmail_mail
 
 PROJ_DIR = Path(__file__).parent.parent
 ASSETS_DIR = PROJ_DIR / "assets"
@@ -717,6 +721,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 
 <!-- PARAMETRES -->
 <section class=panel id=params>
+  <div class=block><h2>Gmail</h2><p><a href="/gmail">Lire et répondre depuis le Minitel</a></p></div>
   <div class=block><h2>PRONOTE</h2><p><a href="/pronote">Connexion parent et enfants autorisés</a></p></div>
   <div class=block>
     <h2>Fournisseur d'IA (LLM)</h2>
@@ -964,6 +969,7 @@ def login():
 
 @app.route("/logout")
 def logout():
+    discard_mail(session.get("gmail_session"))
     session.clear()
     return redirect(url_for("login"))
 
@@ -1360,6 +1366,142 @@ def pronote_admin():
     response.headers["Referrer-Policy"] = "no-referrer"
     return response
 
+
+# Mail bodies and drafts stay in bounded process memory, never Flask cookies.
+
+MAIL_SESSIONS = OrderedDict()
+MAIL_SESSIONS_LOCK = threading.RLock()
+MAIL_TTL = 1200
+
+
+def discard_mail(identifier):
+    with MAIL_SESSIONS_LOCK:
+        item = MAIL_SESSIONS.pop(identifier, None)
+        if item:
+            item["mail"].reset()
+
+
+def mail_entry():
+    with MAIL_SESSIONS_LOCK:
+        now = time.monotonic()
+        for identifier, item in list(MAIL_SESSIONS.items()):
+            if now - item["used"] > MAIL_TTL:
+                discard_mail(identifier)
+        identifier = session.get("gmail_session")
+        if identifier not in MAIL_SESSIONS:
+            while len(MAIL_SESSIONS) >= 8:
+                discard_mail(next(iter(MAIL_SESSIONS)))
+            identifier = secrets.token_urlsafe(32)
+            session["gmail_session"] = identifier
+            MAIL_SESSIONS[identifier] = {
+                "mail": gmail_mail.MailSession(
+                    model=gmail_mail.MailModel(
+                        settings=lambda: (mistral_key(), mistral_model())
+                    )
+                ),
+                "pages": ["MAIL pour consulter la boîte."],
+                "page": 0,
+                "ticket": None,
+                "used": now,
+                "lock": threading.Lock(),
+            }
+        item = MAIL_SESSIONS[identifier]
+        item["used"] = now
+        MAIL_SESSIONS.move_to_end(identifier)
+        return item
+
+
+GMAIL_HTML = """<!doctype html><html lang="fr"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Gmail — 3615 IA</title>
+<style>body{background:#101820;color:#eee;font:16px system-ui;max-width:700px;margin:2em auto;padding:1em}
+pre{font:16px monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:#000;color:#7fffa0;padding:1em}
+input,button{font:inherit;padding:.5em;margin:.2em} input[type=text]{width:90%}</style>
+<a href="/">Administration</a><h1>Gmail</h1>
+<p>Session privée en mémoire. Lecture sans marquer comme lu. Le modèle ne peut pas envoyer.</p>
+{% if not enabled %}<p>Gmail désactivé. Suivre docs/GMAIL.md pour la connexion sur ordinateur.</p>{% endif %}
+<pre>{{ page }}</pre><p>Page {{ position }} / {{ count }}</p>
+<form method="post" autocomplete="off"><input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="ticket" value="{{ ticket or '' }}">
+<button name="action" value="previous" {% if position == 1 %}disabled{% endif %}>RETOUR</button>
+<button name="action" value="next" {% if position == count %}disabled{% endif %}>SUITE</button>
+<button name="action" value="send" {% if not reviewed %}disabled{% endif %}>ENVOYER</button>
+<button name="action" value="modify">MODIFIER</button><button name="action" value="cancel">ANNULER</button>
+<button name="action" value="reset">SOMMAIRE</button><br>
+<input name="question" type="text" maxlength="2000" placeholder="MAIL / LIRE 1 / TEXTE / REPONDRE instructions">
+<button name="action" value="command">ENVOI</button></form>
+<p>RECHERCHE is:unread / from:nom / subject:mot / after:2026/10/01 before:2026/10/13.
+Les dates de la liste sont affichées en Europe/Paris.</p></html>"""
+
+
+@app.route("/gmail", methods=["GET", "POST"])
+@require_login
+def gmail_admin():
+    session.setdefault("gmail_csrf", secrets.token_urlsafe(32))
+    if request.method == "POST" and not hmac.compare_digest(
+        request.form.get("csrf", "").encode(), session["gmail_csrf"].encode()
+    ):
+        return "Requête refusée", 403
+    item = mail_entry()
+    cancelling = request.method == "POST" and (
+        request.form.get("action") in ("cancel", "reset")
+        or request.form.get("question", "").strip().upper() in ("ANNULER", "SOMMAIRE")
+    )
+    if cancelling:
+        item["mail"].reset()
+    if not item["lock"].acquire(blocking=False):
+        return (
+            ("Session mail effacée; la requête en cours est abandonnée.", 200)
+            if cancelling
+            else ("Gmail: busy", 409)
+        )
+    try:
+        if request.method == "POST":
+            action = request.form.get("action", "")
+            if action in ("next", "previous"):
+                item["page"] = max(
+                    0,
+                    min(
+                        len(item["pages"]) - 1,
+                        item["page"] + (1 if action == "next" else -1),
+                    ),
+                )
+            else:
+                command = {
+                    "send": "ENVOYER",
+                    "modify": "MODIFIER",
+                    "cancel": "ANNULER",
+                    "reset": "SOMMAIRE",
+                    "command": request.form.get("question", ""),
+                }.get(action)
+                if command is None:
+                    return "Action inconnue", 400
+                if not gmail_mail.enabled():
+                    result = {"display": "Gmail désactivé. Suivre docs/GMAIL.md."}
+                else:
+                    result = item["mail"].handle(
+                        command, request.form.get("ticket") or None
+                    )
+                item["pages"], item["page"] = gmail_mail.pages(result["display"]), 0
+                item["ticket"] = result.get("review_ticket")
+        if item["ticket"] and item["page"] == len(item["pages"]) - 1:
+            item["mail"].acknowledge(item["ticket"])
+        response = app.make_response(
+            render_template_string(
+                GMAIL_HTML,
+                enabled=gmail_mail.enabled(),
+                csrf=session["gmail_csrf"],
+                page=item["pages"][item["page"]],
+                position=item["page"] + 1,
+                count=len(item["pages"]),
+                ticket=item["ticket"],
+                reviewed=item["mail"].review_valid(item["ticket"]),
+            )
+        )
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+    finally:
+        item["lock"].release()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, debug=False)

@@ -325,3 +325,11 @@ install.sh             installation
 
 Lecture locale des devoirs et notes via un compte parent connecté par QR.
 Installation, autorisation des enfants et tests : [docs/PRONOTE.md](docs/PRONOTE.md).
+
+## Gmail (prototype optionnel)
+
+Lecture et recherche Gmail, résumé du message sélectionné et réponse locale avec
+signature fixe et confirmation explicite `ENVOYER` après pagination complète.
+OAuth Desktop sur ordinateur, credentials chiffrés systemd, aucun mot de passe
+Google et aucune modification de boîte mail. Installation, enrollment et contrôles
+réels Pi/Minitel : [docs/GMAIL.md](docs/GMAIL.md).
