@@ -50,18 +50,19 @@ References checked 12 October 2026:
 
 ### Install code on the Pi without promoting main
 
-This change is committed locally on `develop`, **not pushed**. Transfer the supplied
-`gmail-prototype.bundle` from your computer to `/tmp/gmail-prototype.bundle` on the Pi.
-The bundle is code only; it contains no account configuration or credentials.
+The tested Gmail implementation is published on `develop`. Update that branch
+on the Pi; enrollment remains a separate owner-controlled setup step.
 
 ```sh
 cd /home/minitel/minitel-gpt
 git status --short
-git fetch origin develop
-git fetch /tmp/gmail-prototype.bundle develop:refs/remotes/gmail-prototype/develop
-git merge --ff-only refs/remotes/gmail-prototype/develop
+git switch develop
+git pull --ff-only origin develop
 sudo bash scripts/install_gmail.sh
 ```
+
+The earlier code-only `gmail-prototype.bundle` remains an alternative transfer
+for an offline Pi with baseline `6687d04`; it contains no credentials.
 
 Start from a clean `develop` checkout; if the fast-forward fails, inspect the
 concurrent commits and integrate them normally. Do not reset/discard local work.
