@@ -441,7 +441,10 @@ class MailSession:
                 self.reply_instruction, epoch, deadline, self.recipient_choices[index]
             )
         # ECRIRE is the explicit shortcut. A colon separates identity from instructions.
-        if re.match(r"^(écrire|ecrire)\b", question, re.IGNORECASE):
+        if re.match(r"^(écrire|ecrire)\b", question, re.IGNORECASE) and (
+            ":" in question
+            or not re.search(r"\b(mail|email|courriel)\b", question, re.IGNORECASE)
+        ):
             if self.draft:
                 self.save(
                     epoch,
@@ -461,7 +464,9 @@ class MailSession:
             return {"display": self.selected_text()}
         if upper in ("RESUMER", "RÉSUMER"):
             return {"display": self.summarize(deadline)}
-        if re.match(r"^(répondre|repondre|reply|draft)\b", question, re.IGNORECASE):
+        if re.match(
+            r"^(répondre|repondre|reply|draft)\b", question, re.IGNORECASE
+        ) and not re.match(r"^draft\b.*\bto\b", question, re.IGNORECASE):
             return self.make_draft(question, epoch, deadline)
         changing_recipient = bool(
             re.search(
@@ -792,9 +797,15 @@ class MailSession:
         except (ValueError, TypeError, KeyError):
             raise GmailError("recipient_resolution_invalid") from None
         choices = [by_id[i] for i in identifiers]
+        if len(choices) > 6:
+            self.save(epoch, lambda: setattr(self, "recipient_choices", []))
+            return {
+                "display": notice
+                + f"{len(choices)} correspondants possibles.\nPrécisez le nom complet, le domaine ou une adresse récente pour réduire le choix."
+            }
         self.save(epoch, lambda: setattr(self, "recipient_choices", choices))
         text = "\n\n".join(
-            f"{i}. {', '.join(c['names']) or '(nom absent)'} <{c['address']}>\n"
+            f"{i}. {', '.join(c['names'][:2]) or '(nom absent)'} <{c['address']}>\n"
             + " / ".join(c["roles"])
             + "\nDernier: "
             + c["last_seen"]

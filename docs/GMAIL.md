@@ -7,7 +7,7 @@ personality and serial/navigation paths remain available.
 
 ## Validation status
 
-The full suite passes **144 offline tests**, including mocked REST/model responses,
+The full suite passes **147 offline tests**, including mocked REST/model responses,
 Flask console checks and simulated UART workflows. New composition uses synthetic
 correspondents and validates the existing review/send gate without contacting Google
 or sending real messages. Model selection quality, real metadata-fetch latency and
@@ -374,6 +374,7 @@ and discarded by SOMMAIRE, ANNULER, logout/session expiry or restart.
 - Ambiguity shows numbered real names/addresses and provenance. Use **DESTINATAIRE 2**
   or clarify in words; the original writing instructions are retained. Displayed
   candidate pages use existing navigation without refetching or calling the model.
+  More than six plausible matches asks for more detail instead of a long menu.
 - A missing match explains the last-50-message boundary. Use a more precise name or
   an address that actually occurs in those messages; arbitrary new addresses are
   outside Stage 1. For partial fetch failures, SOMMAIRE lets a fresh request retry.

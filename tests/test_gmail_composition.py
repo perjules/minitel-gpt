@@ -319,6 +319,50 @@ class ModelContractTests(unittest.TestCase):
 
 
 class CompositionSessionTests(unittest.TestCase):
+    def test_many_plausible_matches_ask_for_detail_instead_of_a_long_menu(self):
+        session, client, model = compose_session()
+        client.correspondent_metadata.return_value["records"] = [
+            metadata("m" + str(i), From=f"Alice <a{i}@example.org>") for i in range(7)
+        ]
+        model.resolve.side_effect = lambda d, c, t: {
+            "status": "ambiguous",
+            "ids": [v["id"] for v in c],
+        }
+        result = session.handle("ECRIRE Alice : mardi")
+        self.assertIn("7 correspondants", result["display"])
+        self.assertEqual(session.recipient_choices, [])
+        self.assertEqual(session.composition["instruction"], "mardi")
+        model.composition.assert_not_called()
+
+    def test_natural_infinitive_and_draft_to_are_new_not_reply_shortcuts(self):
+        for request in [
+            "Écrire un mail à Alice pour confirmer mardi",
+            "Draft an email to Alice confirming Tuesday",
+        ]:
+            session, _client, model = compose_session()
+            model.route.return_value = {
+                "action": "compose",
+                "recipient": "Alice",
+                "instruction": "confirmer mardi",
+            }
+            self.assertIn("review_ticket", session.handle(request))
+            self.assertEqual(session.draft["kind"], "new")
+            self.assertIsNone(session.selected)
+
+    def test_missing_content_is_clarified_before_fetch_and_keeps_recipient(self):
+        session, client, model = compose_session()
+        model.route.return_value = {
+            "action": "compose",
+            "recipient": "Alice",
+            "instruction": "",
+        }
+        result = session.handle("Écris un mail à Alice")
+        self.assertIn("voulez-vous écrire", result["display"])
+        client.correspondent_metadata.assert_not_called()
+        self.assertIn("review_ticket", session.handle("confirmer mardi"))
+        self.assertEqual(model.resolve.call_args.args[0], "Alice")
+        self.assertEqual(model.composition.call_args.args[0], "confirmer mardi")
+
     def test_shortcut_no_selection_fresh_mime_full_review_signature_one_send(self):
         session, client, model = compose_session()
         result = session.handle("ECRIRE Alice : confirmer mardi")
