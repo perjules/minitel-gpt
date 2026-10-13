@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 import requests
 
 try:  # Support both systemd's direct script and package imports in tests.
-    from . import mistral_answers, pronote, pronote_answers, gmail_mail, memory_session, calculator
+    from . import mistral_answers, pronote, pronote_answers, gmail_mail, memory_session, calculator, printing_session
 except ImportError:
     import mistral_answers
     import pronote
@@ -29,6 +29,7 @@ except ImportError:
     import gmail_mail
     import memory_session
     import calculator
+    import printing_session
 
 # Translittération vers ASCII affichable sur Minitel (é→e, œ→oe, …) :
 # évite les « ? » que produisait encode('ascii','replace').
@@ -798,6 +799,24 @@ def show_calculator_scene(t, steps, language):
         t.w(SCROLL_OFF)
 
 
+def execute_print(t, document, language):
+    """Terminal owns display; BLE transport runs on worker."""
+    if document is None:
+        return "AUCUN DOCUMENT"
+    t.clear()
+    t.w(FG_CYAN)
+    t.line("MF-83 / REPROGRAPHIE")
+    t.line("")
+    try:
+        printing_session.print_with_progress(
+            document, lambda line: t.line(safe_display(line))
+        )
+    except Exception as exc:
+        log.warning("Printing failed: %s", exc)
+        return ("ECHEC REPROGRAPHIE: " if language == "fr" else "PRINT FAILURE: ") + str(exc)
+    return "DOCUMENT MATERIALISE" if language == "fr" else "DOCUMENT PRINTED"
+
+
 # ── Boucle principale ────────────────────────────────────────────────────
 def run(term=None):
     t = term if term is not None else Term()
@@ -808,6 +827,7 @@ def run(term=None):
     pending = None
     mail = None
     memory = None
+    printer = printing_session.Session()
 
     while True:  # boucle sommaire
         # Recharger le preset à chaque retour au sommaire (prise en compte des édits)
@@ -820,6 +840,7 @@ def run(term=None):
         memory = None
         mail = gmail_mail.MailSession() if gmail_mail.enabled() else None
         review_ticket = None
+        printer.reset()
         history = []
         knowledge = factual_knowledge()
         memory, user_action = select_memory_user(t, title_lines=title_lines, title_msg=title_msg)
@@ -866,6 +887,45 @@ def run(term=None):
             if action in ('sommaire', 'timeout'):
                 break
 
+            # Only trusted keyboard input may trigger physical printing.
+            print_intent = printing_session.intent(question)
+            if printer.approval is not None:
+                if print_intent in ("non", "annuler"):
+                    printer.cancel()
+                    message = "REQUISITION ANNULEE"
+                elif print_intent == "oui":
+                    document = printer.take_confirmed(question)
+                    message = execute_print(t, document, language)
+                else:
+                    printer.cancel()
+                    message = "REQUISITION ANNULEE"
+                    print_intent = None
+                if print_intent is not None:
+                    result = show_response(t, message, language)
+                    if result != "done":
+                        break
+                    show_question_prompt(t, question_msg)
+                    continue
+            if print_intent in ("direct", "confirm", "image"):
+                if not printing_session.installed():
+                    message = "SERVICE REPROGRAPHIE NON INSTALLE"
+                elif print_intent == "image":
+                    message = "IMPRESSION D'IMAGE: GENERATION NON CONFIGUREE"
+                elif not printer.last_text:
+                    message = "AUCUNE REPONSE A IMPRIMER"
+                elif print_intent == "direct":
+                    document = printer.prepare().document
+                    printer.cancel()
+                    message = execute_print(t, document, language)
+                else:
+                    printer.prepare()
+                    message = "IMPRIMER LA DERNIERE REPONSE ? OUI / NON"
+                result = show_response(t, message, language)
+                if result != "done":
+                    break
+                show_question_prompt(t, question_msg)
+                continue
+
             memory.record("user", question)
 
             t.w(bytes([CR, LF]))
@@ -902,6 +962,9 @@ def run(term=None):
                     answer = response["display"]
                     if response["turn"] is not None:
                         history = mistral_answers.bound_history(candidate + [response["turn"]])
+
+            if response is not None and response.get("turn") is not None:
+                printer.remember(answer)
 
             warning = memory.take_warning()
             if warning:
