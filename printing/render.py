@@ -15,7 +15,20 @@ def render_document_pages(document: PrintDocument, *, width: int = 384, max_heig
     text_width = width // scale
     margin = 8
     line_height = 16
-    font = ImageFont.load_default()
+    # Use a Unicode font; Pillow's default bitmap font lacks many glyphs.
+    font = None
+    for candidate in (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        "DejaVuSans.ttf",
+    ):
+        try:
+            font = ImageFont.truetype(candidate, 11)
+            break
+        except OSError:
+            continue
+    if font is None:
+        raise RuntimeError("Unicode printing font missing: install fonts-dejavu-core")
     scratch = ImageDraw.Draw(Image.new("L", (text_width, 1), 255))
     available = text_width - 2 * margin
     if available <= 0:
