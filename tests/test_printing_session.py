@@ -41,6 +41,20 @@ class PrintSessionTests(unittest.TestCase):
         # A text document is never silently truncated at the old 6000px limit.
         self.assertGreater(sum(page.height for page in pages), 600)
 
+    def test_document_uses_one_ble_session(self):
+        from printing import PrintDocument, TextBlock
+        from unittest.mock import AsyncMock
+        document = PrintDocument("3615 IA", (TextBlock("ligne\n" * 80),))
+        with patch("printing.mxw01.MXW01") as driver:
+            driver.return_value.print_images = AsyncMock()
+            events = []
+            printing_session.print_with_progress(document, events.append)
+            self.assertEqual(driver.call_count, 1)
+            self.assertEqual(driver.return_value.print_images.await_count, 1)
+            sections = driver.return_value.print_images.await_args.args[0]
+            self.assertGreater(len(sections), 1)
+            self.assertTrue(all(section.height <= 600 for section in sections))
+
     def test_extension_is_optional(self):
         with patch.dict("os.environ", {"PRINTING_ENABLED": "0"}):
             self.assertFalse(printing_session.installed())
