@@ -58,7 +58,7 @@ sudo btmgmt power on
 ## Limitations and safety
 
 - **Not yet physically validated:** the MXW01 driver is based on a community protocol specification, which describes itself as incomplete.
-- Each job is bounded to 6000 image lines; printing may take time.
+- Long text is split into consecutive sections of at most 1800 image lines (384 dots wide); printing may take time. Individual oversized image blocks still require resizing.
 - Connection and completion errors are surfaced to the operator.
 - The driver pads short image buffers and paces BLE writes; these details need validation on the actual hardware.
 - The `PrintApproval` class is a primitive, **not an integrated security boundary**. Its `confirm` method must only receive actual trusted terminal input. The model may propose or render, but must never call physical printing or synthesize approval.
@@ -72,7 +72,7 @@ in the Python environment running the chat service. No Bluetooth scan is made
 until a print job is actually requested. Set `PRINTING_ENABLED=0` to disable
 the extension explicitly; `MXW01_ADDRESS` overrides the default BLE address.
 
-- `IMPRIMER` prints the last assistant answer immediately, with no LLM call and
+- `IMPRIMER` prints the complete last assistant answer (not just the final Minitel display page), with no LLM call and
   no additional confirmation.
 - `Imprime cette réponse` prepares the last answer and asks `OUI / NON`.
   Confirmation is processed only from actual keyboard input, never from LLM output.
@@ -92,3 +92,8 @@ Run `.venv/bin/python -m unittest discover -s tests -p 'test_printing_session.py
 and validate `IMPRIMER` in the terminal console before testing the physical
 Minitel. Only the standalone text print protocol has received hardware feedback
 so far; Minitel integration and image printing remain to be validated.
+
+When an email is selected in Gmail, `IMPRIMER` prints its full selected message text
+(headers and body), rather than the last assistant response. The Gmail message
+menu advertises `TEXTE / RESUMER / REPONDRE / IMPRIMER`. Printing is explicit
+and does not send, forward or otherwise modify email.
