@@ -29,6 +29,18 @@ class PrintSessionTests(unittest.TestCase):
         session.reset()
         self.assertIsNone(session.last_text)
 
+    def test_long_document_prints_all_sections(self):
+        from printing.render import render_document_pages
+        from printing import PrintDocument, TextBlock
+
+        # Three screenfuls of distinct content must survive paper sectioning.
+        content = "\n".join(f"PRONOTE LIGNE {index:03d} NOTE {index}/20" for index in range(100))
+        pages = render_document_pages(PrintDocument("3615 IA", (TextBlock(content),)))
+        self.assertGreater(len(pages), 1)
+        self.assertTrue(all(page.width == 384 and page.height <= 1800 for page in pages))
+        # A text document is never silently truncated at the old 6000px limit.
+        self.assertGreater(sum(page.height for page in pages), 1800)
+
     def test_extension_is_optional(self):
         with patch.dict("os.environ", {"PRINTING_ENABLED": "0"}):
             self.assertFalse(printing_session.installed())
