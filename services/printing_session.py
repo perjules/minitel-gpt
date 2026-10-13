@@ -87,8 +87,7 @@ def print_with_progress(document, report):
         try:
             pages = render_document_pages(document)
             address = os.environ.get("MXW01_ADDRESS", "48:0F:57:1E:0E:EB")
-            for bitmap in pages:
-                asyncio.run(MXW01(address).print_image(bitmap))
+            asyncio.run(MXW01(address).print_images(pages))
         except Exception as exc:
             errors.append(exc)
         finally:
