@@ -29,6 +29,22 @@ class PrintingTests(unittest.TestCase):
             self.assertEqual(image.mode, "1")
             self.assertGreater(image.height, 384)
 
+    def test_unicode_accents_and_symbols(self):
+        from printing.render import render_document_pages
+        from PIL import ImageChops
+        samples = (
+            "é è ê ë à â ù û î ï ô ç œ É Ç — €",
+            "e e e e a a u u i i o c oe E C - EUR",
+        )
+        images = [
+            render_document_pages(PrintDocument("Titre", (TextBlock(sample),)))[0]
+            for sample in samples
+        ]
+        self.assertEqual(images[0].width, 384)
+        self.assertIsNotNone(ImageChops.difference(
+            images[0].convert("L"), images[1].convert("L")
+        ).getbbox())
+
     def test_height_limit(self):
         with self.assertRaises(ValueError):
             render_document(PrintDocument("Title", (TextBlock("hello " * 1000),)), max_height=64)
