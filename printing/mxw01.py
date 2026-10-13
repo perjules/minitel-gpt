@@ -89,7 +89,10 @@ class MXW01:
                     await asyncio.sleep(0.01)
                 status = await await_response(0xA1, self.timeout)
                 if len(status) < 13 or status[12] != 0:
-                    raise RuntimeError(\n                        f"Printer status not ready: {len(status)} bytes, payload={status.hex()} "\n                        "(expected >=13 bytes with status flag at offset 12 equal to 00)"\n                    )
+                    raise RuntimeError(
+                        f"Printer status not ready: {len(status)} bytes, payload={status.hex()} "
+                        "(expected >=13 bytes with status flag at offset 12 equal to 00)"
+                    )
                 await client.write_gatt_char(CONTROL, command(0xA2, b"\x5d"), response=False)
                 request = image.height.to_bytes(2, "little") + (48).to_bytes(2, "little")
                 await client.write_gatt_char(CONTROL, command(0xA9, request, checksum=False), response=False)
