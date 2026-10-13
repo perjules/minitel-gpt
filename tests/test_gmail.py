@@ -79,6 +79,7 @@ def make_session(text="Bonjour", output="Merci pour votre message."):
     client.send.return_value = "sent"
     model = Mock()
     model.complete.return_value = output
+    model.route.return_value = {"action": "revise"}
     session = mail.MailSession(client, model)
     return session, client, model
 

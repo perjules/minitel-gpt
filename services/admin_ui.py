@@ -721,7 +721,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 
 <!-- PARAMETRES -->
 <section class=panel id=params>
-  <div class=block><h2>Gmail</h2><p><a href="/gmail">Lire et répondre depuis le Minitel</a></p></div>
+  <div class=block><h2>Gmail</h2><p><a href="/gmail">Lire, répondre et écrire depuis le Minitel</a></p></div>
   <div class=block><h2>PRONOTE</h2><p><a href="/pronote">Connexion parent et enfants autorisés</a></p></div>
   <div class=block>
     <h2>Fournisseur d'IA (LLM)</h2>
@@ -1399,7 +1399,7 @@ def mail_entry():
                         settings=lambda: (mistral_key(), mistral_model())
                     )
                 ),
-                "pages": ["MAIL pour consulter la boîte."],
+                "pages": ["MAIL pour consulter la boîte.\nECRIRE nom : instructions pour un nouveau mail."],
                 "page": 0,
                 "ticket": None,
                 "used": now,
@@ -1427,7 +1427,7 @@ input,button{font:inherit;padding:.5em;margin:.2em} input[type=text]{width:90%}<
 <button name="action" value="send" {% if not reviewed %}disabled{% endif %}>ENVOYER</button>
 <button name="action" value="modify">MODIFIER</button><button name="action" value="cancel">ANNULER</button>
 <button name="action" value="reset">SOMMAIRE</button><br>
-<input name="question" type="text" maxlength="2000" placeholder="MAIL / LIRE 1 / TEXTE / REPONDRE instructions">
+<input name="question" type="text" maxlength="2000" placeholder="MAIL / LIRE 1 / REPONDRE / ECRIRE nom : instructions">
 <button name="action" value="command">ENVOI</button></form>
 <p>RECHERCHE is:unread / from:nom / subject:mot / after:2026/10/01 before:2026/10/13.
 Les dates de la liste sont affichées en Europe/Paris.</p></html>"""

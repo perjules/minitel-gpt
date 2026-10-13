@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import test_terminal_startup as startup
 from test_gmail import make_session
+from test_gmail_composition import compose_session
 from test_terminal_startup import fn
 
 from services import admin_ui as admin
@@ -117,8 +118,89 @@ class AdminMailTests(unittest.TestCase):
         self.assertIsNone(self.mail.draft)
         self.assertFalse(admin.MAIL_SESSIONS)
 
+    def test_new_composition_review_revision_paging_and_confirmed_send(self):
+        self.factory.stop()
+        self.mail, self.api, self.model = compose_session()
+        self.model.composition.return_value = ("Nouveau sujet", "Bonjour. " * 150)
+        self.factory = patch.object(
+            admin.gmail_mail, "MailSession", return_value=self.mail
+        )
+        self.factory.start()
+        admin.MAIL_SESSIONS.clear()
+        self.client.get("/gmail")
+        response = self.command("ECRIRE Alice : confirmer mardi")
+        item = next(iter(admin.MAIL_SESSIONS.values()))
+        ticket = item["ticket"]
+        self.assertGreater(len(item["pages"]), 1)
+        self.assertIn("alice@example.org", response.text)
+        self.assertNotRegex(response.text, r'value="send"(?! disabled)')
+        api_calls, model_calls = self.api.method_calls[:], self.model.method_calls[:]
+        while item["page"] < len(item["pages"]) - 1:
+            self.client.post("/gmail", data={"csrf": self.csrf, "action": "next"})
+        self.assertEqual(api_calls, self.api.method_calls)
+        self.assertEqual(model_calls, self.model.method_calls)
+        self.assertTrue(self.mail.review_valid(ticket))
+        self.model.composition.return_value = ("Objet révisé", "Confirmation mardi.")
+        self.command("MODIFIER objet et raccourcir")
+        newer = item["ticket"]
+        self.assertNotEqual(ticket, newer)
+        self.command("ENVOYER", ticket)
+        self.api.send.assert_not_called()
+        # Reread after a failed stale-ticket request; its output replaced the preview.
+        self.command("MODIFIER conserver le texte")
+        self.assertEqual(len(item["pages"]), 1)
+        newer = item["ticket"]
+        self.command("ENVOYER", newer)
+        self.api.send.assert_called_once()
+        self.assertIsNone(self.api.send.call_args.args[1])
+        self.command("ENVOYER", newer)
+        self.api.send.assert_called_once()
+        with self.client.session_transaction() as cookie:
+            self.assertNotIn("alice@example.org", str(dict(cookie)))
+
 
 class TerminalMailTests(unittest.TestCase):
+    def test_new_draft_natural_route_and_uart_review_remain_private(self):
+        session, client, model = compose_session()
+        model.route.return_value = {
+            "action": "compose",
+            "recipient": "Alice",
+            "instruction": "confirmer mardi",
+        }
+        model.composition.return_value = ("Objet neuf", "Bonjour. " * 120)
+        with (
+            patch.dict("os.environ", {"GMAIL_ENABLED": "1"}),
+            patch.object(terminal.mistral_answers, "answer") as public,
+        ):
+            result = terminal.call_answer(
+                "persona",
+                [
+                    {
+                        "role": "user",
+                        "content": "Écris un mail à Alice pour confirmer mardi",
+                    }
+                ],
+                "fr",
+                ("conversations", True, 60),
+                "knowledge",
+                session,
+            )
+            self.assertIsNone(result["turn"])
+            public.assert_not_called()
+        text = terminal.safe_display(result["display"])
+        term = object.__new__(terminal.Term)
+        term.s = startup.FakeSerial(fn(terminal.K_SOMMAIRE))
+        self.assertEqual(terminal.show_response(term, text), "sommaire")
+        self.assertFalse(session.review_valid(result["review_ticket"]))
+        before = (client.method_calls[:], model.method_calls[:])
+        term.s = startup.FakeSerial(fn(terminal.K_SUITE) * (len(mail.pages(text)) - 1))
+        self.assertEqual(terminal.show_response(term, text), "done")
+        self.assertEqual(before, (client.method_calls, model.method_calls))
+        session.acknowledge(result["review_ticket"])
+        session.handle("ENVOYER", result["review_ticket"])
+        client.send.assert_called_once()
+        self.assertIsNone(client.send.call_args.args[1])
+
     def test_gmail_router_is_private_and_nonmail_still_uses_existing_engine(self):
         session, _client, _ = make_session()
         with patch.dict("os.environ", {"GMAIL_ENABLED": "1"}):

@@ -4,6 +4,7 @@ import base64
 import email.policy
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from email.header import decode_header, make_header
 from email.message import EmailMessage
@@ -23,6 +24,7 @@ URL = "https://gmail.googleapis.com/gmail/v1/users/me"
 MAX_BODY = 65536
 MAX_RESPONSE = 1048576
 HEADERS = ["From", "Reply-To", "Subject", "Date", "Message-ID", "References"]
+CORRESPONDENT_HEADERS = ["From", "Reply-To", "To", "Cc", "Subject", "Date"]
 
 
 def printable(value):
@@ -388,14 +390,14 @@ class GmailClient:
     def send(self, raw, thread_id, message_id, deadline):
         """Exactly one send attempt. Caller retires uncertain attempts permanently."""
         try:
+            payload = {"raw": base64.urlsafe_b64encode(raw).decode()}
+            if thread_id is not None:
+                payload["threadId"] = thread_id
             result = self.request(
                 "POST",
                 "/messages/send",
                 deadline,
-                payload={
-                    "raw": base64.urlsafe_b64encode(raw).decode(),
-                    "threadId": thread_id,
-                },
+                payload=payload,
             )
             if not isinstance(result.get("id"), str) or not re.fullmatch(
                 r"[A-Za-z0-9_-]{1,128}", result["id"]
@@ -436,3 +438,120 @@ class GmailClient:
             except GmailError:
                 pass
             raise GmailError("send_uncertain") from None
+
+    def correspondent_metadata(self, deadline):
+        """Up to 50 recent non-draft messages, metadata only. Five connection pools.
+
+        Each worker owns its HTTP Session; only the locked token source is shared.
+        Results never enter the ordinary ten-message inbox list or body cache.
+        """
+        identifiers, page, partial = [], None, False
+        for _ in range(5):
+            params = {
+                "maxResults": 50 - len(identifiers),
+                "includeSpamTrash": "false",
+                "q": "-in:drafts -in:spam -in:trash",
+                "fields": "messages(id),nextPageToken",
+            }
+            if page:
+                params["pageToken"] = page
+            data = self.request("GET", "/messages", deadline, params=params)
+            entries = data.get("messages", [])
+            if not isinstance(entries, list) or len(entries) > params["maxResults"]:
+                raise GmailError("malformed_response")
+            for entry in entries:
+                identifier = entry.get("id") if isinstance(entry, dict) else None
+                if not isinstance(identifier, str) or not re.fullmatch(
+                    r"[A-Za-z0-9_-]{1,128}", identifier
+                ):
+                    raise GmailError("malformed_response")
+                if identifier not in identifiers:
+                    identifiers.append(identifier)
+            next_page = data.get("nextPageToken")
+            if not next_page or len(identifiers) == 50:
+                break
+            if (
+                not isinstance(next_page, str)
+                or len(next_page) > 2048
+                or next_page == page
+            ):
+                raise GmailError("malformed_response")
+            page = next_page
+        else:
+            partial = True
+
+        def fetch(group):
+            records, failures = [], 0
+            with requests.Session() as http:
+                client = GmailClient(self.tokens, http)
+                for identifier in group:
+                    try:
+                        data = client.request(
+                            "GET",
+                            "/messages/" + identifier,
+                            deadline,
+                            params={
+                                "format": "metadata",
+                                "metadataHeaders": CORRESPONDENT_HEADERS,
+                                "fields": "id,internalDate,labelIds,payload(headers)",
+                            },
+                        )
+                        if data.get("id") != identifier:
+                            raise GmailError("message_identity_mismatch")
+                        headers = data.get("payload", {}).get("headers", [])
+                        labels = data.get("labelIds", [])
+                        if (
+                            not isinstance(headers, list)
+                            or len(headers) > 50
+                            or any(
+                                not isinstance(h, dict)
+                                or not isinstance(h.get("name"), str)
+                                or not isinstance(h.get("value"), str)
+                                for h in headers
+                            )
+                            or sum(len(h["name"]) + len(h["value"]) for h in headers)
+                            > 32768
+                            or not isinstance(labels, list)
+                            or any(not isinstance(v, str) for v in labels)
+                        ):
+                            raise GmailError("malformed_response")
+                        # Retain only the contract fields, even if an API fixture/server
+                        # supplies extra fields despite the partial-response selector.
+                        data = {
+                            "id": identifier,
+                            "internalDate": data.get("internalDate"),
+                            "labelIds": labels,
+                            "payload": {"headers": headers},
+                        }
+                        if not set(data.get("labelIds", [])) & {
+                            "DRAFT",
+                            "SPAM",
+                            "TRASH",
+                        }:
+                            records.append(data)
+                    except GmailError as error:
+                        if str(error) in {
+                            "reconnect_required",
+                            "permission_denied",
+                            "credential_helper_unavailable",
+                        }:
+                            raise
+                        failures += 1
+            return records, failures
+
+        records, failures = [], 0
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            jobs = [
+                pool.submit(fetch, identifiers[i::5])
+                for i in range(min(5, len(identifiers)))
+            ]
+            for job in jobs:
+                group, failed = job.result()
+                records.extend(group)
+                failures += failed
+        return {
+            "records": records,
+            "attempted": len(identifiers),
+            "failed": failures,
+            "partial": partial or bool(failures),
+        }
