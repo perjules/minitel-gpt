@@ -58,10 +58,23 @@ class MXW01:
         self.timeout = timeout
 
     async def print_image(self, image):
+        """Backward-compatible one-image job."""
+        await self.print_images([image])
+
+    async def print_images(self, images):
+        """One BLE connection, sequential short receipts on a continuous roll.
+
+        The printer must acknowledge each section before the next starts.
+        On uncertain completion, stop rather than duplicate paper output.
+        """
         from bleak import BleakClient, BleakScanner
 
-        packed = pack_image(image)
-        # Scan first to obtain a BLE device object, avoiding BlueZ classic fallback.
+        iterator = iter(images)
+        first = next(iterator, None)
+        if first is None:
+            return
+        # Validate first section before connecting.
+        pack_image(first)
         devices = await BleakScanner.discover(timeout=self.scan_timeout)
         device = next((d for d in devices if d.address.upper() == self.address.upper()), None)
         if device is None:
@@ -84,7 +97,7 @@ class MXW01:
         async with BleakClient(device, timeout=self.timeout) as client:
             await client.start_notify(NOTIFY, on_notification)
             try:
-                for code, payload in ((0xB1, b"\x00"), (0xA2, b"\x5d"), (0xA1, b"\x00")):
+                for code, payload in ((0xB1, b"\\x00"), (0xA2, b"\\x5d"), (0xA1, b"\\x00")):
                     await client.write_gatt_char(CONTROL, command(code, payload), response=False)
                     await asyncio.sleep(0.01)
                 status = await await_response(0xA1, self.timeout)
@@ -93,22 +106,30 @@ class MXW01:
                         f"Printer status not ready: {len(status)} bytes, payload={status.hex()} "
                         "(expected >=8 bytes with status byte at offset 6 equal to 00)"
                     )
-                await client.write_gatt_char(CONTROL, command(0xA2, b"\x5d"), response=False)
-                request = image.height.to_bytes(2, "little") + (48).to_bytes(2, "little")
-                await client.write_gatt_char(CONTROL, command(0xA9, request, checksum=False), response=False)
-                accepted = await await_response(0xA9, self.timeout)
-                if not accepted or accepted[0] != 0:
-                    raise RuntimeError("Printer rejected print request")
-                if len(packed) < 4320:
-                    packed += bytes(4320 - len(packed))
-                for offset in range(0, len(packed), 20):
-                    await client.write_gatt_char(DATA, packed[offset:offset + 20], response=False)
-                    await asyncio.sleep(0.015)
-                await client.write_gatt_char(CONTROL, command(0xAD, b"\x00", checksum=False), response=False)
-                # AA completion notification is not consistently delivered by firmware.
-                try:
-                    await await_response(0xAA, max(15, image.height / 20))
-                except asyncio.TimeoutError:
-                    raise TimeoutError("Printer did not acknowledge completion; paper may have printed")
+                for image in (first, *iterator):
+                    packed = pack_image(image)
+                    # Discard stale acknowledgements from previous commands.
+                    while not responses.empty():
+                        responses.get_nowait()
+                    await client.write_gatt_char(CONTROL, command(0xA2, b"\\x5d"), response=False)
+                    request = image.height.to_bytes(2, "little") + (48).to_bytes(2, "little")
+                    await client.write_gatt_char(CONTROL, command(0xA9, request, checksum=False), response=False)
+                    accepted = await await_response(0xA9, self.timeout)
+                    if not accepted or accepted[0] != 0:
+                        raise RuntimeError("Printer rejected print request")
+                    # Firmware expects at least 90 raster rows; don't stream an
+                    # unbounded blank tail for short sections.
+                    if len(packed) < 4320:
+                        packed += bytes(4320 - len(packed))
+                    for offset in range(0, len(packed), 20):
+                        await client.write_gatt_char(DATA, packed[offset:offset + 20], response=False)
+                        await asyncio.sleep(0.015)
+                    await client.write_gatt_char(CONTROL, command(0xAD, b"\\x00", checksum=False), response=False)
+                    try:
+                        await await_response(0xAA, max(15, image.height / 20))
+                    except asyncio.TimeoutError:
+                        raise TimeoutError(
+                            "Printer did not acknowledge completion; paper may have printed"
+                        ) from None
             finally:
                 await client.stop_notify(NOTIFY)
