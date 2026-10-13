@@ -5,7 +5,7 @@ Pillow is imported only when rendering is requested.
 from .document import ImageBlock, PrintDocument, TextBlock
 
 
-def render_document_pages(document: PrintDocument, *, width: int = 384, max_height: int = 1800):
+def render_document_pages(document: PrintDocument, *, width: int = 384, max_height: int = 600):
     """Render successive short paper sections without losing text."""
     from PIL import Image, ImageDraw, ImageFont
 
