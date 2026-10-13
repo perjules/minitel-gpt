@@ -16,7 +16,8 @@ _ROOT = str(Path(__file__).resolve().parents[1])
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from printing import PrintDocument, PrintApproval, TextBlock, render_document
+from printing import PrintDocument, PrintApproval, TextBlock
+from printing.render import render_document_pages
 
 
 def installed():
@@ -84,8 +85,10 @@ def print_with_progress(document, report):
 
     def worker():
         try:
-            bitmap = render_document(document)
-            asyncio.run(MXW01(os.environ.get("MXW01_ADDRESS", "48:0F:57:1E:0E:EB")).print_image(bitmap))
+            pages = render_document_pages(document)
+            address = os.environ.get("MXW01_ADDRESS", "48:0F:57:1E:0E:EB")
+            for bitmap in pages:
+                asyncio.run(MXW01(address).print_image(bitmap))
         except Exception as exc:
             errors.append(exc)
         finally:
@@ -108,5 +111,12 @@ def print_with_progress(document, report):
             index += 1
     thread.join(timeout=0)
     if errors:
-        raise RuntimeError(str(errors[0])) from errors[0]
+        error = str(errors[0])
+        if "not found by Bluetooth LE scan" in error:
+            error = "IMPRIMANTE INTROUVABLE. VERIFIER ALIMENTATION ET REDEMARRER L IMPRIMANTE."
+        elif "not ready" in error or "rejected print request" in error:
+            error = "IMPRIMANTE NON PRETE. VERIFIER LE PAPIER ET REDEMARRER L IMPRIMANTE."
+        elif "acknowledge completion" in error:
+            error = "CONFIRMATION ABSENTE. VERIFIER LE PAPIER AVANT DE RELANCER."
+        raise RuntimeError(error) from errors[0]
     report("DOCUMENT MATERIALISE")
