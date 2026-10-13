@@ -7,11 +7,19 @@ personality and serial/navigation paths remain available.
 
 ## Validation status
 
-Implementation has offline unit, mocked REST, Flask and simulated UART tests.
-**No Google account has been enrolled here; no live Gmail read/renewal/send,
-Pi service restart, Pi reboot or physical Minitel check has been performed.**
-Complete the three acceptance stages below on the owner-controlled Pi/account.
-Automated tests use fake clients and never send real email.
+Implementation passed 121 offline unit, mocked REST, Flask and simulated UART tests.
+On **13 October 2026 (Europe/Paris)**, the owner confirmed Google Production setup,
+encrypted enrollment on the actual Pi, live reading and access-token renewal. The
+read-only probe retrieved ten metadata entries and a 1,190-character selected body,
+then reported `forced_renewal: true` and exited successfully. Activation left both
+services `active`; inbox listing and selected-message reading worked, and the owner
+confirmed authorization survived a Pi reboot without another login.
+
+The chat does not establish which interface was used for every interaction; detailed
+admin-console and physical Minitel acceptance remain separate checks. Draft/revise/
+cancel/send, receipt, threading and signature verification are **not yet confirmed**.
+Automated tests use fake clients and never send real email. No private email contents
+or account identifiers are recorded in this guide.
 
 ## 1. Google project and encrypted enrollment
 
@@ -21,10 +29,18 @@ Automated tests use fake clients and never send real email.
    a project used only for this personal Gmail integration, and enable **Gmail API**.
 2. In **Google Auth Platform → Branding**, set the app name `3615 IA`, your support
    address and developer contact. In **Audience**, choose **External** for a personal
-   Gmail account. A Workspace account may require administrator approval.
-3. Under **Data Access**, request exactly these two scopes:
+   Gmail account. If the Audience page already says **User type: External**, this
+   step is complete; leave it as it is. External permits personal Google accounts;
+   Internal restricts access to an organization. A Workspace account may require
+   administrator approval.
+3. Open **Google Auth Platform → Data Access → Add or remove scopes** (project
+   settings, not the individual client page), and request exactly these two scopes:
    - `https://www.googleapis.com/auth/gmail.readonly`
    - `https://www.googleapis.com/auth/gmail.send`
+
+   Google assigns the categories automatically: `gmail.readonly` is **Restricted**
+   and `gmail.send` is **Sensitive**. Select both, click **Update**, then save.
+   If they are missing, enable Gmail API or use the dialog's manual scope entry.
 
    Do not add `gmail.modify`, `gmail.compose`, broad `mail.google.com`, profile or
    identity scopes. Gmail drafts are not used; the outgoing draft lives in Python RAM.
@@ -32,11 +48,29 @@ Automated tests use fake clients and never send real email.
    Do not create a Web application or TV/limited-input client. Desktop loopback
    callbacks are supported; no public redirect domain, Google password, app password
    or pasted authorization code is needed.
+   The downloaded JSON is **application configuration, not an account token**.
+   The Pi obtains tokens during browser enrollment and encrypts them automatically;
+   do not try to obtain or paste a token yourself. If the client form offers an
+   AI-agent checkbox, select it for this assistant; it adds no Gmail permissions.
 5. Set the personal-use production project's **Audience → Publishing status** to
    **In production** before the durable enrollment. This does not publish your Pi.
    **Testing expires Gmail authorization and its refresh token after seven days.**
    If you enrolled while Testing, publish and enroll again; do not assume the old
    token becomes durable. Production tokens can still expire or be revoked.
+   Click **Publish app** on Audience and confirm; the visible **In production**
+   label means this step is complete. If publishing is disabled with a Branding
+   configuration warning, saving the Branding draft alone was not sufficient.
+   The owner's public information pages are now online; use these Branding values:
+
+   | Branding field | Value |
+   | --- | --- |
+   | Application homepage | `https://perjules.github.io/3615-ia-info/` |
+   | Privacy policy | `https://perjules.github.io/3615-ia-info/privacy.html` |
+   | Authorized domain | `perjules.github.io` |
+
+   These pages are in a separate public repository and describe the app/data flow
+   without account, family, OAuth or network details. Domain ownership verification,
+   if requested, is a separate Google step; these URLs do not guarantee approval.
 6. Google documents a verification exemption for personal apps with fewer than
    100 users. An unverified-app warning and lifetime user cap can remain; continue
    only for your own known project/account. Public distribution is outside this
@@ -75,12 +109,16 @@ ARMv6. The Google libraries use the existing shared `.venv` so PRONOTE remains i
 Unsupported encrypted credentials stop setup; **there is no plaintext fallback**.
 The first install prepares dependencies/helper only and does not restart services.
 
+In all commands below, replace `PI` with the Pi's hostname or IP address.
 Upload the Desktop client JSON over SSH (not through chat or the admin console).
-For example, on your computer:
+For example, in a terminal on your **laptop/computer** (PowerShell works on Windows):
 
 ```sh
 scp ~/Downloads/client_secret_DESKTOP.json minitel@PI:/tmp/minitel-gmail-client.json
 ```
+
+Use the actual path/name of your downloaded JSON. A Windows example is
+`scp "C:\Users\YOUR_NAME\Downloads\YOUR_CLIENT.json" minitel@PI:/tmp/minitel-gmail-client.json`.
 
 On the Pi, install it outside Git and remove the temporary OAuth configuration:
 
@@ -95,13 +133,22 @@ private on your computer too.
 
 ### Authorize once using the computer's browser
 
-On the computer, keep this tunnel running in one terminal:
+**Window 1 — on your laptop/computer**, run this SSH tunnel and leave the window
+open throughout enrollment. Replace `PI` with the Pi's hostname/IP, and enter your
+usual SSH password if asked. A blank window after login is normal: `-N` opens no
+interactive shell; it keeps forwarding the browser callback to the Pi.
 
 ```sh
 ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:8765:127.0.0.1:8765 minitel@PI
 ```
 
-In another SSH terminal, run on the Pi:
+**Window 2 — on your laptop/computer**, connect separately to the Pi:
+
+```sh
+ssh minitel@PI
+```
+
+Then run these commands **in that Pi SSH session**:
 
 ```sh
 cd /home/minitel/minitel-gpt
@@ -115,6 +162,11 @@ validates the random state; Google's OAuth library supplies S256 PKCE. Callback
 access logging is disabled; the authorization code never appears in logs.
 The callback window is five minutes. A wrong state is refused. Port 8765 must be
 free on both ends; no phone HTTPS enrollment is implemented.
+
+When the Pi prints **`Encrypted enrollment saved. Activate/restart both services;
+run the read-only probe.`**, enrollment succeeded. You do not need to copy a token
+or authorize again. Close **Window 1's tunnel** with **Ctrl+C**; keep Window 2's
+Pi session for the following checks. The tunnel is not used during normal operation.
 
 A successful enrollment fetches your canonical Gmail address and writes **only
 verified encrypted credentials**, atomically, to:
@@ -130,9 +182,11 @@ See [systemd credentials](https://systemd.io/CREDENTIALS/).
 
 ### Prove live reading and automatic renewal before use
 
-Run this manual **read-only** probe. It prints counts/status only, not tokens or
-mail content. It fetches up to ten metadata entries, reads the first body if any,
-and renews the access token again in memory. It cannot send:
+**Step 1 — on the Pi:** copy this entire manual **read-only** probe as one block.
+The trailing backslashes continue the same command over several lines. It prints
+counts/status only, not tokens or mail content. It fetches up to ten metadata
+entries, reads the first body if any, and renews the access token again in memory.
+It cannot send:
 
 ```sh
 sudo systemd-run --wait --pipe --collect --uid=minitel \
@@ -141,21 +195,47 @@ sudo systemd-run --wait --pipe --collect --uid=minitel \
   /home/minitel/minitel-gpt/.venv/bin/python scripts/gmail_probe.py --renew
 ```
 
-Expect `authorization: ok`, a nonzero count if the inbox contains mail, and
-`forced_renewal: true`. If a selected message exceeds the body limit, use a small
-owner-controlled inbox test message and rerun. Then activate both normal services:
+Successful output includes JSON like this (counts vary with your inbox), followed
+by `Finished with result: success` and exit status `0/SUCCESS`:
+
+```json
+{"authorization": "ok", "inbox_metadata_count": 10, "selected_body_characters": 1190, "forced_renewal": true}
+```
+
+This establishes account access, retrieval and forced access-token renewal; it does
+not test sending. If the probe fails, stop before activation and diagnose the
+reported error. If a selected message exceeds the body limit, use a small
+owner-controlled inbox test message and rerun.
+
+**Step 2 — on the Pi:** enable Gmail in both normal services:
 
 ```sh
 sudo bash scripts/install_gmail.sh --activate
 systemctl is-active admin-ui minitel-chatgpt
-sudo systemctl restart admin-ui minitel-chatgpt
 ```
 
-Repeat the probe and check `/gmail` plus `MAIL` on the terminal after service restart.
-Then run `sudo reboot`, reconnect SSH after the Pi comes back, check both service
-statuses and repeat the probe / `MAIL` **without any browser or unlock operation**.
-For expiry renewal, repeat after the normal access token lifetime has elapsed.
-Record the results; code-level tests alone do not prove these live checks.
+The installer activates and restarts both services itself. Expect **`active` on
+two lines**, one per service. That confirms the services are running; the next
+step checks the actual interface.
+
+**Step 3 — try mail:** refresh the admin console and open **Paramètres → Gmail**,
+or type **`MAIL`** at the Minitel's question prompt and press **ENVOI**. Expect a
+numbered inbox list. **`LIRE 1`** opens the first listed message. A long message may
+show a labelled summary; **`TEXTE`** gives its full cached readable body. Use
+**SUITE** to page through it. Reading leaves Gmail's read/unread status unchanged.
+
+**Step 4 — on the Pi:** verify unattended operation after reboot:
+
+```sh
+sudo reboot
+```
+
+The SSH connection closes normally. Wait for the Pi to return, reconnect SSH if
+needed, and try **`MAIL`** again through the admin console or Minitel. No browser,
+tunnel, new Google consent or unlock operation should be required. For a stronger
+renewal check, repeat the read-only probe after reboot and again after the normal
+access-token lifetime has elapsed. Record these results separately from forced
+renewal; they are not implied by offline tests.
 
 Services use `LoadCredentialEncrypted=gmail:...` and `PrivateMounts=yes`. Access
 tokens remain in RAM. A small root-owned zero-argument sudo helper reads the
