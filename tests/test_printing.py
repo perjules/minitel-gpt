@@ -41,8 +41,10 @@ class PrintingTests(unittest.TestCase):
             for sample in samples
         ]
         self.assertEqual(images[0].width, 384)
+        overlap = min(images[0].height, images[1].height)
         self.assertIsNotNone(ImageChops.difference(
-            images[0].convert("L"), images[1].convert("L")
+            images[0].convert("L").crop((0, 0, 384, overlap)),
+            images[1].convert("L").crop((0, 0, 384, overlap)),
         ).getbbox())
 
     def test_height_limit(self):
