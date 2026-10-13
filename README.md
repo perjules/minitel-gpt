@@ -203,6 +203,13 @@ Modèles Claude proposés (prix entrée / sortie par million de tokens) :
 > `LLM_PROVIDER` (`mistral`, `claude` ou `linkup`), `MISTRAL_KEY`, `MISTRAL_MODEL`,
 > `ANTHROPIC_KEY`, `CLAUDE_MODEL`, `LINKUP_KEY`, `LINKUP_DEPTH`.
 
+### Calculateur
+
+Le [calculateur](docs/CALCULATOR.md) reconnaît les expressions arithmétiques simples
+ou s'ouvre avec CALC puis ENVOI. Il calcule localement, avec un bref théâtre
+mathématique. La division par zéro réserve une scène générée de panne et de
+maintenance fictives, interruptible par les touches existantes.
+
 ### Mémoire, notes et listes
 
 La [mémoire légère](docs/MEMORY.md) ajoute un nom facultatif au démarrage :
