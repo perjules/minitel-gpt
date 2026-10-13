@@ -12,7 +12,7 @@ git pull --ff-only origin develop
 bash scripts/install_printer.sh
 ```
 
-The installer adds only `bleak` and `pillow` to the project virtual environment.
+The installer adds only `bleak` and `pillow` to the project virtual environment.\nText rendering also requires a Unicode TrueType font, normally provided by\n`fonts-dejavu-core` on Raspberry Pi OS (`sudo apt install fonts-dejavu-core` if absent).\nAccented French text and common punctuation are rendered as glyphs, not stripped.
 It does not modify Bluetooth controller settings or enable printing at startup.
 
 ## Preview (no Bluetooth needed)
@@ -96,4 +96,6 @@ When an email is selected in Gmail, `IMPRIMER` prints its full selected message 
 (headers and body), rather than the last assistant response. The Gmail message
 menu advertises `TEXTE / RESUMER / REPONDRE / IMPRIMER`. Printing is explicit
 and does not send, forward or otherwise modify email.
-\n## 2026-10-14 continuous-roll printing checkpoint\n\nThe MXW01 uses a continuous thermal roll: short raster chunks should be printed sequentially without page breaks. Previous implementation reconnected for each 600-line chunk; now one BLE scan/connection and notification subscription serve the entire document. Each chunk uses its own A9 print request, raster payload and AD end command, and waits for AA completion before the next chunk. If AA is missing, stop; do not blindly retry a chunk that may already have printed. Printer firmware may not reliably emit AA; this is the next physical validation point. No Pi Bluetooth settings are changed.\n
+
+## 2026-10-14 continuous-roll printing checkpoint
+\nThe MXW01 uses a continuous thermal roll: short raster chunks should be printed sequentially without page breaks. Previous implementation reconnected for each 600-line chunk; now one BLE scan/connection and notification subscription serve the entire document. Each chunk uses its own A9 print request, raster payload and AD end command, and waits for AA completion before the next chunk. If AA is missing, stop; do not blindly retry a chunk that may already have printed. Printer firmware may not reliably emit AA; this is the next physical validation point. No Pi Bluetooth settings are changed.
