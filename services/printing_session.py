@@ -101,6 +101,7 @@ def print_with_progress(document, report):
         "CONTROLE DES ARCHIVES CENTRALES",
     )
     index = 0
+    started = time.monotonic()
     while not finished.wait(0.5):
         if index < len(stages) and index * 3 <= (time.monotonic() - started):
             report(stages[index])
