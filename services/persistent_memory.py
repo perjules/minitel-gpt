@@ -180,6 +180,7 @@ class MemoryStore:
                 or data["revision"] < 0
                 or not isinstance(data.get("items"), list)
                 or len(data["items"]) > MAX_ITEMS
+                or data.get("language") not in (None, "fr", "en")
             ):
                 raise ValueError()
             seen = set()
@@ -291,30 +292,7 @@ class MemoryStore:
                     "Mémoire pleine (256 éléments). Retirez un élément avant d'en ajouter."
                 )
             data["revision"] += 1
-            encoded = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
-            if len(encoded.encode()) > MAX_FILE:
-                raise MemoryProblem(
-                    "Mémoire pleine (1 Mio). Aucun élément tronqué ni fichier modifié."
-                )
-            temporary = None
-            try:
-                with tempfile.NamedTemporaryFile(
-                    mode="w", encoding="utf-8", dir=folder, delete=False
-                ) as stream:
-                    temporary = stream.name
-                    stream.write(encoded)
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                os.replace(temporary, folder / "memory.json")
-                temporary = None
-                descriptor = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
-                try:
-                    os.fsync(descriptor)
-                finally:
-                    os.close(descriptor)
-            finally:
-                if temporary:
-                    Path(temporary).unlink(missing_ok=True)
+            self._write(folder, data)
             label = {
                 "save": "Enregistré",
                 "add": "Ajouté",
@@ -323,6 +301,45 @@ class MemoryStore:
                 "complete": "Terminé",
             }[operation]
             return item, label
+
+    def set_language(self, key, language):
+        if key == "shared":
+            return
+        if language not in ("fr", "en"):
+            raise MemoryProblem("Langue invalide.")
+        with self.locked(key) as folder:
+            data = self._read(folder)
+            if data.get("language") == language:
+                return
+            data["language"] = language
+            data["revision"] += 1
+            self._write(folder, data)
+
+    def _write(self, folder, data):
+        encoded = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+        if len(encoded.encode()) > MAX_FILE:
+            raise MemoryProblem(
+                "Mémoire pleine (1 Mio). Aucun élément tronqué ni fichier modifié."
+            )
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=folder, delete=False
+            ) as stream:
+                temporary = stream.name
+                stream.write(encoded)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, folder / "memory.json")
+            temporary = None
+            descriptor = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        finally:
+            if temporary:
+                Path(temporary).unlink(missing_ok=True)
 
 
 def tokens(text):

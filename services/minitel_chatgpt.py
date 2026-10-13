@@ -528,7 +528,7 @@ def safe_display(text):
 
 
 # ── Écrans ───────────────────────────────────────────────────────────────
-def show_home(t: Term, title_lines, title_msg):
+def show_home(t: Term, title_lines, title_msg, username=False):
     t.clear()
     t.w(bytes([CR, LF]))
     t.w(FG_CYAN)
@@ -539,9 +539,14 @@ def show_home(t: Term, title_lines, title_msg):
     t.center(title_msg)
     t.line()
     t.w(FG_WHITE)
-    t.center(UI["language_prompt"])
-    t.center(UI["language_options"])
-    t.center(UI["language_submit"])
+    if username:
+        t.center("Nom / name (vide / blank = commun)")
+        t.center("Sans mot de passe / no password")
+        t.center("ENVOI: continuer / continue")
+    else:
+        t.center(UI["language_prompt"])
+        t.center(UI["language_options"])
+        t.center(UI["language_submit"])
     t.line()
 
 
@@ -550,14 +555,10 @@ def choose_language(text):
     return "en" if (text or "").strip().lower() in ("en", "english") else "fr"
 
 
-def select_memory_user(t, language):
+def select_memory_user(t, language="fr", title_lines=None, title_msg="3615 IA"):
     """The name chooses a memory folder, not an authenticated identity."""
     while True:
-        t.clear()
-        t.w(FG_WHITE)
-        t.center("Memory name (blank = shared)" if language == "en" else "Nom pour memoire (vide = commune)")
-        t.center("No password. ENVOI to continue." if language == "en" else "Sans mot de passe. Validez par ENVOI.")
-        t.line()
+        show_home(t, title_lines or [], title_msg, username=True)
         name, action = read_question(t, allow_empty=True)
         if action in ('sommaire', 'guide'):
             return None, action
@@ -765,20 +766,25 @@ def run():
         review_ticket = None
         history = []
         knowledge = factual_knowledge()
-        show_home(t, title_lines, title_msg)
-        choice, action = read_question(t, allow_empty=True)
-        if action == 'guide':
-            show_guide(t)
-            continue
-        if action == 'sommaire':
-            continue
-        language = choose_language(choice)
-        system_prompt = session_prompt(system_prompt, language)
-        memory, user_action = select_memory_user(t, language)
+        memory, user_action = select_memory_user(t, title_lines=title_lines, title_msg=title_msg)
         if user_action == 'guide':
-            show_guide(t, language)
+            show_guide(t)
         if user_action in ('guide', 'sommaire'):
             continue
+        language = memory.saved_language()
+        action = user_action
+        if language not in ("fr", "en"):
+            show_home(t, title_lines, title_msg)
+            choice, action = read_question(t, allow_empty=True)
+            if action == 'guide':
+                show_guide(t)
+                continue
+            if action == 'sommaire':
+                continue
+            language = choose_language(choice)
+            if action == 'envoi':
+                memory.remember_language(language)
+        system_prompt = session_prompt(system_prompt, language)
         if language == "en":
             question_msg = UI[language]["question"]
             loading_msg = UI[language]["loading"]

@@ -192,6 +192,27 @@ class MemorySession:
             text, self.warning = self.warning, ""
             return text
 
+    def saved_language(self):
+        try:
+            with self.lock:
+                self.active()
+                return (
+                    self.store.read(self.key).get("language")
+                    if self.key != "shared"
+                    else None
+                )
+        except memory.MemoryProblem as error:
+            self.warning = str(error)
+            return None
+
+    def remember_language(self, language):
+        try:
+            with self.lock:
+                self.active()
+                self.store.set_language(self.key, language)
+        except memory.MemoryProblem as error:
+            self.warning = str(error)
+
     def context(self, question):
         try:
             with self.lock:

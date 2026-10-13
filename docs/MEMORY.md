@@ -1,11 +1,18 @@
 # Mémoire légère — 3615 IA
 
-Après le choix de langue, entrez un nom puis **ENVOI**. Laissez vide pour la
+Au démarrage, entrez d'abord un nom puis **ENVOI**. Laissez vide pour la
 mémoire commune. Le nom sélectionne des fichiers, **ce n'est pas une
 authentification** : aucun mot de passe, ni contrôle d'accès supplémentaire.
 La casse ne distingue pas deux noms; revenez avec le même nom après un redémarrage.
+Choisissez ensuite la langue pour un nouveau nom : ce choix est enregistré dans
+son `memory.json` et repris automatiquement aux démarrages suivants, sans nouveau
+prompt de langue. Un nom existant sans langue enregistrée reçoit aussi ce prompt.
+Les sessions communes demandent toujours la langue, sans conserver un choix global.
+Un timeout utilise le français sans enregistrer ce choix implicite. Pour refaire
+le choix d'un utilisateur connu, retirez le champ `language` de son `memory.json`
+pendant que les deux services sont arrêtés, puis redémarrez-les.
 **SOMMAIRE** efface la conversation, les choix en attente et les brouillons Gmail,
-puis permet un autre choix de langue et de nom. La mémoire enregistrée reste.
+puis permet un autre choix de nom, avec sa langue enregistrée. La mémoire reste.
 
 ## Demander, lire, préciser
 

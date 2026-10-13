@@ -43,6 +43,7 @@ class MemoryTests(unittest.TestCase):
 
     def test_personal_shared_separation_and_restart(self):
         self.save()
+        self.alice.remember_language("en")
         bob = sessions.MemorySession("Bob", self.store, self.model)
         self.addCleanup(bob.close)
         self.assertEqual(self.store.read(bob.key)["items"], [])
@@ -406,17 +407,17 @@ class MemoryInterfaces(unittest.TestCase):
 
     def test_full_uart_startup_reset_switch_and_persistence(self):
         uart = FakeSerial(
-            b"fr"
+            b"Alice"
             + fn(chat.K_ENVOI)
-            + b"Alice"
+            + b"fr"
             + fn(chat.K_ENVOI)
             + fn(chat.K_SUITE)
             + b"Retiens une preference"
             + fn(chat.K_ENVOI)
             + fn(chat.K_SOMMAIRE)
-            + b"fr"
-            + fn(chat.K_ENVOI)
             + b"Bob"
+            + fn(chat.K_ENVOI)
+            + b"fr"
             + fn(chat.K_ENVOI)
             + fn(chat.K_SUITE)
             + b"MEMOIRE"
@@ -466,6 +467,73 @@ class MemoryInterfaces(unittest.TestCase):
         self.assertIn("Réponses courtes", restored.handle("MEMOIRE")["display"])
         for path in Path(self.temp.name).glob("users/*/logs/*.jsonl"):
             self.assertNotIn("PERIPHERIQUES", path.read_text())
+
+    def test_username_first_remembers_language_and_shared_still_prompts(self):
+        def visit(name, language, question):
+            keys = name.encode() + fn(chat.K_ENVOI)
+            if language is not None:
+                keys += language.encode() + fn(chat.K_ENVOI)
+            return (
+                keys
+                + fn(chat.K_SUITE)
+                + question.encode()
+                + fn(chat.K_ENVOI)
+                + fn(chat.K_SOMMAIRE)
+            )
+
+        uart = FakeSerial(
+            visit("Alice", "en", "Hello")
+            + visit("ALICE", None, "Again")
+            + visit("Bob", "fr", "Bonjour")
+            + visit("", "fr", "Salut")
+            + visit("", "en", "Hi")
+        )
+
+        def synchronous(*args, **kwargs):
+            result = chat.call_answer(*args, **kwargs)
+            output = Queue()
+            output.put((result, None))
+            return Mock(is_alive=lambda: False), output, chat.time.monotonic()
+
+        result = {"status": "ordinary", "text": "OK", "chunks": [], "references": []}
+        with (
+            patch.object(chat.serial, "Serial", return_value=uart),
+            patch.object(chat.time, "sleep"),
+            patch.object(
+                chat,
+                "load_preset",
+                return_value=("persona", "3615 IA", "Question?", "WAIT", None),
+            ),
+            patch.object(chat, "build_title", return_value=["LOGO"]),
+            patch.object(chat, "factual_knowledge", return_value=""),
+            patch.object(
+                chat, "prepare_boot", side_effect=lambda lang: chat.UI[lang]["boot"]
+            ) as boot,
+            patch.object(chat, "start_answer", side_effect=synchronous),
+            patch.object(chat.mistral_answers, "answer", return_value=result) as answer,
+            self.assertRaises(EndOfInput),
+        ):
+            chat.run()
+        self.assertEqual(
+            [call.args[0] for call in boot.call_args_list],
+            ["en", "en", "fr", "fr", "en"],
+        )
+        self.assertEqual(
+            [call.args[1] for call in answer.call_args_list],
+            ["en", "en", "fr", "fr", "en"],
+        )
+        visible = screen_text(uart.output)
+        self.assertLess(visible.index("Nom / name"), visible.index("Choose language"))
+        self.assertEqual(visible.count("Choose language"), 4)
+        store = memory.MemoryStore(self.temp.name)
+        self.assertEqual(store.read(memory.user_key("Alice")[0])["language"], "en")
+        self.assertEqual(store.read(memory.user_key("Bob")[0])["language"], "fr")
+        self.assertNotIn("language", store.read("shared"))
+        restored = sessions.MemorySession("Alice", memory.MemoryStore(self.temp.name))
+        self.addCleanup(restored.close)
+        self.assertEqual(restored.saved_language(), "en")
+        for call in answer.call_args_list:
+            self.assertEqual(len(call.args[0]), 1)
 
     def test_terminal_context_and_memory_do_not_enter_factual_history(self):
         selected = sessions.MemorySession("Alice", model=Mock())
