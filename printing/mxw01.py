@@ -19,7 +19,7 @@ def crc8(payload: bytes) -> int:
 def command(code: int, payload: bytes, *, checksum: bool = True) -> bytes:
     if len(payload) > 65535:
         raise ValueError("Command payload too large")
-    return (b"\\x22\\x21" + bytes((code, 0)) + len(payload).to_bytes(2, "little")
+    return (b"\x22\x21" + bytes((code, 0)) + len(payload).to_bytes(2, "little")
             + payload + bytes((crc8(payload) if checksum else 0, 0xFF)))
 
 
@@ -41,7 +41,7 @@ def pack_image(image) -> bytes:
 
 
 def response_packet(raw: bytes):
-    if len(raw) < 7 or raw[:2] != b"\\x22\\x21":
+    if len(raw) < 7 or raw[:2] != b"\x22\x21":
         return None
     length = int.from_bytes(raw[4:6], "little")
     if len(raw) < 7 + length:
@@ -84,21 +84,24 @@ class MXW01:
         async with BleakClient(device, timeout=self.timeout) as client:
             await client.start_notify(NOTIFY, on_notification)
             try:
-                for code, payload in ((0xB1, b"\\x00"), (0xA2, b"\\x5d"), (0xA1, b"\\x00")):
+                for code, payload in ((0xB1, b"\x00"), (0xA2, b"\x5d"), (0xA1, b"\x00")):
                     await client.write_gatt_char(CONTROL, command(code, payload), response=False)
                     await asyncio.sleep(0.01)
                 status = await await_response(0xA1, self.timeout)
                 if len(status) < 13 or status[12] != 0:
                     raise RuntimeError("Printer status not ready")
-                await client.write_gatt_char(CONTROL, command(0xA2, b"\\x5d"), response=False)
+                await client.write_gatt_char(CONTROL, command(0xA2, b"\x5d"), response=False)
                 request = image.height.to_bytes(2, "little") + (48).to_bytes(2, "little")
                 await client.write_gatt_char(CONTROL, command(0xA9, request, checksum=False), response=False)
                 accepted = await await_response(0xA9, self.timeout)
                 if not accepted or accepted[0] != 0:
                     raise RuntimeError("Printer rejected print request")
-                if len(packed) < 4320:\n                    packed += bytes(4320 - len(packed))\n                for offset in range(0, len(packed), 20):
-                    await client.write_gatt_char(DATA, packed[offset:offset + 20], response=False)\n                    await asyncio.sleep(0.015)
-                await client.write_gatt_char(CONTROL, command(0xAD, b"\\x00", checksum=False), response=False)
+                if len(packed) < 4320:
+                    packed += bytes(4320 - len(packed))
+                for offset in range(0, len(packed), 20):
+                    await client.write_gatt_char(DATA, packed[offset:offset + 20], response=False)
+                    await asyncio.sleep(0.015)
+                await client.write_gatt_char(CONTROL, command(0xAD, b"\x00", checksum=False), response=False)
                 # AA completion notification is not consistently delivered by firmware.
                 try:
                     await await_response(0xAA, max(15, image.height / 20))
