@@ -109,9 +109,8 @@ elle reste séparée des diagnostics fictifs du mainframe.
 
 ## Déploiement et acceptation
 
-Cette livraison est **locale sur develop**. Ne lancez la mise à jour du Pi qu'après
-publication explicitement demandée et vérification du commit à installer.
-Sur le Pi, après cette publication :
+Cette fonctionnalité est publiée sur **develop**, sans promotion de main.
+Vérifiez le commit à installer, puis sur le Pi :
 
 ```sh
 cd /home/minitel/minitel-gpt
