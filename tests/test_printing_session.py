@@ -37,9 +37,9 @@ class PrintSessionTests(unittest.TestCase):
         content = "\n".join(f"PRONOTE LIGNE {index:03d} NOTE {index}/20" for index in range(100))
         pages = render_document_pages(PrintDocument("3615 IA", (TextBlock(content),)))
         self.assertGreater(len(pages), 1)
-        self.assertTrue(all(page.width == 384 and page.height <= 1800 for page in pages))
+        self.assertTrue(all(page.width == 384 and page.height <= 600 for page in pages))
         # A text document is never silently truncated at the old 6000px limit.
-        self.assertGreater(sum(page.height for page in pages), 1800)
+        self.assertGreater(sum(page.height for page in pages), 600)
 
     def test_extension_is_optional(self):
         with patch.dict("os.environ", {"PRINTING_ENABLED": "0"}):
