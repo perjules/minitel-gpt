@@ -9,7 +9,7 @@ class MXW01ProtocolTests(unittest.TestCase):
         self.assertEqual(crc8(b"\\x00"), 0)
 
     def test_status_command(self):
-        self.assertEqual(command(0xA1, b"\\x00"), bytes.fromhex("2221a100010000ff"))
+        self.assertEqual(command(0xA1, b"\\x00"), bytes.fromhex("2221a10001000000ff"))
 
     def test_print_request(self):
         self.assertEqual(command(0xA9, bytes.fromhex("01003000"), checksum=False),
