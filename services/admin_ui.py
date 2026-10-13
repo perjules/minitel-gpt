@@ -20,12 +20,13 @@ from flask import (Flask, render_template_string, request, redirect,
 from werkzeug.utils import secure_filename
 
 try:
-    from . import mistral_answers, pronote, pronote_answers, gmail_mail
+    from . import mistral_answers, pronote, pronote_answers, gmail_mail, memory_session
 except ImportError:
     import mistral_answers
     import pronote
     import pronote_answers
     import gmail_mail
+    import memory_session
 
 PROJ_DIR = Path(__file__).parent.parent
 ASSETS_DIR = PROJ_DIR / "assets"
@@ -711,6 +712,10 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       utilise le prompt système ci-dessus (même non enregistré), les fichiers de
       connaissance, et le fournisseur d'IA configuré. La réponse est convertie en
       ASCII, telle qu'elle s'afficherait à l'écran.</p>
+    <label>Nom pour mémoire (vide = commune, sans mot de passe)</label>
+    <input type=text id=memoryUser maxlength=60 placeholder="Nom ou vide">
+    <button class="btn btn-s" type=button onclick="testPreset(true)">SOMMAIRE / nouvelle session</button>
+    <p class=sub>Les demandes et réponses visibles sont journalisées sur le Pi. MEMOIRE rappelle les éléments délibérément enregistrés.</p>
     <input type=text id=testMsg placeholder="Votre question..."
       onkeydown="if(event.key==='Enter'){event.preventDefault();testPreset()}">
     <button class="btn btn-p" type=button onclick=testPreset()>Envoyer</button>
@@ -922,16 +927,16 @@ async function genPrompt(){
   }catch(e){alert('Erreur: '+e);}
   spin.style.display='none';
 }
-async function testPreset(){
+async function testPreset(reset=false){
   const msg=document.getElementById('testMsg').value.trim();
-  if(!msg){alert('Saisissez une question');return;}
+  if(!msg&&!reset){alert('Saisissez une question');return;}
   const key=document.getElementById('presetSel').value;
   const system=document.getElementById('fsystem').value;
   const spin=document.getElementById('testSpin'), out=document.getElementById('testOut');
   spin.style.display='block'; out.style.display='none';
   try{
     const r=await fetch('/test-preset',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({preset_key:key,message:msg,system:system})});
+      body:JSON.stringify({preset_key:key,message:msg,system:system,memory_user:document.getElementById('memoryUser').value,reset:reset})});
     const j=await r.json();
     out.style.display='block';
     out.textContent = j.ok ? (j.answer||'(réponse vide)') : ('Erreur : '+j.error);
@@ -970,6 +975,7 @@ def login():
 @app.route("/logout")
 def logout():
     discard_mail(session.get("gmail_session"))
+    discard_memory(session.get("memory_session"))
     session.clear()
     return redirect(url_for("login"))
 
@@ -1121,7 +1127,7 @@ def test_preset_route():
     j = request.json or {}
     key = (j.get("preset_key") or "").strip()
     msg = (j.get("message") or "").strip()
-    if not msg:
+    if not msg and not j.get("reset"):
         return jsonify(ok=False, error="Question vide")
     data = load_prompts()
     if key not in data["presets"]:
@@ -1133,7 +1139,24 @@ def test_preset_route():
         system += ("\n\nCONNAISSANCES DE REFERENCE (utilise ces informations "
                    "en priorite pour repondre) :\n" + kb)
     try:
-        answer = llm_answer(system, msg, knowledge=kb)
+        selected = memory_entry(j.get("memory_user", ""),
+                                reset=bool(j.get("reset")) or msg.upper() == "SOMMAIRE")
+        with selected.turn_lock:
+            if j.get("reset") or msg.upper() == "SOMMAIRE":
+                selected.close()
+                discard_memory(session.get("memory_session"))
+                return jsonify(ok=True, answer="Session effacée. Choisissez un nom ou laissez vide; la mémoire enregistrée est conservée.")
+            selected.record("user", msg)
+            result = selected.handle(msg) if selected.interested(msg) else {"passthrough": True}
+            if result.get("passthrough"):
+                remembered = selected.context(msg)
+                answer = llm_answer(system + "\n\n" + remembered, msg, knowledge=kb + "\n\n" + remembered)
+            else:
+                answer = result["display"]
+            warning = selected.take_warning()
+            if warning:
+                answer += "\n\n" + warning
+            selected.record("assistant", answer, "chat" if result.get("passthrough") else "memory")
         # The browser preview retains exact URLs, including Unicode paths.
         conversations = (llm_provider() == "mistral" and
                          mistral_answers.settings({**os.environ, **read_env()})[0] == "conversations")
@@ -1367,6 +1390,51 @@ def pronote_admin():
     return response
 
 
+# Only an opaque selector is stored in the browser cookie. Records stay on disk.
+MEMORY_SESSIONS = OrderedDict()
+MEMORY_SESSIONS_LOCK = threading.RLock()
+
+
+def discard_memory(identifier):
+    with MEMORY_SESSIONS_LOCK:
+        item = MEMORY_SESSIONS.pop(identifier, None)
+        if item:
+            item["memory"].close()
+
+
+def memory_entry(username=None, reset=False):
+    with MEMORY_SESSIONS_LOCK:
+        now = time.monotonic()
+        for identifier, item in list(MEMORY_SESSIONS.items()):
+            if now - item["used"] > 1200:
+                discard_memory(identifier)
+        identifier = session.get("memory_session")
+        item = MEMORY_SESSIONS.get(identifier)
+        key = memory_session.memory.user_key(username)[0] if username is not None else None
+        if item and (reset or (key is not None and key != item["memory"].key)):
+            discard_memory(identifier)
+            item = None
+        if not item:
+            while len(MEMORY_SESSIONS) >= 8:
+                discard_memory(next(iter(MEMORY_SESSIONS)))
+            identifier = secrets.token_urlsafe(32)
+            session["memory_session"] = identifier
+            private_values = [v for k, v in read_env().items()
+                              if re.search(r"(?:KEY|TOKEN|PASSWORD|SECRET)$", k)]
+            item = {
+                "memory": memory_session.MemorySession(
+                    username or "", root=read_env().get("MINITEL_MEMORY_DIR"),
+                    model=memory_session.MemoryModel(
+                        settings=lambda: (mistral_key(), mistral_model())),
+                    extra_secrets=private_values),
+                "used": now,
+            }
+            MEMORY_SESSIONS[identifier] = item
+        item["used"] = now
+        MEMORY_SESSIONS.move_to_end(identifier)
+        return item["memory"]
+
+
 # Mail bodies and drafts stay in bounded process memory, never Flask cookies.
 
 MAIL_SESSIONS = OrderedDict()
@@ -1417,7 +1485,8 @@ GMAIL_HTML = """<!doctype html><html lang="fr"><meta charset="utf-8">
 pre{font:16px monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:#000;color:#7fffa0;padding:1em}
 input,button{font:inherit;padding:.5em;margin:.2em} input[type=text]{width:90%}</style>
 <a href="/">Administration</a><h1>Gmail</h1>
-<p>Session privée en mémoire. Lecture sans marquer comme lu. Le modèle ne peut pas envoyer.</p>
+<p>Destination mémoire/journal : {{ memory_label }}. Le nom se choisit dans le test de personnalité.</p>
+<p>Brouillons temporaires; commandes et réponses visibles journalisées dans la mémoire sélectionnée au test de personnalité. Lecture sans marquer comme lu. Le modèle ne peut pas envoyer.</p>
 {% if not enabled %}<p>Gmail désactivé. Suivre docs/GMAIL.md pour la connexion sur ordinateur.</p>{% endif %}
 <pre>{{ page }}</pre><p>Page {{ position }} / {{ count }}</p>
 <form method="post" autocomplete="off"><input type="hidden" name="csrf" value="{{ csrf }}">
@@ -1442,12 +1511,15 @@ def gmail_admin():
     ):
         return "Requête refusée", 403
     item = mail_entry()
+    selected = memory_entry()
     cancelling = request.method == "POST" and (
         request.form.get("action") in ("cancel", "reset")
         or request.form.get("question", "").strip().upper() in ("ANNULER", "SOMMAIRE")
     )
     if cancelling:
         item["mail"].reset()
+        if request.form.get("action") == "reset" or request.form.get("question", "").strip().upper() == "SOMMAIRE":
+            discard_memory(session.get("memory_session"))
     if not item["lock"].acquire(blocking=False):
         return (
             ("Session mail effacée; la requête en cours est abandonnée.", 200)
@@ -1475,12 +1547,22 @@ def gmail_admin():
                 }.get(action)
                 if command is None:
                     return "Action inconnue", 400
-                if not gmail_mail.enabled():
+                selected.record("user", command, "gmail")
+                memory_request = (selected.interested(command) and
+                                  (not item["mail"].draft or memory_session.explicit_request(command)))
+                result = selected.handle(command) if memory_request else {"passthrough": True}
+                if not result.get("passthrough"):
+                    pass
+                elif not gmail_mail.enabled():
                     result = {"display": "Gmail désactivé. Suivre docs/GMAIL.md."}
                 else:
                     result = item["mail"].handle(
                         command, request.form.get("ticket") or None
                     )
+                warning = selected.take_warning()
+                if warning:
+                    result["display"] += "\n\n" + warning
+                selected.record("assistant", result["display"], "memory" if result.get("memory") else "gmail")
                 item["pages"], item["page"] = gmail_mail.pages(result["display"]), 0
                 item["ticket"] = result.get("review_ticket")
         if item["ticket"] and item["page"] == len(item["pages"]) - 1:
@@ -1489,6 +1571,7 @@ def gmail_admin():
             render_template_string(
                 GMAIL_HTML,
                 enabled=gmail_mail.enabled(),
+                memory_label=selected.label,
                 csrf=session["gmail_csrf"],
                 page=item["pages"][item["page"]],
                 position=item["page"] + 1,

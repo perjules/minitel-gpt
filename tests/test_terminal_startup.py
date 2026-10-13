@@ -112,7 +112,7 @@ class StartupTests(unittest.TestCase):
             calls.append((system, [dict(turn) for turn in history], bytes(uart.consumed)))
             return "17 x 23 = 391."
 
-        def start(system, history, language, options, knowledge):
+        def start(system, history, language, options, knowledge, **kwargs):
             # UART fixtures contain already queued future input: complete the
             # mocked request before reading those keys. Worker races/reset are
             # exercised separately with a real blocked thread.
@@ -140,6 +140,7 @@ class StartupTests(unittest.TestCase):
         boot_screen = Mock(wraps=chat.show_boot)
 
         with (
+            patch.object(chat, "select_memory_user", return_value=(Mock(take_warning=lambda: "", context=lambda q: "", interested=lambda q: False), "envoi")),
             patch.object(chat.serial, "Serial", return_value=uart),
             patch.object(chat.time, "sleep"),
             patch.object(chat.Term, "read_key", read_key),

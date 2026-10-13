@@ -18,7 +18,7 @@ class WaitingTests(unittest.TestCase):
         entered = threading.Event()
         history = [{"role": "user", "content": "Old question"}]
 
-        def blocked(*args):
+        def blocked(*args, **kwargs):
             entered.set()
             release.wait(2)
             return {"display": "STALE", "turn": {"role": "assistant", "content": "STALE"}}
@@ -67,19 +67,20 @@ class WaitingTests(unittest.TestCase):
         real_start = chat.start_answer
         pending_requests = []
 
-        def blocked(*args):
+        def blocked(*args, **kwargs):
             entered.set()
             release.wait(2)
             return {"display": "STALE", "turn": None}
 
-        def start(*args):
-            pending = real_start(*args)
+        def start(*args, **kwargs):
+            pending = real_start(*args, **kwargs)
             pending_requests.append(pending)
             self.assertTrue(entered.wait(1))
             return pending
 
         try:
-            with (patch.object(chat.serial, "Serial", return_value=uart),
+            with (patch.object(chat, "select_memory_user", return_value=(Mock(take_warning=lambda: ""), "envoi")),
+                  patch.object(chat.serial, "Serial", return_value=uart),
                   patch.object(chat.time, "sleep"),
                   patch.object(chat, "load_preset", return_value=("persona", "3615 IA", "Question?", "WAIT", None)),
                   patch.object(chat, "factual_knowledge", return_value=""),

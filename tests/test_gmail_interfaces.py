@@ -1,6 +1,7 @@
 """Flask and simulated UART checks, with no live email calls."""
 
 import unittest
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import test_terminal_startup as startup
@@ -16,6 +17,9 @@ from services import minitel_chatgpt as terminal
 class AdminMailTests(unittest.TestCase):
     def setUp(self):
         admin.MAIL_SESSIONS.clear()
+        self.temp = TemporaryDirectory()
+        self.memory_env = patch.dict("os.environ", {"MINITEL_MEMORY_DIR": self.temp.name})
+        self.memory_env.start()
         self.client = admin.app.test_client()
         with self.client.session_transaction() as cookie:
             cookie["logged_in"] = True
@@ -33,8 +37,12 @@ class AdminMailTests(unittest.TestCase):
             self.csrf = cookie["gmail_csrf"]
 
     def tearDown(self):
+        for identifier in list(admin.MEMORY_SESSIONS):
+            admin.discard_memory(identifier)
         self.factory.stop()
         self.enabled.stop()
+        self.memory_env.stop()
+        self.temp.cleanup()
         admin.MAIL_SESSIONS.clear()
 
     def command(self, question, ticket=""):
@@ -294,6 +302,7 @@ class FullTerminalWorkflow(unittest.TestCase):
             return Mock(is_alive=lambda: False), queue, terminal.time.monotonic()
 
         with (
+            patch.object(terminal, "select_memory_user", return_value=(Mock(take_warning=lambda: "", interested=lambda q: False), "envoi")),
             patch.dict("os.environ", {"GMAIL_ENABLED": "1"}),
             patch.object(terminal.gmail_mail, "MailSession", return_value=session),
             patch.object(terminal.serial, "Serial", return_value=uart),

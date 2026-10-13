@@ -21,12 +21,13 @@ from dotenv import load_dotenv
 import requests
 
 try:  # Support both systemd's direct script and package imports in tests.
-    from . import mistral_answers, pronote, pronote_answers, gmail_mail
+    from . import mistral_answers, pronote, pronote_answers, gmail_mail, memory_session
 except ImportError:
     import mistral_answers
     import pronote
     import pronote_answers
     import gmail_mail
+    import memory_session
 
 # Translittération vers ASCII affichable sur Minitel (é→e, œ→oe, …) :
 # évite les « ? » que produisait encode('ascii','replace').
@@ -427,12 +428,28 @@ def wrap(text, width=COLS):
     return out
 
 
-def call_answer(system_prompt, history, language, options, knowledge, mail=None, review_ticket=None):
+def call_answer(system_prompt, history, language, options, knowledge,
+                mail=None, review_ticket=None, memory=None):
     api, web_search, timeout = options
+    question = history[-1]["content"]
+    explicit_memory = memory_session.explicit_request(question)
+    note_request = re.match(r"^note\b", question, re.I)
+    if (memory is not None and memory.interested(question)
+            and (mail is None or not mail.draft or explicit_memory or note_request)):
+        # An ambiguous "note this" during reply editing must not silently save instead.
+        if mail is not None and mail.draft and note_request:
+            return {"display": "Ajouter au brouillon ou à la mémoire ? Pour mémoriser, dites RETIENS contenu.", "turn": None}
+        response = memory.handle(question, language, timeout)
+        if not response.get("passthrough"):
+            return response
     if mail is not None and mail.interested(history[-1]["content"]):
         response = mail.handle(history[-1]["content"], review_ticket, timeout)
         if not response.get("passthrough"):
             return response
+    remembered = memory.context(question) if memory is not None else ""
+    if remembered:
+        knowledge = knowledge + "\n\n" + remembered
+        system_prompt += "\n\n" + remembered
     if PROVIDER == "mistral" and api == "conversations":
         result = mistral_answers.answer(history, language, MISTRAL_KEY,
                                         MISTRAL_MODEL, web_search, timeout, knowledge,
@@ -453,13 +470,16 @@ def call_answer(system_prompt, history, language, options, knowledge, mail=None,
     return {"display": answer, "turn": {"role": "assistant", "content": answer}}
 
 
-def start_answer(system_prompt, history, language, options, knowledge, mail=None, review_ticket=None):
-    """One daemon worker. It never touches the UART or session memory."""
+def start_answer(system_prompt, history, language, options, knowledge,
+                 mail=None, review_ticket=None, memory=None):
+    """One daemon worker; no UART access. File operations use the scoped memory guard."""
     output = Queue(maxsize=1)
 
     def request():
         try:
             optional = {"mail": mail, "review_ticket": review_ticket} if mail is not None else {}
+            if memory is not None:
+                optional["memory"] = memory
             output.put((call_answer(system_prompt, history, language, options, knowledge, **optional), None))
         except Exception as error:
             output.put((None, error))
@@ -528,6 +548,24 @@ def show_home(t: Term, title_lines, title_msg):
 def choose_language(text):
     """French is the silent fallback for empty or unrecognised input."""
     return "en" if (text or "").strip().lower() in ("en", "english") else "fr"
+
+
+def select_memory_user(t, language):
+    """The name chooses a memory folder, not an authenticated identity."""
+    while True:
+        t.clear()
+        t.w(FG_WHITE)
+        t.center("Memory name (blank = shared)" if language == "en" else "Nom pour memoire (vide = commune)")
+        t.center("No password. ENVOI to continue." if language == "en" else "Sans mot de passe. Validez par ENVOI.")
+        t.line()
+        name, action = read_question(t, allow_empty=True)
+        if action in ('sommaire', 'guide'):
+            return None, action
+        try:
+            return memory_session.MemorySession(name if action == 'envoi' else ""), action
+        except memory_session.memory.MemoryProblem as error:
+            t.line(safe_display(str(error)))
+            t.center("ENVOI: choose a simple name" if language == "en" else "ENVOI: choisissez un nom simple")
 
 
 def session_prompt(system_prompt, language):
@@ -712,6 +750,7 @@ def run():
                else ("chat_completions", False, 60))
     pending = None
     mail = None
+    memory = None
 
     while True:  # boucle sommaire
         # Recharger le preset à chaque retour au sommaire (prise en compte des édits)
@@ -719,6 +758,9 @@ def run():
         title_lines = build_title(title_art)
         if mail is not None:
             mail.reset()
+        if memory is not None:
+            memory.close()
+        memory = None
         mail = gmail_mail.MailSession() if gmail_mail.enabled() else None
         review_ticket = None
         history = []
@@ -732,6 +774,11 @@ def run():
             continue
         language = choose_language(choice)
         system_prompt = session_prompt(system_prompt, language)
+        memory, user_action = select_memory_user(t, language)
+        if user_action == 'guide':
+            show_guide(t, language)
+        if user_action in ('guide', 'sommaire'):
+            continue
         if language == "en":
             question_msg = UI[language]["question"]
             loading_msg = UI[language]["loading"]
@@ -739,7 +786,7 @@ def run():
         t.w(FG_CYAN)
         t.center(UI[language]["boot_wait"])
         # An unattended language-screen timeout must not spend an API call.
-        boot_lines = (prepare_boot(language) if action == 'envoi'
+        boot_lines = (prepare_boot(language) if action == 'envoi' and user_action == 'envoi'
                       else list(UI[language]["boot"]))  # retained for this session only
         result = show_boot(t, language, boot_lines)
         if result == 'guide':
@@ -756,6 +803,8 @@ def run():
             if action in ('sommaire', 'timeout'):
                 break
 
+            memory.record("user", question)
+
             t.w(bytes([CR, LF]))
             t.w(FG_CYAN); t.line(""); t.center(loading_msg)
             # Do not pile up paid calls while a locally abandoned HTTP request
@@ -767,6 +816,7 @@ def run():
             else:
                 candidate = history + [{"role": "user", "content": question}]
                 optional = {"mail": mail, "review_ticket": review_ticket} if mail is not None else {}
+                optional["memory"] = memory
                 pending = start_answer(system_prompt, candidate, language, options, knowledge, **optional)
                 response, action = wait_answer(t, pending, options[2])
                 if action == 'guide':
@@ -783,6 +833,12 @@ def run():
                     if response["turn"] is not None:
                         history = mistral_answers.bound_history(candidate + [response["turn"]])
 
+            warning = memory.take_warning()
+            if warning:
+                answer += "\n\n" + warning
+            channel = ("memory" if response and response.get("memory") else
+                       "gmail" if response and response.get("review_ticket") else "chat")
+            memory.record("assistant", answer, channel)
             result = show_response(t, safe_display(answer), language)
             if result in ('sommaire', 'timeout'):
                 break
@@ -799,6 +855,8 @@ def run():
 
         if mail is not None:
             mail.reset()
+        if memory is not None:
+            memory.close()
 
 if __name__ == "__main__":
     run()
