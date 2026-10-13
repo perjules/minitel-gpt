@@ -633,7 +633,7 @@ class MailSession:
             if len(record["body"]) <= 800
             else self.summarize(deadline)
         )
-        return {"display": text + "\n\nTEXTE / RESUMER / REPONDRE instructions"}
+        return {"display": text + "\n\nTEXTE / RESUMER / REPONDRE / IMPRIMER"}
 
     def selection(self):
         if not self.selected:
