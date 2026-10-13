@@ -1,25 +1,23 @@
 # Gmail prototype — 3615 IA
 
-Optional single-account Gmail reading and **replies only**, shared by the authenticated
+Optional single-account Gmail reading, replies and **new messages to recent correspondents**, shared by the authenticated
 admin console `/gmail` and the physical Minitel. Disabled until encrypted enrollment
 is installed and both services are activated. Existing web search, PRONOTE, boot,
 personality and serial/navigation paths remain available.
 
 ## Validation status
 
-Implementation passed 121 offline unit, mocked REST, Flask and simulated UART tests.
-On **13 October 2026 (Europe/Paris)**, the owner confirmed Google Production setup,
-encrypted enrollment on the actual Pi, live reading and access-token renewal. The
-read-only probe retrieved ten metadata entries and a 1,190-character selected body,
-then reported `forced_renewal: true` and exited successfully. Activation left both
-services `active`; inbox listing and selected-message reading worked, and the owner
-confirmed authorization survived a Pi reboot without another login.
+The full suite passes **144 offline tests**, including mocked REST/model responses,
+Flask console checks and simulated UART workflows. New composition uses synthetic
+correspondents and validates the existing review/send gate without contacting Google
+or sending real messages. Model selection quality, real metadata-fetch latency and
+an owner-controlled new-message exchange still require live acceptance. Physical
+Minitel acceptance is separate from both offline simulations and admin-console tests.
 
-The chat does not establish which interface was used for every interaction; detailed
-admin-console and physical Minitel acceptance remain separate checks. Draft/revise/
-cancel/send, receipt, threading and signature verification are **not yet confirmed**.
-Automated tests use fake clients and never send real email. No private email contents
-or account identifiers are recorded in this guide.
+Record personal setup progress and live results in the installation's private project
+record; this guide documents generic setup and acceptance. Automated tests use fake
+clients and never send real email. No private email contents or account identifiers
+are recorded here.
 
 ## 1. Google project and encrypted enrollment
 
@@ -60,7 +58,8 @@ or account identifiers are recorded in this guide.
    Click **Publish app** on Audience and confirm; the visible **In production**
    label means this step is complete. If publishing is disabled with a Branding
    configuration warning, saving the Branding draft alone was not sufficient.
-   The owner's public information pages are now online; use these Branding values:
+   Provide published information pages for your installation. This fork's separate
+   public information repository provides these example Branding values:
 
    | Branding field | Value |
    | --- | --- |
@@ -317,8 +316,9 @@ Select an owner-controlled test message, then:
 Cancellation/reset can abandon generation; an explicitly approved send already
 submitted to Gmail cannot be recalled by SOMMAIRE. Network uncertainty is never
 resolved by automatically retrying the send. Drafts are intentionally lost on
-restart, reset and logout. Reply-all, CC/BCC, aliases, attachments, new composition,
-full-thread context and multiple accounts are not implemented.
+restart, reset and logout. Reply-all, CC/BCC, sending aliases, attachments,
+full-thread context and multiple accounts are not implemented. New composition
+to recent correspondents is described in Stage 1 below.
 
 Owner-controlled exchange acceptance: send a small inbound message from another
 account you own; read it; draft and revise; cancel one draft; create another;
@@ -327,6 +327,120 @@ Verify receipt, one copy in Sent, exact signature, actual recipient/subject/body
 Gmail thread placement, In-Reply-To and References in the received original source.
 Verify duplicate confirmation does not resend. Repeat the workflow on the physical
 Minitel. Real send testing is manual, never part of the automated suite.
+
+## 4. New message to a recent correspondent (Stage 1)
+
+No selected message is required, and a previous selection/draft does not turn this
+request into a reply. Type either:
+
+```text
+ECRIRE Alice : confirmer le rendez-vous mardi
+```
+
+or a natural request such as **« Écris un mail à Alice pour confirmer le rendez-vous
+mardi »**. In the shortcut, the colon separates the recipient description from the
+writing instructions. An incomplete shortcut shows that syntax without making an
+interpretation call. If a natural request lacks content, the assistant asks what to
+write. If new versus reply intent is unclear, it asks rather than guessing.
+
+Python retrieves metadata from up to **50 recent sent, received and archived
+messages**, excluding drafts, spam and trash. This lookup is independent of MAIL's
+ten results. It reads only From, Reply-To, To, Cc, Subject and date metadata; no
+bodies, snippets or attachments, and no read-status changes. Five workers reuse
+separate HTTP sessions within the existing request deadline. Missing metadata or
+invalid headers are visibly disclosed as partial coverage. There is no automatic
+widening to older mail.
+
+Candidates retain actual validated addresses, decoded name variants, header roles/
+direction, last seen and up to two **short subject examples for identification**.
+From and Reply-To remain distinct if their addresses differ. Identical addresses
+are deduplicated conservatively; the local part is preserved and the domain is
+case-normalized. Distinct addresses with the same name remain separate. Obviously
+automated/no-reply addresses are marked in clarification/review.
+
+The canonical enrolled address is excluded. To exclude explicitly known self-aliases,
+optionally configure `GMAIL_SELF_ALIASES=alias1@example.org,alias2@example.org` in the
+private `.env` and restart both services. This does not permit sending as an alias,
+infer Gmail dot/plus aliases, query account settings or request new permissions.
+
+The model receives the compact quoted records plus your recipient description and
+returns grounded candidate IDs with unique/ambiguous/no-match status. Python accepts
+only actual IDs and recovers the stored address; model-generated addresses and
+confidence values cannot authorize a recipient. Email/header strings remain
+untrusted data. The catalogue is cached in bounded session RAM for **ten minutes**
+and discarded by SOMMAIRE, ANNULER, logout/session expiry or restart.
+
+- A unique supported match goes directly to the draft with the full address visible.
+- Ambiguity shows numbered real names/addresses and provenance. Use **DESTINATAIRE 2**
+  or clarify in words; the original writing instructions are retained. Displayed
+  candidate pages use existing navigation without refetching or calling the model.
+- A missing match explains the last-50-message boundary. Use a more precise name or
+  an address that actually occurs in those messages; arbitrary new addresses are
+  outside Stage 1. For partial fetch failures, SOMMAIRE lets a fresh request retry.
+- The compact catalogue is capped at 64,000 serialized characters, and model input
+  at 24,000 catalogue characters. Overflow asks for an exact address already present
+  in the recent messages; Python validates that literal address against metadata
+  rather than silently dropping candidates or adding a name-matching engine.
+
+After resolution, the model generates a fresh subject and plain-text body from your
+instructions. Identification subjects and the previously selected body are **not**
+provided to drafting. Python builds a fresh From/To/Date/Message-ID and appends the
+same reviewed signature. New-message MIME has **no In-Reply-To or References**, and
+the Gmail send request omits **threadId**. The selected subject is not reused or
+automatically prefixed with Re:. Gmail can still independently group similar mail.
+
+Review, revise, cancel and **ENVOYER** work exactly as for replies. Use **MODIFIER
+instructions** for body/subject changes, or describe a recipient change in words,
+for example **« change le destinataire pour Alice Martin »**. A recipient change
+reruns grounded resolution. Any attempted edit/new target invalidates previous
+review, including failures. The model has no send tool; ENVOYER sends the stored,
+reviewed MIME without another generation call. Uncertain and duplicate sends retain
+the same protections as replies. Reply selection remains required for REPONDRE only.
+
+### Deploy Stage 1 after publication
+
+Stage 1 uses the existing Gmail pair of scopes and existing encrypted credentials.
+**No new Google consent/enrollment, dependency install or root-helper migration is
+needed.** These commands apply once the local changes have been explicitly published
+to develop; do not expect unpublished commits to appear in a normal pull:
+
+```sh
+cd /home/minitel/minitel-gpt
+git status --short
+git pull --ff-only origin develop
+sudo systemctl restart admin-ui minitel-chatgpt
+```
+
+### Owner-controlled live acceptance before Stage 2
+
+1. Use a second account/address you control. Exchange a small message with the
+   enrolled account so that the address appears among the recent 50 messages.
+2. In **Paramètres → Gmail**, leave no selected message and request a NEW message
+   with ECRIRE or natural language. Verify the displayed full recipient and fresh
+   subject/body. Try an ambiguous name and resolve it without losing instructions.
+3. Change the body/subject and, if practical, the recipient to another controlled
+   correspondent. Confirm old review cannot send; reread all pages. Cancel one draft,
+   then make another and explicitly ENVOYER once after review.
+4. Verify receipt, correct recipient/body, exact Minitel signature and one sent copy.
+   Inspect the received original source: fresh Message-ID/Date and no In-Reply-To or
+   References. Offline tests check omission of threadId in the request; Gmail's UI
+   grouping alone does not establish our deliberate threading behavior.
+5. Verify duplicate ENVOYER does not resend. Check that existing replies still target
+   the selected Reply-To/From and retain their reply headers. Report success/failures
+   without sharing private contents or credentials. When the physical terminal is
+   available, repeat composition, clarification, pagination, review and reset there.
+
+**Stage 2 — saved Google Contacts is deliberately gated on that live Stage 1 exchange.**
+It is not implemented or enabled by Stage 1. Do not add contacts.readonly or
+contacts.other.readonly yet. Stage 2 will require People API, optional Contacts
+scope support and backward-compatible encrypted re-enrollment/helper migration;
+those instructions will accompany that implementation. The current two-scope
+validator remains unchanged and would reject extra scopes. Other Contacts is a
+separate later opt-in, not part of saved Contacts.
+
+References: [Gmail list/search](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/list),
+[metadata fields](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/get),
+[send message resource](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/send).
 
 ## Reconnect, diagnostics and disabling
 
