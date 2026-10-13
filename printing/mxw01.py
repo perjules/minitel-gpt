@@ -41,10 +41,10 @@ def pack_image(image) -> bytes:
 
 
 def response_packet(raw: bytes):
-    if len(raw) < 8 or raw[:2] != b"\\x22\\x21":
+    if len(raw) < 7 or raw[:2] != b"\\x22\\x21":
         return None
     length = int.from_bytes(raw[4:6], "little")
-    if len(raw) < 8 + length:
+    if len(raw) < 7 + length:
         return None
     return raw[2], raw[6:6 + length]
 
