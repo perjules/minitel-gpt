@@ -11,12 +11,14 @@ def render_document(document: PrintDocument, *, width: int = 384, max_height: in
     if not 64 <= width <= 2048 or max_height < 64:
         raise ValueError("Invalid printing dimensions")
     font = ImageFont.load_default()
+    text_scale = 3
+    text_width = width // text_scale
     line_height = 16
     margin = 8
     strips = []
 
     def text_lines(text):
-        scratch = Image.new("L", (width, 1), 255)
+        scratch = Image.new("L", (text_width, 1), 255)
         draw = ImageDraw.Draw(scratch)
         result = []
         for paragraph in text.split("\n"):
@@ -27,15 +29,15 @@ def render_document(document: PrintDocument, *, width: int = 384, max_height: in
             line = ""
             for word in words:
                 candidate = f"{line} {word}" if line else word
-                if draw.textlength(candidate, font=font) <= width - 2 * margin:
+                if draw.textlength(candidate, font=font) <= text_width - 2 * margin:
                     line = candidate
                 else:
                     if line:
                         result.append(line)
                     line = word
-                    while draw.textlength(line, font=font) > width - 2 * margin:
+                    while draw.textlength(line, font=font) > text_width - 2 * margin:
                         cut = len(line) - 1
-                        while cut > 1 and draw.textlength(line[:cut], font=font) > width - 2 * margin:
+                        while cut > 1 and draw.textlength(line[:cut], font=font) > text_width - 2 * margin:
                             cut -= 1
                         result.append(line[:cut])
                         line = line[cut:]
@@ -45,11 +47,11 @@ def render_document(document: PrintDocument, *, width: int = 384, max_height: in
     for block in (TextBlock(document.title), *document.blocks):
         if isinstance(block, TextBlock):
             lines = text_lines(block.text)
-            image = Image.new("L", (width, max(1, len(lines)) * line_height + margin), 255)
+            image = Image.new("L", (text_width, max(1, len(lines)) * line_height + margin), 255)
             draw = ImageDraw.Draw(image)
             for i, line in enumerate(lines):
                 draw.text((margin, i * line_height), line, font=font, fill=0)
-            strips.append(image)
+            strips.append(image.resize((width, image.height * text_scale), Image.Resampling.NEAREST))
         elif isinstance(block, ImageBlock):
             with Image.open(block.path) as source:
                 source = source.convert("L")
