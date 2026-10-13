@@ -445,6 +445,12 @@ References: [Gmail list/search](https://developers.google.com/workspace/gmail/ap
 
 ## Reconnect, diagnostics and disabling
 
+The optional startup [memory selector](MEMORY.md) also selects the separate
+plaintext conversation archive. Visible Gmail requests/results can appear there;
+mailbox caches, draft internals, OAuth credentials and API payloads are not archived.
+Memory records are deliberately saved only, and are not automatically added to
+outgoing messages. Gmail's encrypted enrollment and send/review gate are unchanged.
+
 `reconnect_required` means refresh authorization expired/revoked or service
 credentials are absent. Repeat desktop enrollment and `install_gmail.sh --activate`
 to restart **both** services with the replaced encrypted credential. No account

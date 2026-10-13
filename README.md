@@ -203,6 +203,15 @@ Modèles Claude proposés (prix entrée / sortie par million de tokens) :
 > `LLM_PROVIDER` (`mistral`, `claude` ou `linkup`), `MISTRAL_KEY`, `MISTRAL_MODEL`,
 > `ANTHROPIC_KEY`, `CLAUDE_MODEL`, `LINKUP_KEY`, `LINKUP_DEPTH`.
 
+### Mémoire, notes et listes
+
+La [mémoire légère](docs/MEMORY.md) ajoute un nom facultatif au démarrage :
+vide sélectionne la mémoire commune, sans authentification. Préférences, notes,
+listes et tâches se gèrent en langage naturel; SOMMAIRE permet de changer
+d'utilisateur sans perdre les éléments enregistrés. Les journaux de conversations
+visibles sont conservés séparément sur le Pi, hors Git. Voir le guide pour
+le test admin, le stockage et l'acceptation avant validation physique.
+
 ### Mettre à jour le code (après installation)
 
 Le plus simple : depuis l'**admin web** → onglet **Paramètres** → *Vérifier les
