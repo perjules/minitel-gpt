@@ -1,7 +1,7 @@
 # 3615 IA optional printing — hardware smoke-test checkpoint
 
 The generic renderer and authorization primitives are separate from the MXW01 backend.
-Nothing in the Minitel interface or LLM can currently initiate printing.
+The Minitel interface accepts explicit trusted-keyboard printing commands; model output cannot authorize printing.
 
 ## Installation on Raspberry Pi
 
@@ -58,9 +58,9 @@ sudo btmgmt power on
 ## Limitations and safety
 
 - **Not yet physically validated:** the MXW01 driver is based on a community protocol specification, which describes itself as incomplete.
-- Long text is split into consecutive sections of at most 1800 image lines (384 dots wide); printing may take time. Individual oversized image blocks still require resizing.
+- Long text is split into short consecutive sections of at most 600 raster lines (384 dots wide), sent over one BLE connection. The paper is a continuous roll, not paginated sheets. Each section must receive the printer completion notification before the next is sent; an ambiguous completion stops the job rather than risking duplicate output. Individual oversized image blocks still require resizing.
 - Connection and completion errors are surfaced to the operator.
-- The driver pads short image buffers and paces BLE writes; these details need validation on the actual hardware.
+- The driver pads short image buffers to the firmware minimum of 90 rows and paces BLE writes; these details need validation on the actual hardware.
 - The `PrintApproval` class is a primitive, **not an integrated security boundary**. Its `confirm` method must only receive actual trusted terminal input. The model may propose or render, but must never call physical printing or synthesize approval.
 - Printer is entirely optional. No printing on application startup.
 - Source protocol: https://github.com/jeremy46231/MXW01-catprinter/blob/main/PROTOCOL.md
@@ -90,10 +90,10 @@ Bluetooth controller settings; BLE-only setup may still be required on the Pi.
 
 Run `.venv/bin/python -m unittest discover -s tests -p 'test_printing_session.py' -v`
 and validate `IMPRIMER` in the terminal console before testing the physical
-Minitel. Only the standalone text print protocol has received hardware feedback
-so far; Minitel integration and image printing remain to be validated.
+Minitel. Hardware testing has shown partial printing and prolonged BLE writes on longer documents. The single-connection multi-section protocol remains to be validated on the physical printer.
 
 When an email is selected in Gmail, `IMPRIMER` prints its full selected message text
 (headers and body), rather than the last assistant response. The Gmail message
 menu advertises `TEXTE / RESUMER / REPONDRE / IMPRIMER`. Printing is explicit
 and does not send, forward or otherwise modify email.
+\n## 2026-10-14 continuous-roll printing checkpoint\n\nThe MXW01 uses a continuous thermal roll: short raster chunks should be printed sequentially without page breaks. Previous implementation reconnected for each 600-line chunk; now one BLE scan/connection and notification subscription serve the entire document. Each chunk uses its own A9 print request, raster payload and AD end command, and waits for AA completion before the next chunk. If AA is missing, stop; do not blindly retry a chunk that may already have printed. Printer firmware may not reliably emit AA; this is the next physical validation point. No Pi Bluetooth settings are changed.\n
