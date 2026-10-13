@@ -20,13 +20,14 @@ from flask import (Flask, render_template_string, request, redirect,
 from werkzeug.utils import secure_filename
 
 try:
-    from . import mistral_answers, pronote, pronote_answers, gmail_mail, memory_session
+    from . import mistral_answers, pronote, pronote_answers, gmail_mail, memory_session, calculator
 except ImportError:
     import mistral_answers
     import pronote
     import pronote_answers
     import gmail_mail
     import memory_session
+    import calculator
 
 PROJ_DIR = Path(__file__).parent.parent
 ASSETS_DIR = PROJ_DIR / "assets"
@@ -927,9 +928,11 @@ async function genPrompt(){
   }catch(e){alert('Erreur: '+e);}
   spin.style.display='none';
 }
+let testSequence=0;
 async function testPreset(reset=false){
   const msg=document.getElementById('testMsg').value.trim();
   if(!msg&&!reset){alert('Saisissez une question');return;}
+  const sequence=++testSequence;
   const key=document.getElementById('presetSel').value;
   const system=document.getElementById('fsystem').value;
   const spin=document.getElementById('testSpin'), out=document.getElementById('testOut');
@@ -938,10 +941,22 @@ async function testPreset(reset=false){
     const r=await fetch('/test-preset',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({preset_key:key,message:msg,system:system,memory_user:document.getElementById('memoryUser').value,reset:reset})});
     const j=await r.json();
+    if(sequence!==testSequence)return;
     out.style.display='block';
-    out.textContent = j.ok ? (j.answer||'(réponse vide)') : ('Erreur : '+j.error);
-  }catch(e){out.style.display='block';out.textContent='Erreur : '+e;}
-  spin.style.display='none';
+    if(j.ok&&j.scene){
+      out.textContent='';
+      const started=performance.now();
+      for(const line of j.scene){
+        if(sequence!==testSequence)return;
+        if(performance.now()-started>90000)break;
+        out.textContent+=line+'\\n';
+        await new Promise(resolve=>setTimeout(resolve,220));
+      }
+    }else{
+      out.textContent = j.ok ? (j.answer||'(réponse vide)') : ('Erreur : '+j.error);
+    }
+  }catch(e){if(sequence===testSequence){out.style.display='block';out.textContent='Erreur : '+e;}}
+  if(sequence===testSequence)spin.style.display='none';
 }
 loadPreset();
 // Desactive le champ mot de passe quand "Supprimer la cle existante" est coche
@@ -1147,20 +1162,36 @@ def test_preset_route():
                 discard_memory(session.get("memory_session"))
                 return jsonify(ok=True, answer="Session effacée. Choisissez un nom ou laissez vide; la mémoire enregistrée est conservée.")
             selected.record("user", msg)
-            result = selected.handle(msg) if selected.interested(msg) else {"passthrough": True}
+            language = selected.saved_language() or "fr"
+            calc = selected.calculator
+            result = None
+            if calc.explicit(msg) or (not selected.pending and calculator.candidate(msg)):
+                result = calc.handle(msg, language, generate=lambda expr, lang:
+                                     calculator.generate_scene(expr, lang, mistral_key(), mistral_model()))
+            if result is None:
+                result = selected.handle(msg, language) if selected.interested(msg) else {"passthrough": True}
             if result.get("passthrough"):
                 remembered = selected.context(msg)
                 answer = llm_answer(system + "\n\n" + remembered, msg, knowledge=kb + "\n\n" + remembered)
             else:
                 answer = result["display"]
+            selected.active()  # A reset/switch abandons a late generated scene.
             warning = selected.take_warning()
             if warning:
                 answer += "\n\n" + warning
-            selected.record("assistant", answer, "chat" if result.get("passthrough") else "memory")
+            if result.get("calculator"):
+                selected.record("assistant", answer, "theatre", factual=result.get("factual"))
+            else:
+                selected.record("assistant", answer, "chat" if result.get("passthrough") else "memory")
         # The browser preview retains exact URLs, including Unicode paths.
         conversations = (llm_provider() == "mistral" and
                          mistral_answers.settings({**os.environ, **read_env()})[0] == "conversations")
-        return jsonify(ok=True, answer=answer if conversations else to_minitel_ascii(answer))
+        response = {"ok": True, "answer": answer if conversations else to_minitel_ascii(answer)}
+        if result.get("calculator"):
+            response["calculator_mode"] = calc.mode
+            if result.get("scene"):
+                response["scene"] = list(calculator.frames([to_minitel_ascii(s) for s in result["scene"]]))
+        return jsonify(response)
     except Exception as e:
         return jsonify(ok=False, error=str(e))
 
@@ -1429,6 +1460,7 @@ def memory_entry(username=None, reset=False):
                     extra_secrets=private_values),
                 "used": now,
             }
+            item["memory"].calculator = calculator.Session()
             MEMORY_SESSIONS[identifier] = item
         item["used"] = now
         MEMORY_SESSIONS.move_to_end(identifier)

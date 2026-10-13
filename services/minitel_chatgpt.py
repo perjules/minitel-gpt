@@ -21,13 +21,14 @@ from dotenv import load_dotenv
 import requests
 
 try:  # Support both systemd's direct script and package imports in tests.
-    from . import mistral_answers, pronote, pronote_answers, gmail_mail, memory_session
+    from . import mistral_answers, pronote, pronote_answers, gmail_mail, memory_session, calculator
 except ImportError:
     import mistral_answers
     import pronote
     import pronote_answers
     import gmail_mail
     import memory_session
+    import calculator
 
 # Translittération vers ASCII affichable sur Minitel (é→e, œ→oe, …) :
 # évite les « ? » que produisait encode('ascii','replace').
@@ -428,10 +429,19 @@ def wrap(text, width=COLS):
     return out
 
 
+def calculator_blocked(mail, memory):
+    return bool((memory is not None and memory.pending) or
+                (mail is not None and (mail.draft or mail.composition or mail.recipient_choices)))
+
+
 def call_answer(system_prompt, history, language, options, knowledge,
-                mail=None, review_ticket=None, memory=None):
+                mail=None, review_ticket=None, memory=None, calc=None):
     api, web_search, timeout = options
     question = history[-1]["content"]
+    blocked = calculator_blocked(mail, memory)
+    if calc is not None and calc.explicit(question):
+        return calc.handle(question, language, generate=lambda expr, lang:
+                           calculator.generate_scene(expr, lang, MISTRAL_KEY, MISTRAL_MODEL))
     explicit_memory = memory_session.explicit_request(question)
     note_request = re.match(r"^note\b", question, re.I)
     if (memory is not None and memory.interested(question)
@@ -446,6 +456,11 @@ def call_answer(system_prompt, history, language, options, knowledge,
         response = mail.handle(history[-1]["content"], review_ticket, timeout)
         if not response.get("passthrough"):
             return response
+    if calc is not None and not blocked:
+        result = calc.handle(question, language, generate=lambda expr, lang:
+                             calculator.generate_scene(expr, lang, MISTRAL_KEY, MISTRAL_MODEL))
+        if result is not None:
+            return result
     remembered = memory.context(question) if memory is not None else ""
     if remembered:
         knowledge = knowledge + "\n\n" + remembered
@@ -471,7 +486,7 @@ def call_answer(system_prompt, history, language, options, knowledge,
 
 
 def start_answer(system_prompt, history, language, options, knowledge,
-                 mail=None, review_ticket=None, memory=None):
+                 mail=None, review_ticket=None, memory=None, calc=None):
     """One daemon worker; no UART access. File operations use the scoped memory guard."""
     output = Queue(maxsize=1)
 
@@ -480,6 +495,8 @@ def start_answer(system_prompt, history, language, options, knowledge,
             optional = {"mail": mail, "review_ticket": review_ticket} if mail is not None else {}
             if memory is not None:
                 optional["memory"] = memory
+            if calc is not None:
+                optional["calc"] = calc
             output.put((call_answer(system_prompt, history, language, options, knowledge, **optional), None))
         except Exception as error:
             output.put((None, error))
@@ -490,7 +507,7 @@ def start_answer(system_prompt, history, language, options, knowledge,
     return worker, output, started
 
 
-def wait_answer(t, pending, timeout):
+def wait_answer(t, pending, timeout, allow_retour=False):
     """Reset stops local waiting; provider work/billing may continue."""
     _, output, started = pending
     deadline = started + timeout
@@ -499,6 +516,8 @@ def wait_answer(t, pending, timeout):
             result, error = output.get_nowait()
         except Empty:
             kind, code = t.read_key(min(0.1, max(0, deadline - time.monotonic())))
+            if allow_retour and kind == 'fn' and code == K_RETOUR:
+                return None, 'retour'
             if kind == 'fn' and code in (K_SOMMAIRE, K_GUIDE):
                 return None, 'guide' if code == K_GUIDE else 'sommaire'
             continue
@@ -681,7 +700,7 @@ def show_guide(t: Term, language="fr"):
     t.read_key(120)
 
 
-def read_question(t: Term, allow_empty=False):
+def read_question(t: Term, allow_empty=False, calculator_mode=False):
     """Lit une question. Retourne (texte, 'envoi') / (None,'sommaire') / (None,'timeout')."""
     t.w(FG_GREEN)
     t.w("> ")
@@ -692,6 +711,8 @@ def read_question(t: Term, allow_empty=False):
         if kind == 'timeout':
             return None, 'timeout'
         if kind == 'fn':
+            if calculator_mode and code == K_RETOUR:
+                return 'RETOUR', 'envoi'
             if code == K_SOMMAIRE:
                 return None, 'sommaire'
             if code == K_GUIDE:
@@ -743,6 +764,37 @@ def show_response(t: Term, text: str, language="fr"):
     return 'done'
 
 
+def show_calculator_scene(t, steps, language):
+    """Only the UART owner plays frames. Poll every beat; always restore page mode."""
+    deadline = time.monotonic() + 90
+    fast = False
+    t.clear()
+    t.w(SCROLL_ON)
+    t.w(FG_WHITE)
+    try:
+        for row in calculator.frames([safe_display(step) for step in steps]):
+            # Keyboard-aware delay; SUITE removes added pauses, RETOUR cancels.
+            pause = time.monotonic() + (0.02 if fast else 0.22)
+            while time.monotonic() < pause:
+                kind, code = t.read_key(min(0.05, max(0, pause - time.monotonic())))
+                if kind == 'fn':
+                    if code in (K_SOMMAIRE, K_GUIDE, K_RETOUR):
+                        flush = getattr(t.s, 'reset_output_buffer', None)
+                        if callable(flush):
+                            flush()
+                        return {K_SOMMAIRE: 'sommaire', K_GUIDE: 'guide', K_RETOUR: 'retour'}[code]
+                    if code == K_SUITE:
+                        fast = True
+                        break
+            if time.monotonic() >= deadline:
+                t.line(safe_display(calculator.content(language)["cancelled"]))
+                return 'retour'
+            t.line(row)
+        return 'done'
+    finally:
+        t.w(SCROLL_OFF)
+
+
 # ── Boucle principale ────────────────────────────────────────────────────
 def run():
     t = Term()
@@ -785,6 +837,7 @@ def run():
             if action == 'envoi':
                 memory.remember_language(language)
         system_prompt = session_prompt(system_prompt, language)
+        calc = calculator.Session()
         if language == "en":
             question_msg = UI[language]["question"]
             loading_msg = UI[language]["loading"]
@@ -802,7 +855,7 @@ def run():
         show_question_prompt(t, question_msg)
 
         while True:  # boucle conversation
-            question, action = read_question(t)
+            question, action = read_question(t, calculator_mode=calc.mode)
             if action == 'guide':
                 show_guide(t, language)
                 break          # retour au sommaire après l'écran d'aide
@@ -812,7 +865,10 @@ def run():
             memory.record("user", question)
 
             t.w(bytes([CR, LF]))
-            t.w(FG_CYAN); t.line(""); t.center(loading_msg)
+            calculator_request = calc.explicit(question) or (
+                calculator.candidate(question) and not calculator_blocked(mail, memory))
+            t.w(FG_CYAN); t.line("")
+            t.center(calculator.content(language)["loading"] if calculator_request else loading_msg)
             # Do not pile up paid calls while a locally abandoned HTTP request
             # is still running. Its isolated queue is discarded when it ends.
             response = None
@@ -823,8 +879,9 @@ def run():
                 candidate = history + [{"role": "user", "content": question}]
                 optional = {"mail": mail, "review_ticket": review_ticket} if mail is not None else {}
                 optional["memory"] = memory
+                optional["calc"] = calc
                 pending = start_answer(system_prompt, candidate, language, options, knowledge, **optional)
-                response, action = wait_answer(t, pending, options[2])
+                response, action = wait_answer(t, pending, options[2], allow_retour=calculator_request)
                 if action == 'guide':
                     show_guide(t, language)
                     break
@@ -834,6 +891,9 @@ def run():
                 if action == 'deadline':
                     answer = ("Request timed out. Information unverified." if language == "en"
                               else "Delai depasse. Information non verifiee.")
+                elif action == 'retour':
+                    calc.mode = False
+                    answer = calculator.content(language)["cancelled"]
                 elif response is not None:
                     answer = response["display"]
                     if response["turn"] is not None:
@@ -842,10 +902,23 @@ def run():
             warning = memory.take_warning()
             if warning:
                 answer += "\n\n" + warning
-            channel = ("memory" if response and response.get("memory") else
+            channel = ("theatre" if response and response.get("calculator") else
+                       "memory" if response and response.get("memory") else
                        "gmail" if response and response.get("review_ticket") else "chat")
-            memory.record("assistant", answer, channel)
-            result = show_response(t, safe_display(answer), language)
+            if response and response.get("calculator"):
+                memory.record("assistant", answer, channel, factual=response.get("factual"))
+            else:
+                memory.record("assistant", answer, channel)
+            result = (show_calculator_scene(t, response["scene"], language)
+                      if response and response.get("scene") else show_response(t, safe_display(answer), language))
+            if response and response.get('scene') and result != 'done':
+                memory.record('event', 'Scene CALC interrompue: ' + result, 'session')
+            if result == 'guide':
+                show_guide(t, language)
+                break
+            if result == 'retour':
+                calc.mode = False
+                show_response(t, safe_display(calculator.content(language)["cancelled"]), language)
             if result in ('sommaire', 'timeout'):
                 break
 
@@ -856,7 +929,7 @@ def run():
             # Invite pour rebondir
             t.w(bytes([CR, LF]))
             t.w(FG_WHITE)
-            t.center(UI[language]["follow_up"])
+            t.center(calculator.content(language)["prompt"] if calc.mode else UI[language]["follow_up"])
             t.w(bytes([CR, LF]))
 
         if mail is not None:

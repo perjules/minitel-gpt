@@ -169,18 +169,22 @@ class MemorySession:
                 self.closed = True
                 self.pending, self.last_answer, self.recent = None, "", []
 
-    def record(self, role, text, channel="chat"):
+    def record(self, role, text, channel="chat", factual=None):
         with self.lock:
             if self.closed:
                 return
-            safe = memory.redact(
-                text, self.journal.extra_secrets if self.journal else ()
-            )
-            if role in {"user", "assistant"}:
-                self.recent.append({"role": role, "text": safe[:2000]})
-                self.recent = self.recent[-6:]
-                if role == "assistant":
-                    self.last_answer = safe
+            usable = factual if channel == "theatre" else text
+            if usable is not None:
+                safe = memory.redact(
+                    usable, self.journal.extra_secrets if self.journal else ()
+                )
+                if role in {"user", "assistant"}:
+                    self.recent.append({"role": role, "text": safe[:2000]})
+                    self.recent = self.recent[-6:]
+                    if role == "assistant":
+                        self.last_answer = safe
+            elif role == "assistant":
+                self.last_answer = ""
             if self.journal:
                 try:
                     self.journal.append(role, text, channel)
