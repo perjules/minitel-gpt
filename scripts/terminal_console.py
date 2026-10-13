@@ -4,8 +4,37 @@
 import argparse
 import curses
 import logging
+import os
+import subprocess
 import sys
 from pathlib import Path
+
+
+def launch_gmail_console():
+    """Deliver existing encrypted credentials to an unprivileged console."""
+    checkout = Path(__file__).resolve().parents[1]
+    python = checkout / ".venv/bin/python"
+    if not python.is_file():
+        python = Path(sys.executable)
+    command = [
+        "sudo", "systemd-run", "--quiet", "--wait", "--pty", "--collect",
+        "--uid=minitel",
+        "--property=LoadCredentialEncrypted=gmail:/etc/credstore.encrypted/minitel-gmail",
+        "--property=PrivateMounts=yes",
+        f"--working-directory={checkout}",
+        "--setenv=GMAIL_ENABLED=1",
+        f"--setenv=TERM={os.getenv('TERM', 'xterm')}",
+    ]
+    if os.getenv("MINITEL_MEMORY_DIR"):
+        command.append(f"--setenv=MINITEL_MEMORY_DIR={os.environ['MINITEL_MEMORY_DIR']}")
+    # Child has systemd credentials and no --gmail flag: no recursive launch.
+    command.extend([str(python), str(Path(__file__).resolve())])
+    try:
+        return subprocess.call(command)
+    except OSError:
+        print("Gmail console requires sudo and systemd-run on the enrolled Pi.",
+              file=sys.stderr)
+        return 2
 
 
 def main():
@@ -15,9 +44,18 @@ def main():
                "Ctrl-G/F1=GUIDE; Ctrl-R/F4/Esc=RETOUR; Ctrl-Q/Ctrl-C=quit. "
                "Uses the checkout's .env and existing credentials; no UART access.",
     )
-    parser.parse_args()
+    parser.add_argument(
+        "--gmail", action="store_true",
+        help="use enrolled Gmail credentials via a temporary systemd service (may prompt for sudo)",
+    )
+    args = parser.parse_args()
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         parser.exit(2, "An interactive terminal is required (use ssh -t if needed).\n")
+
+    if args.gmail:
+        if not os.getenv("CREDENTIALS_DIRECTORY"):
+            return launch_gmail_console()
+        os.environ["GMAIL_ENABLED"] = "1"
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from services import minitel_chatgpt as chat

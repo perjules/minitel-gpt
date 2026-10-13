@@ -60,25 +60,23 @@ credential chiffré : la console affiche alors une demande de reconnexion même
 si Gmail fonctionne dans l'admin. Le nom saisi au démarrage choisit les souvenirs,
 pas le compte Gmail; changer de nom ne résout pas ce problème.
 
-Pour Gmail déjà enrôlé avec son helper installé, lancer la console dans un
-service temporaire avec un terminal interactif et la même livraison de
-credentials que les services installés :
+Pour Gmail déjà enrôlé avec son helper installé :
 
 ```bash
-sudo systemd-run --wait --pty --collect --uid=minitel \
-  --property=LoadCredentialEncrypted=gmail:/etc/credstore.encrypted/minitel-gmail \
-  --property=PrivateMounts=yes --working-directory=/home/minitel/minitel-gpt \
-  --setenv=GMAIL_ENABLED=1 --setenv="TERM=$TERM" \
-  /home/minitel/minitel-gpt/.venv/bin/python scripts/terminal_console.py
+.venv/bin/python scripts/terminal_console.py --gmail
 ```
 
-Adapter les deux chemins du dépôt si l'installation est ailleurs. La console
-tourne sous l'utilisateur Linux `minitel`, comme les services; `sudo` lance
-seulement le service temporaire. `--pty` fournit le terminal requis par `curses`.
-Cela réutilise le credential chiffré et le helper existants sans réenrôlement;
-ne copiez aucun token depuis le service. Pour isoler seulement les souvenirs et
-journaux de test, ajouter `--setenv=MINITEL_MEMORY_DIR=/chemin/de/test` (accessible
-à `minitel`); les API et autres intégrations restent réelles.
+Le flag lance automatiquement un service temporaire avec un terminal interactif
+et le credential chiffré existant. `sudo` peut demander le mot de passe Linux;
+la console tourne ensuite sous l'utilisateur Linux `minitel`, comme les services.
+Le script trouve son dépôt et son venv sans chemin à saisir. S'il dispose déjà
+de credentials livrés par systemd, il active Gmail directement.
+
+Aucun réenrôlement ni copie de token n'est nécessaire. `TERM` et un éventuel
+`MINITEL_MEMORY_DIR` sont transmis au service temporaire; les autres variables
+du shell ne le sont pas. Le `.env` du dépôt reste chargé normalement. Pour isoler
+seulement les souvenirs et journaux de test, définir `MINITEL_MEMORY_DIR` vers un
+répertoire accessible à `minitel`; les API et autres intégrations restent réelles.
 
 Le test web de personnalité reste indépendant et ne reproduit pas toute cette
 session. Les contrôles automatisés de la console emploient des réponses simulées;
