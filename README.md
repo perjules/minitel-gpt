@@ -257,6 +257,22 @@ tail -f logs/chatgpt.log                  # logs
 
 ## Interface d'administration
 
+### Tester depuis un terminal, sans Minitel
+
+La [console de test](docs/CONSOLE.md) lance la **vraie boucle du Minitel** dans
+un terminal Bash/SSH, sans ouvrir le port série : démarrage, historique, routage
+des fonctionnalités et pagination restent identiques. Depuis le dépôt :
+
+```bash
+python3 scripts/terminal_console.py
+```
+
+Utiliser `.venv/bin/python` à la place de `python3` si les dépendances de
+l'installation sont dans ce venv. Entrée = ENVOI, Ctrl-N = SUITE, Ctrl-P =
+SOMMAIRE, Ctrl-G = GUIDE, Ctrl-R = RETOUR, Ctrl-Q = quitter. Terminal d'au moins
+40 colonnes et 24 lignes. Ce sont des appels et des actions réels, avec la mémoire
+de l'installation; le test de personnalité web reste un aperçu distinct.
+
 `http://<ip-du-pi>:8080` - mot de passe par défaut **mistral** (`ADMIN_PASSWORD`).
 
 Trois onglets :

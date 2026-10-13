@@ -348,10 +348,13 @@ def build_title(title_art=None):
 
 # ── Serial helpers ───────────────────────────────────────────────────────
 class Term:
-    def __init__(self):
-        self.s = serial.Serial(PORT, BAUD, bytesize=7, parity="E",
-                               stopbits=1, timeout=0.1)
-        time.sleep(0.3)
+    def __init__(self, transport=None):
+        if transport is not None:
+            self.s = transport
+        else:
+            self.s = serial.Serial(PORT, BAUD, bytesize=7, parity="E",
+                                   stopbits=1, timeout=0.1)
+            time.sleep(0.3)
 
     def w(self, data):
         if isinstance(data, str):
@@ -796,9 +799,10 @@ def show_calculator_scene(t, steps, language):
 
 
 # ── Boucle principale ────────────────────────────────────────────────────
-def run():
-    t = Term()
-    log.info(f"Démarré sur {PORT} (fournisseur {PROVIDER}, modèle {MODEL})")
+def run(term=None):
+    t = term if term is not None else Term()
+    destination = PORT if term is None else "console"
+    log.info(f"Démarré sur {destination} (fournisseur {PROVIDER}, modèle {MODEL})")
     options = (mistral_answers.settings(os.environ) if PROVIDER == "mistral"
                else ("chat_completions", False, 60))
     pending = None
