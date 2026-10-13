@@ -12,6 +12,18 @@ l'assistant (la version phare est « bloquée dans les années 80 »).
 
 🌐 Présentation du projet : https://minitel-gpt.herard.com
 
+## Direction de ce fork : demander, lire, préciser
+
+**Tapez ce que vous voulez faire.** Quelques commandes mémorables (`MAIL`, `LIRE 2`)
+offrent des raccourcis précis ; le langage naturel permet d'exprimer une intention
+et de préciser le résultat. Les nouvelles fonctions réutilisent la saisie, l'écran
+et la pagination du terminal. Les indications contextuelles montrent les actions
+disponibles, sans ajouter une arborescence de menus à chaque fonctionnalité.
+Python contrôle les opérations réelles et les confirmations ; l'IA interprète,
+résume ou rédige. L'administration web sert à configurer, diagnostiquer et tester.
+Les principes détaillés et leurs limites sont dans
+[FORK.md](FORK.md#interaction-design-words-context-and-clear-feedback).
+
 ---
 
 ## Matériel

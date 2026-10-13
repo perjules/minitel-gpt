@@ -10,6 +10,58 @@ earnest technological optimism, deadpan machine diagnostics, cinematic hacker
 jargon and occasional unsettling composure. Vintage presentation does not impose
 a fictional 1989 cutoff on factual knowledge.
 
+## Interaction design: words, context and clear feedback
+
+**The primary interface is: type what you want into the computer.** Users express
+intentions, read results and refine them in place. Each new capability extends the
+usable vocabulary while reusing the terminal's input, result display and navigation.
+Its design starts with: what can the user say, and what useful result should appear?
+
+The Minitel's small screen, keyboard and slow serial link are design constraints
+to preserve. Build ordinary feature workflows around words and context; do not
+expand them into feature-specific screens, menu trees, forms or WYSIWYG editors.
+The web admin remains available for configuration, diagnostics and faithful testing
+of terminal behavior; its extra space must not become a requirement for everyday use.
+
+- **Keep a small, memorable command vocabulary.** Exact commands such as `MAIL`,
+  `LIRE 2`, `TEXTE` and `ANNULER` are predictable shortcuts with explicit Python
+  behavior. Do not call a model just to interpret an already recognized command,
+  or accumulate cryptic syntax and dozens of aliases.
+- **Accept flexible language around that vocabulary.** AI can interpret a request,
+  compose or summarize content and apply conversational revisions. It translates
+  intentions into the small set of operations the application actually supports.
+  Python validates targets, parameters and permissions; the model cannot invent
+  capabilities, recipients, successful actions or authorization.
+- **Make context explicit internally.** A selected result and pending draft make
+  references such as "it" or "make it shorter" meaningful. Use bounded session
+  state, clarify ambiguous targets with a short question or numbered choices, and
+  preserve deterministic reset behavior. Do not silently guess what a consequential
+  request refers to.
+- **Show useful next actions with the result.** A short line such as
+  `TEXTE / RESUMER / REPONDRE instructions` teaches the available vocabulary without
+  another navigation level. Keep hints relevant and brief. A contextual `AIDE`
+  command is a possible future extension, not an implemented feature claim.
+- **Use the same interaction rhythm across capabilities:** request, result,
+  refinement and explicit confirmation when an action needs approval. Reuse
+  pagination and function keys; paging loaded output should not refetch data or
+  invoke AI. The ENVOI key submits input; approval of email sending requires the
+  distinct literal `ENVOYER` command after review of the current draft.
+- **Separate composition from output formatting.** Users supply meaning, facts,
+  recipient and tone; AI can draft and revise; a renderer adapts the result to the
+  terminal, email or a future printed document. Provide an appropriate preview
+  where layout matters. Review must cover the actual outgoing content, including
+  application-owned additions such as the Minitel signature.
+- **Keep the fiction in presentation.** Retro character and world-building may
+  accompany interaction, but real messages, factual results, errors, permissions
+  and action confirmations must remain truthful. Do not inject fictional facts
+  into outgoing content unless the user explicitly requests that style.
+
+Keep interpretation and orchestration proportionate to the Pi: small functions,
+bounded requests/state and justified model calls. These principles do not require
+a new routing framework or a refactor of working features. Future capabilities
+remain subject to their own scope and validation; this section defines design
+guidance and adds no runtime functionality.
+
 ## Initial scope
 
 The default birthday/1980s personality is replaced with this character through
