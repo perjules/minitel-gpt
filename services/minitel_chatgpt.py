@@ -887,6 +887,23 @@ def run(term=None):
             if action in ('sommaire', 'timeout'):
                 break
 
+            # A selected email is a document in its own right, not an LLM turn.
+            # Always print its full body, never the preview or summary.
+            if question.strip().upper() == "IMPRIMER" and mail is not None and mail.selected:
+                if printing_session.installed():
+                    document = printing_session.PrintDocument(
+                        "3615 IA / COURRIER",
+                        (printing_session.TextBlock(mail.selected_text()),),
+                    )
+                    message = execute_print(t, document, language)
+                else:
+                    message = "SERVICE REPROGRAPHIE NON INSTALLE"
+                result = show_response(t, message, language)
+                if result != "done":
+                    break
+                show_question_prompt(t, question_msg)
+                continue
+
             # Only trusted keyboard input may trigger physical printing.
             print_intent = printing_session.intent(question)
             if printer.approval is not None:
