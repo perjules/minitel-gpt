@@ -8,6 +8,13 @@ import os
 import re
 import threading
 import time
+import sys
+from pathlib import Path
+
+# systemd may execute services/minitel_chatgpt.py directly, with services/ as sys.path[0].
+_ROOT = str(Path(__file__).resolve().parents[1])
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 from printing import PrintDocument, PrintApproval, TextBlock, render_document
 
