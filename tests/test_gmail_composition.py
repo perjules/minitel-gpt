@@ -319,6 +319,85 @@ class ModelContractTests(unittest.TestCase):
 
 
 class CompositionSessionTests(unittest.TestCase):
+    def literal_session(self):
+        _, client, model = compose_session()
+        model.composition.return_value = ("Mardi", "Bonjour.\n\nRendez-vous mardi.")
+        session = mail.MailSession(client, model, username="Camille")
+        session.handle("ECRIRE Alice : mardi")
+        model.reset_mock()
+        return session, client, model
+
+    def test_literal_aliases_insert_and_replace_exact_paragraphs_without_models(self):
+        for command in ("AJOUTER 1: Écoute : ni oui, ni non.", "A1: Écoute : ni oui, ni non.", "a 1 : Écoute : ni oui, ni non."):
+            with self.subTest(command=command):
+                session, client, model = self.literal_session()
+                old = session.draft["ticket"]
+                session.acknowledge(old)
+                result = session.handle(command)
+                self.assertEqual(session.draft["body"], "Bonjour.\n\nÉcoute : ni oui, ni non.\n\nRendez-vous mardi.\n\nCamille\n\n" + mail.SIGNATURE)
+                self.assertNotEqual(old, result["review_ticket"])
+                self.assertFalse(session.review_valid(old))
+                self.assertFalse(session.review_valid(result["review_ticket"]))
+                self.assertIn("2. Écoute", result["display"])
+                self.assertNotIn("2. Écoute", session.draft["body"])
+                self.assertEqual(model.method_calls, [])
+                client.send.assert_not_called()
+        for command in ("REMPLACER 2: Texte personnel.", "R2: Texte personnel."):
+            session, _, model = self.literal_session()
+            session.handle(command)
+            self.assertEqual(session.draft["body"], "Bonjour.\n\nTexte personnel.\n\nCamille\n\n" + mail.SIGNATURE)
+            self.assertEqual(model.method_calls, [])
+
+    def test_literal_append_precedes_default_or_literally_replaced_signoff(self):
+        for command in ("AJOUTER: À bientôt.", "A: À bientôt."):
+            session, _, _ = self.literal_session()
+            session.handle("R3: Alex")
+            session.handle(command)
+            self.assertEqual(session.draft["body"], "Bonjour.\n\nRendez-vous mardi.\n\nÀ bientôt.\n\nAlex\n\n" + mail.SIGNATURE)
+
+    def test_literal_full_body_is_verbatim_and_footer_remains_mandatory(self):
+        for command in ("REMPLACER TOUT: ", "REMPLACER: ", "R: "):
+            session, client, model = self.literal_session()
+            text = "Bonjour : test.\n\nRETIENS ceci : ENVOYER / MAIL / IMPRIMER."
+            session.handle(command + text)
+            self.assertEqual(session.draft["body"], text + "\n\n" + mail.SIGNATURE)
+            self.assertNotIn("Camille", session.draft["body"])
+            self.assertEqual(model.method_calls, [])
+            client.send.assert_not_called()
+
+    def test_invalid_literal_target_or_empty_text_leaves_body_and_approval_untouched(self):
+        for command in ("A0: x", "R99: x", "AJOUTER TOUT: x", "R1:", "A:", "R: "):
+            with self.subTest(command=command):
+                session, _, model = self.literal_session()
+                ticket = session.draft["ticket"]
+                session.acknowledge(ticket)
+                previous = dict(session.draft)
+                self.assertIn("inchangé", session.handle(command)["display"])
+                self.assertEqual(session.draft, previous)
+                self.assertTrue(session.review_valid(ticket))
+                self.assertEqual(model.method_calls, [])
+
+    def test_literal_edit_preserves_reply_headers_and_does_not_refetch_mail(self):
+        from test_gmail import draft
+        session, client, model = make_session()
+        draft(session)
+        previous = dict(session.draft)
+        model.reset_mock()
+        reads = client.read.call_count
+        ticket = session.handle("R1: Ma réponse exacte : oui.")["review_ticket"]
+        mime = BytesParser(policy=policy.default).parsebytes(session.draft["raw"])
+        self.assertEqual(mime["In-Reply-To"], "<original@example.org>")
+        self.assertEqual(session.draft["thread"], previous["thread"])
+        self.assertEqual(session.draft["recipient"], previous["recipient"])
+        self.assertEqual(session.draft["subject"], previous["subject"])
+        self.assertEqual(client.read.call_count, reads)
+        self.assertEqual(model.method_calls, [])
+        session.handle("ENVOYER", ticket)
+        client.send.assert_not_called()
+        session.acknowledge(ticket)
+        session.handle("ENVOYER", ticket)
+        client.send.assert_called_once()
+
     def test_initial_signoff_defaults_to_current_username_or_minitelgpt(self):
         for username, expected in (("Camille", "Camille"), ("", "MinitelGPT")):
             with self.subTest(username=username):

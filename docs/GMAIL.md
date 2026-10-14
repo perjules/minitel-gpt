@@ -306,6 +306,25 @@ Select an owner-controlled test message, then:
    editing instruction directly revises the existing draft instead of being
    classified as a new message. Failed edits retain this editing state and keep
    the previous review invalid; ANNULER/SOMMAIRE discards it.
+
+   Literal edits require no model call. `MODIFIER` shows numbered paragraphs,
+   independent of the terminal's wrapped screen rows. The personal sign-off is
+   editable and numbered; the mandatory Minitel footer is separate and unnumbered.
+
+   | Command | Alias | Result |
+   |---|---|---|
+   | `AJOUTER: texte` | `A: texte` | Append before the tracked personal sign-off, or at the end of the body if none is tracked |
+   | `AJOUTER 1: texte` | `A1: texte` | Insert after paragraph 1 |
+   | `REMPLACER 1: texte` | `R1: texte` | Replace paragraph 1 |
+   | `REMPLACER TOUT: texte` | `R: texte` | Replace the complete body, including its personal sign-off |
+
+   Commands are case-insensitive; spaces around a paragraph number are optional.
+   The first colon separates the command from the text; further colons remain
+   literal. One optional space after the colon is syntax. Ordinary outer whitespace
+   is trimmed, as in other terminal input. Empty text, invalid targets and control
+   characters leave the draft unchanged. Numbering is preview-only and never sent.
+   Every successful edit builds a new MIME/review ticket and requires rereading
+   before ENVOYER. Recipient, subject and reply threading remain unchanged.
    The terminal displays `Envoye par Minitel 722079V (138121) - 3615 IA`; the actual MIME
    body retains the Unicode signature. Neither persona nor interface instructions
    are included in the outgoing email.

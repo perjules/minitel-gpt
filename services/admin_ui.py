@@ -1583,7 +1583,7 @@ def gmail_admin():
                 if command is None:
                     return "Action inconnue", 400
                 selected.record("user", command, "gmail")
-                memory_request = (selected.interested(command) and
+                memory_request = (not gmail_mail.literal_command(command) and selected.interested(command) and
                                   (not item["mail"].draft or memory_session.explicit_request(command)))
                 result = selected.handle(command) if memory_request else {"passthrough": True}
                 if not result.get("passthrough"):

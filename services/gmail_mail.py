@@ -52,6 +52,21 @@ DRAFT_RULES = (
 )
 CONTEXT_LIMIT = 12000
 DRAFT_LIMIT = 12000
+LITERAL_EDIT = re.compile(r"^\s*(ajouter|remplacer|a|r)\s*(\d+|tout)?\s*:", re.I)
+
+
+def literal_command(question):
+    return LITERAL_EDIT.match(question)
+
+
+def body_paragraphs(body):
+    """Offsets preserve existing whitespace; screen wrapping never changes targets."""
+    spans, offset = [], 0
+    for index, part in enumerate(re.split(r"(\n[ \t]*\n+)", body)):
+        if index % 2 == 0 and part.strip():
+            spans.append((offset, offset + len(part)))
+        offset += len(part)
+    return spans
 
 
 def pages(text):
@@ -318,6 +333,8 @@ class MailSession:
         if not enabled():
             return False
         q = question.strip().casefold()
+        if literal_command(question):
+            return True
         if re.match(r"^(écrire|ecrire)\b", q) or self.composition:
             return True
         if re.search(
@@ -430,6 +447,9 @@ class MailSession:
                     self.busy = False
 
     def perform(self, question, ticket, epoch, deadline):
+        literal = literal_command(question)
+        if literal:
+            return self.literal_edit(question, literal, epoch, deadline)
         upper = question.upper()
         if upper == "ENVOYER":
             return self.send(ticket, epoch, deadline)
@@ -440,7 +460,8 @@ class MailSession:
                 self.draft.update(reviewed=False, ticket=secrets.token_urlsafe(24))
                 self.editing = True
             return {
-                "display": "Indiquez les modifications souhaitées. Le nouveau brouillon devra être relu."
+                "display": self.edit_preview(self.draft)
+                + "\n\nModification libre ou A: / A1: / R1: / R: texte.\nLe nouveau brouillon devra être relu."
             }
         match = re.fullmatch(r"(?:lire|read)?\s*(\d+)", question, re.IGNORECASE)
         recipient = re.fullmatch(r"destinataire\s+(\d+)", question, re.IGNORECASE)
@@ -612,6 +633,50 @@ class MailSession:
         if action == "summary":
             return {"display": self.summarize(deadline)}
         return self.make_draft(question, epoch, deadline, revise=action == "revise")
+
+    def edit_preview(self, draft):
+        body = draft["body"].removesuffix("\n\n" + SIGNATURE)
+        blocks = "\n\n".join(f"{i}. {body[a:b]}" for i, (a, b) in enumerate(body_paragraphs(body), 1))
+        return (f"Brouillon révision {draft['revision']}\nÀ: {draft['recipient']}\nObjet: {draft['subject']}\n\n"
+                + blocks + "\n\n" + SIGNATURE)
+
+    def literal_edit(self, question, match, epoch, deadline):
+        previous = self.save(epoch, lambda: self.draft)
+        if previous is None:
+            raise GmailError("no_pending_draft")
+        action, target = match[1].casefold(), (match[2] or "").casefold()
+        text = question[match.end():]
+        if text.startswith(" "):
+            text = text[1:]
+        body = previous["body"].removesuffix("\n\n" + SIGNATURE)
+        spans = body_paragraphs(body)
+        adding = action in {"a", "ajouter"}
+        if (not text.strip() or printable(text) != text or (adding and target == "tout")
+                or (target.isdigit() and not 1 <= int(target) <= len(spans))):
+            return {"display": "Commande invalide. A: / A1: / R1: / R: texte.\nBrouillon inchangé."}
+        closing = previous.get("personal_signoff")
+        if adding:
+            position = spans[int(target) - 1][1] if target else len(body)
+            if not target and closing and body.endswith("\n\n" + closing):
+                position = len(body) - len(closing) - 2
+            body = body[:position] + "\n\n" + text + body[position:]
+        elif target.isdigit():
+            a, b = spans[int(target) - 1]
+            if closing and body[a:b] == closing:
+                closing = text
+            body = body[:a] + text + body[b:]
+        else:
+            body, closing = text, None
+        if len(body) > DRAFT_LIMIT:
+            return {"display": "Texte trop long. Brouillon inchangé."}
+        # Invalidate approval only after validating the literal operation.
+        self.save(epoch, lambda: previous.update(reviewed=False, ticket=secrets.token_urlsafe(24)))
+        state = {**previous, "personal_signoff": closing}
+        result = self.finish_draft(previous["subject"], body, previous["recipient"], epoch, deadline,
+            selected=self.selection() if previous["kind"] == "reply" else None, previous=state,
+            candidate=previous.get("candidate"), instruction=previous.get("instruction", ""))
+        result["display"] = self.edit_preview(self.draft) + "\n\nAprès relecture: ENVOYER / MODIFIER / ANNULER"
+        return result
 
     def list_text(self):
         if not self.items:
@@ -984,6 +1049,9 @@ class MailSession:
                 refs + ([] if refs and refs[-1] == parent_id else [parent_id])
             )
         body = signed(body, self.username if previous is None else None)
+        personal_signoff = self.username if previous is None else previous.get("personal_signoff")
+        if personal_signoff and not body.removesuffix("\n\n" + SIGNATURE).endswith("\n\n" + personal_signoff):
+            personal_signoff = None
         msg.set_content(body)
         draft = {
             "kind": "reply" if selected is not None else "new",
@@ -994,6 +1062,7 @@ class MailSession:
             "recipient": recipient,
             "subject": subject,
             "body": body,
+            "personal_signoff": personal_signoff,
             "raw": msg.as_bytes(),
             "message_id": msg["Message-ID"],
             "ticket": secrets.token_urlsafe(24),

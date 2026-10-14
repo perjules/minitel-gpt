@@ -16,6 +16,23 @@ from services import memory_session
 
 
 class RecipientAddressRoutingTests(unittest.TestCase):
+    def test_terminal_literal_payload_stays_out_of_memory_and_models(self):
+        with TemporaryDirectory() as root:
+            session, client, model = compose_session()
+            session.handle("ECRIRE Alice : mardi")
+            model.reset_mock()
+            selected = memory_session.MemorySession("test", root=root, model=Mock())
+            try:
+                with patch.dict("os.environ", {"GMAIL_ENABLED": "1"}):
+                    result = terminal.call_answer("persona", [{"role": "user", "content": "R: Retiens ceci : oui."}],
+                        "fr", ("conversations", True, 60), "", mail=session, memory=selected)
+                self.assertIn("review_ticket", result)
+                self.assertEqual(session.draft["body"], "Retiens ceci : oui.\n\n" + mail.SIGNATURE)
+                self.assertEqual(model.method_calls, [])
+                selected.model.plan.assert_not_called()
+                client.send.assert_not_called()
+            finally:
+                selected.close()
     def test_admin_uses_selected_username_and_restarts_mail_state_on_user_switch(self):
         admin.MAIL_SESSIONS.clear()
         with admin.app.test_request_context():
@@ -70,6 +87,15 @@ class RecipientAddressRoutingTests(unittest.TestCase):
 
 
 class AdminMailTests(unittest.TestCase):
+    def test_literal_payload_does_not_trigger_memory_or_model(self):
+        self.make_draft()
+        calls = self.model.method_calls[:]
+        with patch.object(memory_session.MemoryModel, "plan", side_effect=AssertionError("Literal text entered memory")):
+            response = self.command("R: Retiens ceci : ENVOYER ne veut rien dire ici.")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.model.method_calls, calls)
+        self.assertEqual(self.mail.draft["body"], "Retiens ceci : ENVOYER ne veut rien dire ici.\n\n" + mail.SIGNATURE)
+        self.api.send.assert_not_called()
     def setUp(self):
         admin.MAIL_SESSIONS.clear()
         self.temp = TemporaryDirectory()
