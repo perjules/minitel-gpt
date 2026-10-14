@@ -168,7 +168,7 @@ def client_class():
         def post(self, function_name, onglet=None, data=None):
             allowed = {"Identification", "Authentification", "ParametresUtilisateur",
                        "PageInfosPerso", "SecurisationCompteDoubleAuth",
-                       "PageCahierDeTexte", "DernieresNotes"}
+                       "PageCahierDeTexte", "DernieresNotes", "PageEmploiDuTemps"}
             if function_name not in allowed:
                 raise PronoteError("read_only")
             REQUEST_STEP.set(function_name)
@@ -384,8 +384,10 @@ class Pronote:
             ("pronote_list_children", "List the allowed child aliases, never account identities.", {}),
             ("pronote_get_homework", "Read homework, inclusive ISO dates. Default today through 7 days. Max 31 days.",
              {"child": child, "from": {"type": "string"}, "to": {"type": "string"}}),
-            ("pronote_get_grades", "Read published grades. Omit period or use current/latest for the most recent started period. Only use an exact period name when the user explicitly requests it.",
+            ("pronote_get_grades", "Read published grades and class average for each test when available. Omit period or use current/latest for the most recent started period. Only use an exact period name when the user explicitly requests it.",
              {"child": child, "period": {"type": "string"}}),
+            ("pronote_get_timetable", "Read lessons for a day (defaults to today) or an inclusive date range up to 7 days. For tomorrow or a weekday, resolve dates in Europe/Paris. For a week, pass Monday through Sunday as ISO dates.",
+             {"child": child, "from": {"type": "string"}, "to": {"type": "string"}}),
         ]
         return [{"type": "function", "function": {"name": name, "description": description,
                  "parameters": {"type": "object", "properties": properties,
@@ -405,23 +407,24 @@ class Pronote:
             if name == "pronote_list_children" and not arguments:
                 return {"children": list(config["children"])}
             permitted = {"pronote_get_homework": {"child", "from", "to"},
-                         "pronote_get_grades": {"child", "period"}}
+                         "pronote_get_grades": {"child", "period"},
+                         "pronote_get_timetable": {"child", "from", "to"}}
             if name not in permitted or set(arguments) - permitted[name]:
                 raise PronoteError("unsupported_tool")
             child = arguments.get("child")
             if not isinstance(child, str) or child not in config["children"]:
                 raise PronoteError("unknown_child")
             args = {"child": child}
-            if name == "pronote_get_homework":
+            if name in ("pronote_get_homework", "pronote_get_timetable"):
                 start_text = arguments.get("from", today().isoformat())
                 if not isinstance(start_text, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", start_text):
                     raise PronoteError("invalid_arguments")
                 start = date.fromisoformat(start_text)
-                end_text = arguments.get("to", (start + timedelta(days=7)).isoformat())
+                end_text = arguments.get("to", (start + timedelta(days=7 if name == "pronote_get_homework" else 0)).isoformat())
                 if not isinstance(end_text, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", end_text):
                     raise PronoteError("invalid_arguments")
                 end = date.fromisoformat(end_text)
-                if not 0 <= (end - start).days <= 30:
+                if not 0 <= (end - start).days <= (30 if name == "pronote_get_homework" else 6):
                     raise PronoteError("invalid_date_range")
                 args.update({"from": start.isoformat(), "to": end.isoformat()})
             else:
@@ -455,6 +458,17 @@ class Pronote:
                         items = [{"date": h.date.isoformat(), "subject": clean(h.subject.name, 120),
                                   "description": clean(h.description), "done": bool(h.done)}
                                  for h in values[:MAX_ITEMS]]
+                    elif name == "pronote_get_timetable":
+                        values = sorted(client.lessons(start, end), key=lambda item: item.start)
+                        items = [{"start": lesson.start.isoformat(timespec="minutes"),
+                                  "end": lesson.end.isoformat(timespec="minutes"),
+                                  "subject": clean(lesson.subject.name, 120) if lesson.subject else "",
+                                  "teacher": clean(lesson.teacher_name, 120),
+                                  "classroom": clean(lesson.classroom, 80),
+                                  "canceled": bool(lesson.canceled),
+                                  "status": clean(lesson.status, 120),
+                                  "test": bool(lesson.test)}
+                                 for lesson in values[:MAX_ITEMS]]
                     else:
                         periods = client.periods
                         if args["period"] == "current":
@@ -469,7 +483,8 @@ class Pronote:
                         values = sorted(selected.grades, key=lambda item: item.date, reverse=True)
                         items = [{"date": g.date.isoformat(), "subject": clean(g.subject.name, 120),
                                   "grade": clean(g.grade, 40), "out_of": clean(g.out_of, 40),
-                                  "coefficient": clean(g.coefficient, 40), "comment": clean(g.comment, 300)}
+                                  "coefficient": clean(g.coefficient, 40), "comment": clean(g.comment, 300),
+                                  "class_average": clean(g.average, 40) if getattr(g, "average", None) is not None else None}
                                  for g in values[:MAX_ITEMS]]
                         args["period"] = clean(selected.name, 100)
                 truncated = len(values) > MAX_ITEMS
