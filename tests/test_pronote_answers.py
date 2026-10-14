@@ -12,6 +12,7 @@ from services import minitel_chatgpt as chat
 from services import mistral_answers as engine
 from services import pronote as pn
 from services import pronote_answers as pa
+from services import memory_session
 
 
 def final(text="Maths : exercice 2 pour demain."):
@@ -21,6 +22,63 @@ def final(text="Maths : exercice 2 pour demain."):
 def call(name="pronote_get_homework", identifier="call-1", arguments=None):
     return {"type": "function.call", "name": name, "tool_call_id": identifier,
             "arguments": arguments or {"child": "Alex", "from": "2026-10-12", "to": "2026-10-12"}}
+
+
+class SchoolMemoryRoutingTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.memory = memory_session.MemorySession("test", root=self.temp.name, model=Mock())
+        self.addCleanup(self.memory.close)
+        self.backend = Mock()
+        self.backend.tools.return_value = [{"type": "function"}]
+        self.backend.config.return_value = {"children": {"Alex": {}, "Élodie": {}}}
+
+    def ask(self, question):
+        result = {"status": "ordinary", "text": "Données scolaires", "chunks": [], "references": []}
+        with (
+            patch.object(chat, "PROVIDER", "mistral"),
+            patch.object(chat.pronote, "backend", return_value=self.backend),
+            patch.object(self.memory, "handle", return_value={"display": "mémoire", "turn": None}) as saved,
+            patch.object(self.memory, "context", return_value="PRIVATE SAVED NOTES") as context,
+            patch.object(chat.mistral_answers, "answer", return_value=result) as answer,
+        ):
+            response = chat.call_answer("persona", [{"role": "user", "content": question}],
+                                        "fr", ("conversations", True, 60), "knowledge", memory=self.memory)
+        return response, saved, context, answer
+
+    def test_french_school_requests_bypass_saved_notes_and_pending_memory(self):
+        for pending in (None, {"choices": ["some-saved-note"]}):
+            self.memory.pending = pending
+            for question in ("Montre moi les notes de Alex", 'Quels sont les devoirs de "Alex"',
+                             "Montre-moi les notes d'Élodie", "Les notes de Elodie", "Devoirs demain ?"):
+                with self.subTest(question=question, pending=bool(pending)):
+                    _, saved, context, answer = self.ask(question)
+                    saved.assert_not_called()
+                    context.assert_not_called()
+                    self.assertIs(answer.call_args.kwargs["pronote"], self.backend)
+                    self.assertEqual(answer.call_args.args[0][-1]["content"], question)
+                    self.assertEqual(self.memory.pending, pending)
+
+    def test_explicit_memory_and_general_saved_notes_keep_their_route(self):
+        for question in ("Montre mes notes de lecture", "Retiens les notes de Alex",
+                         "Note les devoirs de Alex", "Montre la liste des devoirs"):
+            with self.subTest(question=question):
+                _, saved, _, answer = self.ask(question)
+                saved.assert_called_once()
+                answer.assert_not_called()
+
+    def test_bare_memory_choice_is_not_a_school_request(self):
+        self.memory.pending = {"choices": ["some-saved-note"]}
+        _, saved, _, answer = self.ask("1")
+        saved.assert_called_once()
+        answer.assert_not_called()
+
+    def test_disabled_pronote_does_not_override_memory(self):
+        self.backend.tools.return_value = []
+        _, saved, _, answer = self.ask("Montre moi les notes de Alex")
+        saved.assert_called_once()
+        answer.assert_not_called()
 
 
 class LocalAnswerTests(unittest.TestCase):

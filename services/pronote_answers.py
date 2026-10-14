@@ -4,6 +4,7 @@ import logging
 import re
 import textwrap
 import time
+import unicodedata
 
 import requests
 
@@ -38,6 +39,22 @@ def school_question(history, aliases):
     question = history[-1]["content"].casefold()
     return (any(re.search(r"(?<!\w)" + re.escape(alias.casefold()) + r"(?!\w)", question) for alias in aliases)
             or bool(re.search(r"\b(pronote|devoirs?|homework|grades?|notes?|enfants?|children|child)\b", question)))
+
+
+def school_record_request(question, aliases):
+    """Disambiguate school grades from saved notes before the memory adapter."""
+    def normalized(text):
+        return unicodedata.normalize("NFKD", text.casefold()).encode("ascii", "ignore").decode()
+
+    question = normalized(question)
+    if re.search(r"\b(?:pronote|devoirs?|homework|grades?|bulletins?)\b", question):
+        return True
+    if not re.search(r"\bnotes?\b", question):
+        return False
+    return bool(re.search(r"\b(?:scolaires?|trimestres?|semestres?)\b", question)) or any(
+        re.search(r"(?<!\w)" + re.escape(normalized(alias)) + r"(?!\w)", question)
+        for alias in aliases if alias
+    )
 
 
 def answer(history, language, key, model, web_search, timeout, knowledge, backend):

@@ -448,7 +448,12 @@ def call_answer(system_prompt, history, language, options, knowledge,
                            calculator.generate_scene(expr, lang, MISTRAL_KEY, MISTRAL_MODEL))
     explicit_memory = memory_session.explicit_request(question)
     note_request = re.match(r"^note\b", question, re.I)
+    school = pronote.backend() if PROVIDER == "mistral" and api == "conversations" else None
+    school_enabled = school is not None and bool(school.tools())
+    school_request = (school_enabled and not explicit_memory and not note_request
+                      and pronote_answers.school_record_request(question, school.config().get("children", {})))
     if (memory is not None and memory.interested(question)
+            and not school_request
             and (mail is None or not mail.draft or explicit_memory or note_request)):
         # An ambiguous "note this" during reply editing must not silently save instead.
         if mail is not None and mail.draft and note_request:
@@ -465,14 +470,14 @@ def call_answer(system_prompt, history, language, options, knowledge,
                              calculator.generate_scene(expr, lang, MISTRAL_KEY, MISTRAL_MODEL))
         if result is not None:
             return result
-    remembered = memory.context(question) if memory is not None else ""
+    remembered = memory.context(question) if memory is not None and not school_request else ""
     if remembered:
         knowledge = knowledge + "\n\n" + remembered
         system_prompt += "\n\n" + remembered
     if PROVIDER == "mistral" and api == "conversations":
         result = mistral_answers.answer(history, language, MISTRAL_KEY,
                                         MISTRAL_MODEL, web_search, timeout, knowledge,
-                                        **({"pronote": pronote.backend()} if pronote.backend().tools() else {}))
+                                        **({"pronote": school} if school_enabled else {}))
         notice = mistral_answers.notice(result["status"], language)
         if notice:
             # Operational notices are not successful factual turns. Do not
