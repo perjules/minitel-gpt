@@ -288,7 +288,7 @@ class TerminalMailTests(unittest.TestCase):
         self.assertEqual(terminal.show_response(term, text), "done")
         session.acknowledge(ticket)
         self.assertIn(
-            "Envoye depuis Minitel 722079V (138121)", startup.screen_text(uart.output)
+            "Envoye par Minitel 722079V (138121)", startup.screen_text(uart.output)
         )
         session.handle("ENVOYER", ticket)
         client.send.assert_called_once()

@@ -295,8 +295,8 @@ Select an owner-controlled test message, then:
    malformed/duplicate headers block sending and ask for a different valid source.
 2. Read the entire recipient address, subject and outgoing body through **SUITE**.
    Python appends the exact outgoing signature:
-   **Envoyé depuis Minitel 722079V (138121) — 3615 IA**.
-   The terminal displays `Envoye depuis Minitel 722079V (138121) - 3615 IA`; the actual MIME
+   **Envoyé par Minitel 722079V (138121) — 3615 IA**.
+   The terminal displays `Envoye par Minitel 722079V (138121) - 3615 IA`; the actual MIME
    body retains the Unicode signature. Neither persona nor interface instructions
    are included in the outgoing email.
 3. `MODIFIER` asks for changes; `MODIFIER rendre plus court` or conversational
