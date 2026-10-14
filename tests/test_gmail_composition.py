@@ -319,6 +319,75 @@ class ModelContractTests(unittest.TestCase):
 
 
 class CompositionSessionTests(unittest.TestCase):
+    def test_unknown_contact_then_literal_address_keeps_instructions_and_send_review(self):
+        session, client, model = compose_session()
+        model.resolve.side_effect = None
+        model.resolve.return_value = {"status": "no_match", "ids": []}
+        result = session.handle("ECRIRE Bob : confirmer mardi")
+        self.assertIn("introuvable", result["display"])
+        result = session.handle("mail+new@example.net")
+        ticket = result["review_ticket"]
+        self.assertEqual(session.draft["recipient"], "mail+new@example.net")
+        self.assertEqual(model.composition.call_args.args[0], "confirmer mardi")
+        self.assertEqual(model.composition.call_args.args[1]["address"], "mail+new@example.net")
+        model.route.assert_not_called()
+        model.resolve.assert_called_once()
+        client.correspondent_metadata.assert_called_once()
+        mime = BytesParser(policy=policy.default).parsebytes(session.draft["raw"])
+        self.assertEqual(mime["To"], "mail+new@example.net")
+        self.assertIsNone(mime["In-Reply-To"])
+        session.handle("ENVOYER", ticket)
+        client.send.assert_not_called()
+        session.acknowledge(ticket)
+        session.handle("ENVOYER", ticket)
+        client.send.assert_called_once()
+
+    def test_literal_shortcut_needs_no_correspondent_lookup_or_resolution(self):
+        session, client, model = compose_session()
+        result = session.handle("ECRIRE never-seen@example.net : confirmer mardi")
+        self.assertIn("review_ticket", result)
+        self.assertEqual(session.draft["recipient"], "never-seen@example.net")
+        client.correspondent_metadata.assert_not_called()
+        model.resolve.assert_not_called()
+        model.route.assert_not_called()
+        client.send.assert_not_called()
+
+    def test_literal_address_replaces_ambiguous_choices(self):
+        session, client, model = compose_session()
+        client.correspondent_metadata.return_value["records"].append(
+            metadata("other", From="Alice <other@example.org>"))
+        model.resolve.side_effect = lambda d, c, t: {"status": "ambiguous", "ids": [v["id"] for v in c]}
+        session.handle("ECRIRE Alice : confirmer mardi")
+        self.assertEqual(len(session.recipient_choices), 2)
+        self.assertIn("review_ticket", session.handle("new@example.net"))
+        self.assertEqual(session.draft["recipient"], "new@example.net")
+        self.assertEqual(session.recipient_choices, [])
+        model.resolve.assert_called_once()
+
+    def test_invalid_literal_addresses_keep_pending_instructions_without_drafting(self):
+        for address in ("bad@@example.org", "a@example.org, b@example.org",
+                        "good@example.org\r\n Bcc: other@example.org"):
+            with self.subTest(address=address):
+                session, client, model = compose_session()
+                model.resolve.side_effect = None
+                model.resolve.return_value = {"status": "no_match", "ids": []}
+                session.handle("ECRIRE Bob : confirmer mardi")
+                self.assertIn("mal formée", session.handle(address)["display"])
+                self.assertEqual(session.composition["instruction"], "confirmer mardi")
+                self.assertIsNone(session.draft)
+                model.composition.assert_not_called()
+                client.send.assert_not_called()
+
+    def test_direct_address_without_content_asks_only_for_content(self):
+        session, client, model = compose_session()
+        model.route.return_value = {"action": "compose", "recipient": "new@example.net", "instruction": ""}
+        self.assertIn("voulez-vous écrire", session.handle("Écris un mail à new@example.net")["display"])
+        self.assertIn("review_ticket", session.handle("Contacter support@example.org mardi"))
+        self.assertEqual(session.draft["recipient"], "new@example.net")
+        self.assertEqual(model.composition.call_args.args[0], "Contacter support@example.org mardi")
+        client.correspondent_metadata.assert_not_called()
+        model.resolve.assert_not_called()
+
     def test_many_plausible_matches_ask_for_detail_instead_of_a_long_menu(self):
         session, client, model = compose_session()
         client.correspondent_metadata.return_value["records"] = [
@@ -476,7 +545,7 @@ class CompositionSessionTests(unittest.TestCase):
         session.handle("ECRIRE Alice : vendredi")
         self.assertEqual(client.correspondent_metadata.call_count, 3)
 
-    def test_model_context_overflow_narrows_only_to_real_literal_address(self):
+    def test_model_context_overflow_accepts_a_literal_address_without_more_lookup(self):
         session, client, model = compose_session()
         with patch.object(extraction, "MODEL_CATALOGUE_LIMIT", 50):
             result = session.handle("ECRIRE Alice : mardi")

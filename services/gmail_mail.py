@@ -394,12 +394,14 @@ class MailSession:
                     "\nAdresse de réponse absente, multiple ou mal formée. Choisissez un autre message "
                     "ou faites vérifier l'en-tête dans Gmail; aucune adresse ne sera inventée."
                 )
+                if code == "recipient_invalid" and self.composition:
+                    message = "Adresse email mal formée ou multiple. Saisissez une seule adresse complète; aucun mail envoyé."
             elif code == "message_too_large":
                 message += "\nLimite locale: corps 64 Kio / réponse API 1 Mio. Ouvrez ce message dans Gmail."
             useful = {
                 "select_message_first": "Choisissez d'abord un message avec MAIL puis LIRE numéro pour répondre. Pour un nouveau mail: ECRIRE nom : instructions.",
                 "recipient_resolution_invalid": "La sélection du destinataire n'est pas valide. Précisez le nom ou l'adresse; aucune adresse n'a été inventée.",
-                "catalogue_too_large": "Catalogue trop volumineux pour une sélection fiable. Précisez une adresse complète déjà présente parmi les 50 messages récents.",
+                "catalogue_too_large": "Catalogue trop volumineux pour une sélection fiable. Saisissez directement une adresse email complète.",
                 "invalid_composition": "Le brouillon généré est incomplet ou mal formé. Reformulez vos instructions; aucun mail envoyé.",
             }
             if code in useful:
@@ -482,6 +484,12 @@ class MailSession:
             return self.list("", epoch, deadline)
         if re.match(r"^(recherche|search)\s+", question, re.IGNORECASE):
             return self.list(question.split(" ", 1)[1], epoch, deadline)
+        # A supplied address resolves either a missing contact or a name ambiguity.
+        # Do this before keyword routing (even mail@example.org contains "mail").
+        if (self.composition and not self.draft
+                and not self.composition.get("instruction_needed") and "@" in question):
+            return self.compose(question, self.composition["instruction"], epoch, deadline,
+                                previous=self.composition.get("previous"))
         # New email intent is routed before the conversational revision catch-all.
         new_intent = bool(
             re.search(
@@ -709,19 +717,27 @@ class MailSession:
         own = self.client.tokens.email_address
         if not own:
             raise GmailError("reconnect_required")
+        if "@" in description:
+            # The user supplies the destination; recent-mail lookup is only for names.
+            if any(ord(c) < 32 or ord(c) == 127 for c in description):
+                raise GmailError("recipient_invalid")
+            literal = addresses(description)
+            if len(literal) != 1:
+                raise GmailError("recipient_invalid")
+            return self.make_new(instruction, {
+                "address": literal[0], "names": [], "automated": False,
+            }, epoch, deadline, previous=previous)
         aliases = []
         for alias in self.self_aliases:
             parsed = addresses(alias)
             if len(parsed) != 1:
                 raise GmailError("recipient_invalid")
             aliases.extend(parsed)
-        # Exact-address narrowing is validation against evidence, not another name matcher.
-        exact = re.findall(r"[\w.+-]+@[\w.-]+", description)
         cached = self.save(epoch, lambda: self.catalogue)
         if not cached or cached["expires"] <= time.monotonic():
             metadata = self.client.correspondent_metadata(deadline)
             candidates, skipped = correspondents.catalogue(
-                metadata, [own, *aliases], exact
+                metadata, [own, *aliases]
             )
             notice = (
                 f"Correspondants: {len(metadata['records'])}/{metadata['attempted']} messages récupérés. "
@@ -737,22 +753,10 @@ class MailSession:
                 "candidates": candidates,
                 "expires": time.monotonic() + correspondents.CATALOGUE_TTL,
                 "notice": notice,
-                "exact": exact,
             }
             self.save(epoch, lambda: setattr(self, "catalogue", record))
         cached = self.save(epoch, lambda: self.catalogue)
         candidates = cached["candidates"]
-        # A cache narrowed to an address cannot answer a different person's request.
-        if cached["exact"] and cached["exact"] != exact:
-            self.save(epoch, lambda: setattr(self, "catalogue", None))
-            return self.compose(description, instruction, epoch, deadline, previous)
-        if exact:
-            keys = {correspondents.address_key(a) for a in exact}
-            candidates = [
-                c
-                for c in candidates
-                if correspondents.address_key(c["address"]) in keys
-            ]
         if (
             len(json.dumps(candidates, ensure_ascii=False))
             > correspondents.MODEL_CATALOGUE_LIMIT
@@ -790,7 +794,7 @@ class MailSession:
             if result["status"] == "no_match" and not identifiers:
                 return {
                     "display": notice
-                    + "Destinataire introuvable parmi les 50 messages récents.\nPrécisez son nom ou une adresse présente dans ces messages; aucun élargissement automatique."
+                    + "Destinataire introuvable parmi les 50 messages récents.\nPrécisez son nom ou saisissez directement son adresse email complète."
                 }
             if result["status"] != "ambiguous" or len(identifiers) < 2:
                 raise ValueError()

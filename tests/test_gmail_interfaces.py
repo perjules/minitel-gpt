@@ -2,7 +2,7 @@
 
 import unittest
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import test_terminal_startup as startup
 from test_gmail import make_session
@@ -12,6 +12,29 @@ from test_terminal_startup import fn
 from services import admin_ui as admin
 from services import gmail_mail as mail
 from services import minitel_chatgpt as terminal
+from services import memory_session
+
+
+class RecipientAddressRoutingTests(unittest.TestCase):
+    def test_pending_email_address_wins_over_memory_keywords(self):
+        for address in ("note@example.net", "saved@example.net", "notes@school.example"):
+            with self.subTest(address=address), TemporaryDirectory() as root:
+                session, client, model = compose_session()
+                model.resolve.side_effect = None
+                model.resolve.return_value = {"status": "no_match", "ids": []}
+                session.handle("ECRIRE Bob : confirmer mardi")
+                memory_model = Mock()
+                selected = memory_session.MemorySession("test", root=root, model=memory_model)
+                try:
+                    with patch.dict("os.environ", {"GMAIL_ENABLED": "1"}):
+                        result = terminal.call_answer("persona", [{"role": "user", "content": address}],
+                            "fr", ("conversations", True, 60), "", mail=session, memory=selected)
+                    self.assertIn("review_ticket", result)
+                    self.assertEqual(session.draft["recipient"], address)
+                    memory_model.plan.assert_not_called()
+                    client.send.assert_not_called()
+                finally:
+                    selected.close()
 
 
 class AdminMailTests(unittest.TestCase):

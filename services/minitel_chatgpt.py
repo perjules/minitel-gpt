@@ -452,8 +452,11 @@ def call_answer(system_prompt, history, language, options, knowledge,
     school_enabled = school is not None and bool(school.tools())
     school_request = (school_enabled and not explicit_memory and not note_request
                       and pronote_answers.school_record_request(question, school.config().get("children", {})))
+    recipient_address = (mail is not None and mail.composition
+                         and not mail.composition.get("instruction_needed")
+                         and re.fullmatch(r"[^\s<>@]+@[^\s<>@]+", question.strip()))
     if (memory is not None and memory.interested(question)
-            and not school_request
+            and not school_request and not recipient_address
             and (mail is None or not mail.draft or explicit_memory or note_request)):
         # An ambiguous "note this" during reply editing must not silently save instead.
         if mail is not None and mail.draft and note_request:

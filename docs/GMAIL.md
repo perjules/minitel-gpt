@@ -376,12 +376,16 @@ and discarded by SOMMAIRE, ANNULER, logout/session expiry or restart.
   candidate pages use existing navigation without refetching or calling the model.
   More than six plausible matches asks for more detail instead of a long menu.
 - A missing match explains the last-50-message boundary. Use a more precise name or
-  an address that actually occurs in those messages; arbitrary new addresses are
-  outside Stage 1. For partial fetch failures, SOMMAIRE lets a fresh request retry.
+  type a complete email address directly. A single valid user-supplied address is
+  accepted immediately, even when absent from recent messages, without a recipient
+  lookup or confirmation question. The original writing instructions are retained.
+  This also works with `ECRIRE person@example.org : instructions` or in place of a
+  numbered recipient choice. Malformed/multiple addresses are rejected; the full
+  draft still requires review and literal ENVOYER before sending.
 - The compact catalogue is capped at 64,000 serialized characters, and model input
-  at 24,000 catalogue characters. Overflow asks for an exact address already present
-  in the recent messages; Python validates that literal address against metadata
-  rather than silently dropping candidates or adding a name-matching engine.
+  at 24,000 catalogue characters. Overflow asks for a complete email address;
+  Python validates that literal address directly rather than silently dropping
+  candidates or adding a name-matching engine.
 
 After resolution, the model generates a fresh subject and plain-text body from your
 instructions. Identification subjects and the previously selected body are **not**
