@@ -207,7 +207,9 @@ Reports, competencies and announcements show numbered entries first. Daily
 lessons use short time/subject/room lines; long homework and grade comments are
 shortened only in the initial screen view, with `TEXTE` showing the loaded text. `LIRE 2`
 shows one loaded entry; `TEXTE` shows all loaded details. Paging/detail/filtering
-makes no network or model request. `IMPRIMER` prints the complete retained
+makes no network or model request. Results, menus and errors stay visible while
+waiting for the next command; the input hint is appended below the last page
+without clearing it. `IMPRIMER` prints the complete retained
 result, including all loaded pages, through the existing text printer; weekly
 printing includes full lessons even though the screen shows a compact weekly
 summary. It does not print/download attachments. Printer installation and
@@ -379,7 +381,7 @@ PRONOTE and printing dependencies installed. Run the full offline suite and lint
 .venv/bin/ruff check --select F services/pronote.py services/pronote_answers.py services/minitel_chatgpt.py scripts/pronote_setup.py
 ```
 
-The expanded suite passes **269 tests**. Expansion tests use synthetic data and pinned real SDK objects for averages,
+The expanded suite passes **270 tests**. Expansion tests use synthetic data and pinned real SDK objects for averages,
 unpublished reports and announcement content. They cover every new tool/command,
 child changes, stale isolation, date bounds, partial failures, endpoint writes,
 thread serialization, real terminal-loop routing, function keys, full printing

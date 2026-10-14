@@ -969,7 +969,13 @@ def run(term=None):
                     break
                 if result == "retour":
                     school_mode.reset()
-                show_question_prompt(t, "PRONOTE / AIDE / RETOUR" if school_mode.mode else question_msg)
+                # Keep the result/error on screen while accepting the next
+                # command, like ordinary conversation. The startup prompt
+                # helper clears the screen and would erase this last page.
+                t.w(bytes([CR, LF]))
+                t.w(FG_WHITE)
+                t.center("PRONOTE / AIDE / RETOUR" if school_mode.mode else UI[language]["follow_up"])
+                t.w(bytes([CR, LF]))
                 continue
 
             # A selected email is a document in its own right, not an LLM turn.

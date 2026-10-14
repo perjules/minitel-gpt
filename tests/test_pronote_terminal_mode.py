@@ -8,9 +8,46 @@ import test_terminal_startup as startup
 
 from services import minitel_chatgpt as chat
 from services import pronote_mode as mode
+from services.console_terminal import Screen
 
 
 class TerminalModeTests(unittest.TestCase):
+    def test_direct_output_stays_visible_while_waiting_for_next_command(self):
+        cases = [
+            (None, "NOTES / MOYENNES / DEVOIRS", b""),
+            ({"records": {"child": "Alex", "items": [{"subject": "Maths", "start": "2026-10-14T08:00",
+                                                         "end": "2026-10-14T09:00"}]}}, "Maths", b""),
+            ({"records": {"error": "not_enrolled"}}, "PRONOTE: not_enrolled", b""),
+            ({"display": "\n".join(f"Ligne {i}" for i in range(36))}, "Ligne 35", startup.fn(chat.K_SUITE)),
+        ]
+        for response, visible_text, paging in cases:
+            with self.subTest(visible_text=visible_text):
+                backend = Mock()
+                backend.config.return_value = {"enabled": True, "children": {"Alex": {"name": "private"}}}
+
+                def start(*args, response=response):
+                    output = Queue()
+                    output.put((response, None))
+                    return Mock(is_alive=lambda: False), output, chat.time.monotonic()
+
+                keys = b"fr" + startup.fn(chat.K_ENVOI) + startup.fn(chat.K_SUITE)
+                keys += b"PRONOTE" + startup.fn(chat.K_ENVOI)
+                if response:
+                    keys += b"COURS" + startup.fn(chat.K_ENVOI) + paging
+                with (patch.object(chat.pronote, "backend", return_value=backend),
+                      patch.object(chat, "start_pronote", side_effect=start) as request):
+                    helper = startup.StartupTests()
+                    helper.run_session(keys)
+                # Inspect the screen at the next input wait, not the historical
+                # byte stream: text that was emitted then cleared is not visible.
+                screen = Screen()
+                screen.write(helper.uart.output)
+                rendered = "\n".join("".join(row) for row in screen.rows)
+                self.assertIn(visible_text, rendered)
+                self.assertIn("PRONOTE / AIDE / RETOUR", rendered)
+                self.assertLessEqual(screen.row, 22)
+                self.assertEqual(request.call_count, 1 if response else 0)
+
     def test_real_loop_routes_direct_commands_and_restores_normal_conversation(self):
         backend = Mock()
         backend.config.return_value = {"enabled": True, "children": {"Alex": {"name": "private"}, "Sam": {"name": "private2"}}}
