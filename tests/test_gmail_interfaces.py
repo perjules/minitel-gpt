@@ -16,6 +16,24 @@ from services import memory_session
 
 
 class RecipientAddressRoutingTests(unittest.TestCase):
+    def test_explicit_modify_keeps_note_as_edit_instruction_instead_of_memory(self):
+        with TemporaryDirectory() as root:
+            session, client, model = compose_session()
+            session.handle("ECRIRE Alice : confirmer mardi")
+            session.handle("MODIFIER")
+            selected = memory_session.MemorySession("test", root=root, model=Mock())
+            try:
+                with patch.dict("os.environ", {"GMAIL_ENABLED": "1"}):
+                    result = terminal.call_answer("persona", [{"role": "user", "content": "Note Camille comme signature"}],
+                        "fr", ("conversations", True, 60), "", mail=session, memory=selected)
+                self.assertIn("review_ticket", result)
+                self.assertEqual(model.composition.call_args.args[0], "Note Camille comme signature")
+                selected.model.plan.assert_not_called()
+                model.route.assert_not_called()
+                client.send.assert_not_called()
+            finally:
+                selected.close()
+
     def test_pending_email_address_wins_over_memory_keywords(self):
         for address in ("note@example.net", "saved@example.net", "notes@school.example"):
             with self.subTest(address=address), TemporaryDirectory() as root:

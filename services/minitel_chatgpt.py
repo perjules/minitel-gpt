@@ -457,6 +457,7 @@ def call_answer(system_prompt, history, language, options, knowledge,
                          and re.fullmatch(r"[^\s<>@]+@[^\s<>@]+", question.strip()))
     if (memory is not None and memory.interested(question)
             and not school_request and not recipient_address
+            and not (mail is not None and mail.draft and mail.editing and not explicit_memory)
             and (mail is None or not mail.draft or explicit_memory or note_request)):
         # An ambiguous "note this" during reply editing must not silently save instead.
         if mail is not None and mail.draft and note_request:

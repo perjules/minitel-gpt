@@ -207,6 +207,34 @@ class WorkflowTests(unittest.TestCase):
         )
         client.send.assert_called_once()
 
+    def test_modify_then_personal_signoff_revises_reply_without_reclassification(self):
+        session, client, _ = make_session()
+        ticket = draft(session)
+        previous = dict(session.draft)
+        session.acknowledge(ticket)
+        session.model = mail.MailModel()
+        body = previous["body"].removesuffix("\n\n" + mail.SIGNATURE)
+        with (
+            patch.object(session.model, "route", side_effect=AssertionError("Edit was reclassified")),
+            patch.object(session.model, "complete", return_value=body + "\n\nCamille") as complete,
+        ):
+            session.handle("MODIFIER")
+            result = session.handle("Signe avec Camille")
+        complete.assert_called_once()
+        prompt, data = complete.call_args.args[:2]
+        self.assertEqual(data["task"], "revise")
+        self.assertEqual(data["instruction"], "Signe avec Camille")
+        self.assertEqual(data["existing_reply"], body)
+        self.assertIn("sender's closing name", prompt)
+        self.assertEqual(session.draft["recipient"], previous["recipient"])
+        self.assertEqual(session.draft["subject"], previous["subject"])
+        self.assertEqual(session.draft["thread"], previous["thread"])
+        self.assertEqual(session.draft["body"], body + "\n\nCamille\n\n" + mail.SIGNATURE)
+        self.assertNotEqual(result["review_ticket"], ticket)
+        self.assertFalse(session.review_valid(ticket))
+        self.assertFalse(session.review_valid(result["review_ticket"]))
+        client.send.assert_not_called()
+
     def test_revision_old_ticket_cannot_approve_and_ordinary_words_cannot_send(self):
         session, client, model = make_session()
         old = draft(session)

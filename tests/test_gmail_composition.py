@@ -319,6 +319,59 @@ class ModelContractTests(unittest.TestCase):
 
 
 class CompositionSessionTests(unittest.TestCase):
+    def test_modify_then_personal_signoff_edits_existing_new_message_without_router(self):
+        session, client, _ = compose_session()
+        old_ticket = session.handle("ECRIRE Alice : confirmer mardi")["review_ticket"]
+        previous = dict(session.draft)
+        session.acknowledge(old_ticket)
+        session.model = mail.MailModel()
+        revised_body = previous["body"].removesuffix("\n\n" + mail.SIGNATURE) + "\n\nCamille"
+        with (
+            patch.object(session.model, "route", side_effect=AssertionError("Edit was reclassified")),
+            patch.object(session.model, "complete", return_value=json.dumps({
+                "subject": previous["subject"], "body": revised_body,
+            })) as complete,
+        ):
+            session.handle("MODIFIER")
+            self.assertTrue(session.editing)
+            result = session.handle("Signe avec Camille")
+        complete.assert_called_once()
+        prompt, data = complete.call_args.args[:2]
+        self.assertEqual(data["task"], "revise")
+        self.assertEqual(data["instruction"], "Signe avec Camille")
+        self.assertEqual(data["existing_message"]["subject"], previous["subject"])
+        self.assertEqual(data["existing_message"]["body"], previous["body"].removesuffix("\n\n" + mail.SIGNATURE))
+        self.assertIn("sender's closing name", prompt)
+        self.assertNotIn("No signature", prompt)
+        self.assertEqual(session.draft["recipient"], previous["recipient"])
+        self.assertEqual(session.draft["subject"], previous["subject"])
+        self.assertEqual(session.draft["revision"], 2)
+        self.assertIn("\n\nCamille\n\n" + mail.SIGNATURE, session.draft["body"])
+        self.assertEqual(session.draft["body"].count(mail.SIGNATURE), 1)
+        self.assertFalse(session.editing)
+        self.assertFalse(session.review_valid(old_ticket))
+        ticket = result["review_ticket"]
+        session.handle("ENVOYER", ticket)
+        client.send.assert_not_called()
+        session.acknowledge(ticket)
+        session.handle("ENVOYER", ticket)
+        client.send.assert_called_once()
+
+    def test_failed_explicit_edit_keeps_edit_mode_and_old_review_invalid(self):
+        session, client, model = compose_session()
+        ticket = session.handle("ECRIRE Alice : mardi")["review_ticket"]
+        session.acknowledge(ticket)
+        session.handle("MODIFIER")
+        model.composition.side_effect = GmailError("generation_unavailable")
+        session.handle("Signe avec Camille")
+        self.assertTrue(session.editing)
+        self.assertFalse(session.review_valid(ticket))
+        model.route.assert_not_called()
+        client.send.assert_not_called()
+        session.handle("ANNULER")
+        self.assertFalse(session.editing)
+        self.assertIsNone(session.draft)
+
     def test_unknown_contact_then_literal_address_keeps_instructions_and_send_review(self):
         session, client, model = compose_session()
         model.resolve.side_effect = None

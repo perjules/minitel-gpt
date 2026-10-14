@@ -38,6 +38,15 @@ except ImportError:
     )
 
 SIGNATURE = "Envoyé par Minitel 722079V (138121) — 3615 IA"
+DRAFT_RULES = (
+    "User writing/editing instructions are commands for the draft, not facts to announce "
+    "to its recipient. A request such as 'signe avec Camille' means add Camille as the "
+    "sender's closing name; it does not mean anyone signed a document. Include a personal "
+    "closing/name when requested, preserving it in later edits unless asked to remove it. "
+    "Do not invent facts or include headers. Do not generate the automatic Minitel footer; "
+    "Python appends it separately. For revisions return the complete revised body, "
+    "preserving all unchanged content and meaning."
+)
 CONTEXT_LIMIT = 12000
 DRAFT_LIMIT = 12000
 
@@ -223,16 +232,16 @@ class MailModel:
             raise GmailError("recipient_resolution_invalid") from None
 
     def composition(self, instruction, recipient, deadline, previous=None):
-        data = {"instruction": instruction, "recipient": recipient}
+        data = {"task": "revise" if previous else "compose", "instruction": instruction, "recipient": recipient}
         if previous:
             data["existing_message"] = {
                 "subject": previous["subject"],
-                "body": previous["body"],
+                "body": previous["body"].removesuffix("\n\n" + SIGNATURE),
             }
         result = self.complete(
-            "Write a genuinely new email, or revise the supplied new draft. Return only JSON "
-            '{"subject":"fresh subject","body":"complete plain-text body"}. '
-            "No signature or headers in body. Use the user instructions, never unrelated email "
+            ("Revise the supplied existing_message. " if previous else "Write a genuinely new email. ")
+            + 'Return only JSON {"subject":"subject","body":"complete plain-text body"}. '
+            + DRAFT_RULES + " Use the user instructions, never unrelated email "
             "subjects/content or invented facts. Do not prepend Re: automatically. For revisions "
             "preserve unchanged meaning and subject unless the user asks to change it. "
             "The recipient is fixed by Python; this response cannot change it.",
@@ -274,6 +283,7 @@ class MailSession:
         self.catalogue = None
         self.composition = None
         self.choice_kind = None
+        self.editing = False
         self.self_aliases = (
             self_aliases
             if self_aliases is not None
@@ -296,6 +306,7 @@ class MailSession:
             )
             self.recipient_choices, self.reply_instruction = [], ""
             self.catalogue = self.composition = self.choice_kind = None
+            self.editing = False
 
     def interested(self, question):
         if not enabled():
@@ -418,8 +429,10 @@ class MailSession:
             return self.send(ticket, epoch, deadline)
         if upper == "MODIFIER":
             with self.lock:
-                if self.draft:
-                    self.draft.update(reviewed=False, ticket=secrets.token_urlsafe(24))
+                if not self.draft:
+                    raise GmailError("no_pending_draft")
+                self.draft.update(reviewed=False, ticket=secrets.token_urlsafe(24))
+                self.editing = True
             return {
                 "display": "Indiquez les modifications souhaitées. Le nouveau brouillon devra être relu."
             }
@@ -484,6 +497,8 @@ class MailSession:
             return self.list("", epoch, deadline)
         if re.match(r"^(recherche|search)\s+", question, re.IGNORECASE):
             return self.list(question.split(" ", 1)[1], epoch, deadline)
+        if self.editing and self.draft and not changing_recipient:
+            return self.make_draft(question, epoch, deadline, revise=True)
         # A supplied address resolves either a missing contact or a name ambiguity.
         # Do this before keyword routing (even mail@example.org contains "mail").
         if (self.composition and not self.draft
@@ -699,6 +714,7 @@ class MailSession:
         # A new/changed recipient must immediately retire approval of the old target.
         def begin():
             self.draft = None
+            self.editing = False
             self.recipient_choices = []
             self.choice_kind = "new"
             self.composition = {
@@ -910,14 +926,13 @@ class MailSession:
                     + "\n".join(f"{i}. {a}" for i, a in enumerate(candidates, 1))
                 }
             recipient = candidates[0]
-        data = {**self.context(), "instruction": instruction}
+        data = {**self.context(), "task": "revise" if revise else "reply", "instruction": instruction}
         if revise:
-            data["existing_reply"] = previous["body"]
+            data["existing_reply"] = previous["body"].removesuffix("\n\n" + SIGNATURE)
         body = signed(
             self.model.complete(
-                "Write only the complete plain-text reply body, without headers "
-                "or signature. Apply the user's instructions; do not invent facts. "
-                "For revisions preserve all unchanged meaning.",
+                ("Revise the supplied existing_reply. " if revise else "Write a reply to the selected message. ")
+                + "Return only the complete plain-text body. " + DRAFT_RULES,
                 data,
                 deadline,
             )
@@ -982,6 +997,7 @@ class MailSession:
 
         def commit():
             self.draft = draft
+            self.editing = False
             self.composition = self.choice_kind = None
             self.recipient_choices = []
 
