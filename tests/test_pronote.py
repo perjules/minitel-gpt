@@ -111,9 +111,37 @@ class PronoteTests(unittest.TestCase):
         self.assertEqual(result["period"], "Trimestre 1")
         self.assertEqual(result["items"][0]["grade"], "Absent")
         self.assertEqual(result["items"][0]["coefficient"], "0,5")
-        self.assertNotIn("average", json.dumps(result))
+        self.assertEqual(result["items"][0]["class_average"], "PRIVATE CLASS AVERAGE")
         unknown = self.local.execute("pronote_get_grades", {"child": "Alex", "period": "Unknown"})
         self.assertEqual(unknown, {"error": "select_period", "periods": ["Trimestre 1"]})
+
+    def test_timetable_defaults_to_today_and_preserves_cancelled_lessons(self):
+        from datetime import time as dt_time
+        client = self.client()
+        client.lessons.return_value = [
+            Obj(start=datetime.combine(self.day, dt_time(8, 0)),
+                end=datetime.combine(self.day, dt_time(9, 0)),
+                subject=Obj(name="Maths"), teacher_name="Mme Test",
+                classroom="B12", canceled=True, status="Annulé", test=False)
+        ]
+        self.factory.token_login.side_effect = None
+        self.factory.token_login.return_value = client
+        result = self.local.execute("pronote_get_timetable", {"child": "Alex"})
+        self.assertNotIn("error", result)
+        self.assertEqual(result["from"], self.day.isoformat())
+        self.assertEqual(result["to"], self.day.isoformat())
+        self.assertEqual(result["items"][0]["subject"], "Maths")
+        self.assertTrue(result["items"][0]["canceled"])
+        client.lessons.assert_called_once_with(self.day, self.day)
+        self.assertIn("pronote_get_timetable", json.dumps(self.local.tools()))
+
+    def test_timetable_rejects_long_range_before_authentication(self):
+        start = self.day
+        result = self.local.execute("pronote_get_timetable", {
+            "child": "Alex", "from": start.isoformat(),
+            "to": (start + timedelta(days=7)).isoformat()})
+        self.assertEqual(result, {"error": "invalid_date_range"})
+        self.factory.token_login.assert_not_called()
 
     def test_default_grade_period_is_latest_started_and_explicit_choice_is_preserved(self):
         base = self.client().periods[0]
