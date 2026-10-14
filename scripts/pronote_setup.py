@@ -8,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from services.pronote import PronoteError, backend
+from services.pronote_records import DATE_OPERATIONS, PERIOD_OPERATIONS
 
 
 def main():
@@ -22,7 +23,7 @@ def main():
     config = commands.add_parser("configure")
     config.add_argument("--file", type=Path, required=True)
     call = commands.add_parser("read")
-    call.add_argument("kind", choices=["homework", "grades"])
+    call.add_argument("kind", choices=["homework", "grades", "timetable", *PERIOD_OPERATIONS, *DATE_OPERATIONS])
     call.add_argument("child")
     call.add_argument("--from", dest="start")
     call.add_argument("--to", dest="end")
