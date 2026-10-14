@@ -1498,6 +1498,8 @@ def mail_entry(username=""):
             MAIL_SESSIONS[identifier] = {
                 "mail": gmail_mail.MailSession(
                     username=username,
+                    auto_summary_chars=read_env().get("GMAIL_AUTO_SUMMARY_CHARS",
+                                                      os.getenv("GMAIL_AUTO_SUMMARY_CHARS", "6000")),
                     model=gmail_mail.MailModel(
                         settings=lambda: (mistral_key(), mistral_model())
                     )

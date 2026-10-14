@@ -167,10 +167,12 @@ class MimeTests(unittest.TestCase):
 
 class WorkflowTests(unittest.TestCase):
     def test_number_binds_id_and_full_pagination_is_cached(self):
-        session, client, _model = make_session("long " * 500)
+        session, client, model = make_session("long " * 500)
         session.handle("MAIL")
         result = session.handle("LIRE 1")
-        self.assertIn("Résumé IA", result["display"])
+        self.assertNotIn("Résumé IA:", result["display"])
+        self.assertIn("long " * 500, result["display"])
+        model.complete.assert_not_called()
         self.assertEqual(client.read.call_args.args[0], "abc123")
         for page in mail.pages(session.handle("TEXTE")["display"]):
             self.assertTrue(all(len(line) <= 39 for line in page.splitlines()))
@@ -178,6 +180,43 @@ class WorkflowTests(unittest.TestCase):
         client.read.assert_called_once()
         self.assertIn("Choisissez", session.handle("LIRE 9")["display"])
         self.assertEqual(client.list.call_count, 1)
+
+    def test_summary_is_optional_and_full_text_remains_cached(self):
+        session, client, model = make_session("Texte original " * 100)
+        session.handle("MAIL")
+        session.handle("LIRE 1")
+        model.complete.assert_not_called()
+        result = session.handle("RESUMER")
+        self.assertIn("Résumé IA:", result["display"])
+        self.assertIn("TEXTE /", result["display"])
+        model.complete.assert_called_once()
+        self.assertIn("Texte original " * 100, session.handle("TEXTE")["display"])
+        client.read.assert_called_once()
+        model.complete.assert_called_once()
+
+    def test_very_long_mail_summary_threshold_can_be_changed_or_disabled(self):
+        for threshold, size, summarize in ((6000, 6000, False), (6000, 6001, True),
+                                           (0, 14000, False), (100, 101, True)):
+            with self.subTest(threshold=threshold, size=size), patch.dict(
+                "os.environ", {"GMAIL_AUTO_SUMMARY_CHARS": str(threshold)}
+            ):
+                session, client, model = make_session("x" * size)
+                session.handle("MAIL")
+                result = session.handle("LIRE 1")
+                self.assertEqual("Résumé IA:" in result["display"], summarize)
+                self.assertEqual(model.complete.call_count, int(summarize))
+                self.assertIn("x" * size, session.handle("TEXTE")["display"])
+                client.read.assert_called_once()
+
+    def test_failed_automatic_summary_falls_back_to_full_text_without_retry(self):
+        session, client, model = make_session("x" * 7000)
+        model.complete.side_effect = auth.GmailError("generation_unavailable")
+        session.handle("MAIL")
+        result = session.handle("LIRE 1")
+        self.assertIn("texte intégral ci-dessous", result["display"])
+        self.assertIn("x" * 7000, result["display"])
+        model.complete.assert_called_once()
+        client.read.assert_called_once()
 
     def test_draft_signature_threading_full_review_then_one_send(self):
         session, client, model = make_session(output="Merci.\n\n" + mail.SIGNATURE)

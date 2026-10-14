@@ -219,8 +219,9 @@ step checks the actual interface.
 
 **Step 3 — try mail:** refresh the admin console and open **Paramètres → Gmail**,
 or type **`MAIL`** at the Minitel's question prompt and press **ENVOI**. Expect a
-numbered inbox list. **`LIRE 1`** opens the first listed message. A long message may
-show a labelled summary; **`TEXTE`** gives its full cached readable body. Use
+numbered inbox list. **`LIRE 1`** normally opens its full readable text; **`RESUMER`**
+optionally requests an AI summary. Exceptionally long messages may open as a
+labelled automatic summary; **`TEXTE`** always gives the full cached body. Use
 **SUITE** to page through it. Reading leaves Gmail's read/unread status unchanged.
 
 **Step 4 — on the Pi:** verify unattended operation after reboot:
@@ -260,8 +261,14 @@ Minitel's ordinary question prompt and press the function key **ENVOI**:
 | `RESUMER` | Labelled AI summary of selected body |
 
 Natural mail questions use a bounded user-request-only classifier. If a reference
-is ambiguous, choose a displayed number. Selected messages longer than 800
-characters default to an explicitly labelled AI summary; `TEXTE` gives the body.
+is ambiguous, choose a displayed number. **LIRE defaults to full readable text**,
+with no AI call; **RESUMER** explicitly requests a labelled summary. Exceptionally
+long messages (more than **6,000 body characters**, by default) open as a labelled
+automatic summary with a TEXTE hint. Set `GMAIL_AUTO_SUMMARY_CHARS` in the private
+`.env` to change the threshold; **0 disables automatic summaries entirely**.
+Restart services/the console after changing it. `TEXTE` always opens the full
+cached readable body, and paging/refetch-free switching back from a summary does
+not invoke AI. Failed automatic summaries fall back to full text without retrying.
 Plain-text MIME wins over HTML. HTML conversion loads no images/resources. Attachment
 names/types are listed, and their contents are not fetched or interpreted.
 Reading uses GET only and **does not change read/unread status**.

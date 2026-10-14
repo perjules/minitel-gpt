@@ -288,9 +288,14 @@ class MailModel:
 
 
 class MailSession:
-    def __init__(self, client=None, model=None, self_aliases=None, username=""):
+    def __init__(self, client=None, model=None, self_aliases=None, username="", auto_summary_chars=None):
         self.client, self.model = client or GmailClient(), model or MailModel()
         self.username = username.strip() or "MinitelGPT"
+        try:
+            self.auto_summary_chars = max(0, int(auto_summary_chars if auto_summary_chars is not None
+                                               else os.getenv("GMAIL_AUTO_SUMMARY_CHARS", "6000")))
+        except (TypeError, ValueError):
+            self.auto_summary_chars = 6000
         self.lock = threading.RLock()
         self.epoch = 0
         self.busy = False
@@ -505,7 +510,7 @@ class MailSession:
         if upper in ("TEXTE", "FULL"):
             return {"display": self.selected_text()}
         if upper in ("RESUMER", "RÉSUMER"):
-            return {"display": self.summarize(deadline)}
+            return {"display": self.summarize(deadline) + "\n\nTEXTE / REPONDRE / IMPRIMER"}
         if re.match(
             r"^(répondre|repondre|reply|draft)\b", question, re.IGNORECASE
         ) and not re.match(r"^draft\b.*\bto\b", question, re.IGNORECASE):
@@ -631,7 +636,7 @@ class MailSession:
         if action == "full":
             return {"display": self.selected_text()}
         if action == "summary":
-            return {"display": self.summarize(deadline)}
+            return {"display": self.summarize(deadline) + "\n\nTEXTE / REPONDRE / IMPRIMER"}
         return self.make_draft(question, epoch, deadline, revise=action == "revise")
 
     def edit_preview(self, draft):
@@ -722,12 +727,17 @@ class MailSession:
             self.composition = self.choice_kind = None
 
         self.save(epoch, commit)
-        text = (
-            self.selected_text()
-            if len(record["body"]) <= 800
-            else self.summarize(deadline)
-        )
-        return {"display": text + "\n\nTEXTE / RESUMER / REPONDRE / IMPRIMER"}
+        automatic = self.auto_summary_chars > 0 and len(record["body"]) > self.auto_summary_chars
+        if automatic:
+            try:
+                text = self.summarize(deadline) + "\n\nMail long: résumé automatique. TEXTE pour tout lire."
+            except GmailError:
+                automatic = False
+                text = "Résumé automatique indisponible; texte intégral ci-dessous.\n\n" + self.selected_text()
+        else:
+            text = self.selected_text()
+        actions = "TEXTE / REPONDRE / IMPRIMER" if automatic else "RESUMER / REPONDRE / IMPRIMER"
+        return {"display": text + "\n\n" + actions}
 
     def selection(self):
         if not self.selected:
