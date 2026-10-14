@@ -20,6 +20,11 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+try:
+    from . import pronote_records as records
+except ImportError:
+    import pronote_records as records
+
 ROOT = Path(__file__).resolve().parent.parent
 SDK_VERSION = "2.15.7"
 CACHE_SECONDS = 600
@@ -168,7 +173,9 @@ def client_class():
         def post(self, function_name, onglet=None, data=None):
             allowed = {"Identification", "Authentification", "ParametresUtilisateur",
                        "PageInfosPerso", "SecurisationCompteDoubleAuth",
-                       "PageCahierDeTexte", "DernieresNotes", "PageEmploiDuTemps"}
+                       "PageCahierDeTexte", "DernieresNotes", "PageEmploiDuTemps",
+                       "PageBulletins", "DernieresEvaluations", "PagePresence",
+                       "PageActualites", "PageMenus"}
             if function_name not in allowed:
                 raise PronoteError("read_only")
             REQUEST_STEP.set(function_name)
@@ -389,6 +396,12 @@ class Pronote:
             ("pronote_get_timetable", "Read lessons for a day (defaults to today) or an inclusive date range up to 7 days. For tomorrow or a weekday, resolve dates in Europe/Paris. For a week, pass Monday through Sunday as ISO dates.",
              {"child": child, "from": {"type": "string"}, "to": {"type": "string"}}),
         ]
+        for operation, description in records.PERIOD_OPERATIONS.items():
+            definitions.append(("pronote_get_" + operation, description + " Omit period for current started period.",
+                                {"child": child, "period": {"type": "string"}}))
+        for operation, description in records.DATE_OPERATIONS.items():
+            definitions.append(("pronote_get_" + operation, description,
+                                {"child": child, "from": {"type": "string"}, "to": {"type": "string"}}))
         return [{"type": "function", "function": {"name": name, "description": description,
                  "parameters": {"type": "object", "properties": properties,
                                 "required": ["child"] if properties else [],
@@ -409,22 +422,30 @@ class Pronote:
             permitted = {"pronote_get_homework": {"child", "from", "to"},
                          "pronote_get_grades": {"child", "period"},
                          "pronote_get_timetable": {"child", "from", "to"}}
+            permitted.update({"pronote_get_" + op: {"child", "period"} for op in records.PERIOD_OPERATIONS})
+            permitted.update({"pronote_get_" + op: {"child", "from", "to"} for op in records.DATE_OPERATIONS})
             if name not in permitted or set(arguments) - permitted[name]:
                 raise PronoteError("unsupported_tool")
             child = arguments.get("child")
             if not isinstance(child, str) or child not in config["children"]:
                 raise PronoteError("unknown_child")
             args = {"child": child}
-            if name in ("pronote_get_homework", "pronote_get_timetable"):
-                start_text = arguments.get("from", today().isoformat())
+            operation = name.removeprefix("pronote_get_")
+            dated = operation in records.DATE_OPERATIONS or operation in ("homework", "timetable")
+            if dated:
+                default_start = today() - timedelta(days=7) if operation == "announcements" else today()
+                start_text = arguments.get("from", default_start.isoformat())
                 if not isinstance(start_text, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", start_text):
                     raise PronoteError("invalid_arguments")
                 start = date.fromisoformat(start_text)
-                end_text = arguments.get("to", (start + timedelta(days=7 if name == "pronote_get_homework" else 0)).isoformat())
+                default_days = 7 if operation == "homework" else 6 if operation == "tests" else 0
+                default_end = today() if operation == "announcements" else start + timedelta(days=default_days)
+                end_text = arguments.get("to", default_end.isoformat())
                 if not isinstance(end_text, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", end_text):
                     raise PronoteError("invalid_arguments")
                 end = date.fromisoformat(end_text)
-                if not 0 <= (end - start).days <= (30 if name == "pronote_get_homework" else 6):
+                maximum_days = 0 if operation == "briefing" else 6 if operation in ("timetable", "tests") else 30
+                if not 0 <= (end - start).days <= maximum_days:
                     raise PronoteError("invalid_date_range")
                 args.update({"from": start.isoformat(), "to": end.isoformat()})
             else:
@@ -453,10 +474,18 @@ class Pronote:
                     if len(matches) != 1:
                         raise PronoteError("child_unavailable")
                     client.set_child(matches[0])
-                    if name == "pronote_get_homework":
+                    extra = {}
+                    if operation in records.PERIOD_OPERATIONS or operation in records.DATE_OPERATIONS:
+                        items, extra = records.collect(client, operation, args)
+                        if "error" in extra:
+                            return {**args, **extra}
+                        values = items
+                        items = items[:MAX_ITEMS]
+                    elif name == "pronote_get_homework":
                         values = sorted(client.homework(start, end), key=lambda item: item.date)
                         items = [{"date": h.date.isoformat(), "subject": clean(h.subject.name, 120),
-                                  "description": clean(h.description), "done": bool(h.done)}
+                                  "description": clean(h.description), "done": bool(h.done),
+                                  "attachments": records.attachments(getattr(h, "files", []))}
                                  for h in values[:MAX_ITEMS]]
                     elif name == "pronote_get_timetable":
                         values = sorted(client.lessons(start, end), key=lambda item: item.start)
@@ -484,16 +513,17 @@ class Pronote:
                         items = [{"date": g.date.isoformat(), "subject": clean(g.subject.name, 120),
                                   "grade": clean(g.grade, 40), "out_of": clean(g.out_of, 40),
                                   "coefficient": clean(g.coefficient, 40), "comment": clean(g.comment, 300),
-                                  "class_average": clean(g.average, 40) if getattr(g, "average", None) is not None else None}
+                                  "class_average": clean(g.average, 40) if getattr(g, "average", None) is not None else None,
+                                  **records.grade_extra(g)}
                                  for g in values[:MAX_ITEMS]]
                         args["period"] = clean(selected.name, 100)
                 truncated = len(values) > MAX_ITEMS
-                while len(json.dumps(items, ensure_ascii=False)) > MAX_RESULT_CHARACTERS:
+                while items and len(json.dumps({"items": items, **extra}, ensure_ascii=False)) > MAX_RESULT_CHARACTERS:
                     items.pop()
                     truncated = True
                 if name == "pronote_get_homework":
                     truncated = truncated or any(len(clean(h.description, 2001)) > 2000 for h in values[:len(items)])
-                result = {**args, "items": items, "truncated": truncated,
+                result = {**args, **extra, "items": items, "truncated": truncated,
                           "retrieved_at": datetime.now(ZoneInfo("Europe/Paris")).isoformat(timespec="seconds"),
                           "cached": False, "stale": False}
                 if len(self.cache) >= 64:
@@ -510,7 +540,7 @@ class Pronote:
                             "warning": "PRONOTE unavailable; cached data may have changed."}
                 if isinstance(error, PronoteError):
                     raise
-                raise PronoteError("unavailable") from None
+                raise PronoteError(records.error_code(error)) from None
         except PronoteError as error:
             return {"error": str(error)}
         except (ValueError, TypeError):

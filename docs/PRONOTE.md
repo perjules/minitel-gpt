@@ -1,14 +1,16 @@
 # PRONOTE on 3615 IA
 
-Read-only local access to homework and published grades through **PronotePy
-2.15.7 / ParentClient**. Enrollment uses a parent mobile-app QR code, followed
+Read-only local access to academic records, timetable, school-life information
+and canteen menus through **PronotePy 2.15.7 / ParentClient**. Enrollment uses a parent mobile-app QR code, followed
 by token login. Every successful login saves the rotated token on the Pi.
 There is no ENT password scraping and no school write operation.
 
 ## Install and connect on the Pi
 
-Keep the existing Mistral **Conversations** provider selected. Claude, Linkup
-and the Chat Completions rollback adapter do not offer local PRONOTE tools.
+Natural-language school queries and direct-mode AI fallback require Mistral
+**Conversations**. The deterministic `PRONOTE` commands work with any configured
+provider, including when the AI provider/key is unavailable. The same enabled
+PRONOTE configuration, enrollment and authorized aliases are required in both paths.
 
 ```bash
 cd /home/minitel/minitel-gpt
@@ -100,84 +102,202 @@ output is private; do not upload it as a debug fixture or project record.
 
 ## Runtime behavior
 
-Only three functions are offered to the model:
+### Shared tools
 
-| Function | Data |
+Both the normal natural-language router and direct mode call `Pronote.execute`.
+All arguments are validated before authentication; unknown keys/tools and
+unconfigured child aliases are rejected.
+
+| Function | Published data |
 | --- | --- |
-| `pronote_list_children()` | Explicitly allowed aliases only |
-| `pronote_get_homework(child, from, to)` | Inclusive date range, subject, plain description, existing done status |
-| `pronote_get_grades(child, period)` | Published grade strings, scales, coefficients, dates and comments |
+| `pronote_list_children()` | Authorized aliases only |
+| `pronote_get_homework(child, from, to)` | Dates, subjects, descriptions, done status, safe filenames |
+| `pronote_get_grades(child, period)` | Marks/scales, coefficients, comments, test class average/min/max, bonus/optional flags |
+| `pronote_get_timetable(child, from, to)` | Times, subjects, teachers, rooms, cancellations, status and test flags |
+| `pronote_get_averages(child, period)` | Student/class subject averages, class min/max, scale |
+| `pronote_get_report(child, period)` | Published report averages, teachers, subject/general comments |
+| `pronote_get_evaluations(child, period)` | Competency titles/dates, teachers, descriptions, coefficients and acquisition levels |
+| `pronote_get_tests(child, from, to)` | Timetable test flags, excluding canceled lessons |
+| `pronote_get_absences(child, period)` | Times, hours/days, justification and reasons |
+| `pronote_get_delays(child, period)` | Dates, minutes, justification and reasons |
+| `pronote_get_punishments(child, period)` | Nature, date, circumstances/reasons, work and detention schedule/duration |
+| `pronote_get_announcements(child, from, to)` | Titles, authors, publication dates, categories, read/survey flags, content and safe filenames |
+| `pronote_get_menus(child, from, to)` | Meals and food names by day |
+| `pronote_get_briefing(child, from, to)` | Daily lessons/changes, upcoming test flags, homework and recent announcements |
 
-Homework defaults to today through seven days from today, using **Europe/Paris**
-for school dates, and accepts at most 31 inclusive days. Grades default to the
-period with the latest start date on or before today. Future periods are never
-chosen implicitly. If annual/semester/trimester ranges share a start date, the
-shorter interval wins, with the name breaking any remaining tie consistently.
-This does not depend on the SDK's sometimes missing parent `current_period`
-metadata and requires no probing of multiple grade endpoints. Omitted, null,
-blank and symbolic `current`/`latest` selectors all use this default. If there
-are no started periods, or an explicitly requested name is unavailable, actual
-period names are returned for clarification. An explicit period must match an
-actual name; no invented trimester IDs and no substitution of another period.
-An empty latest period stays empty rather than silently fetching older grades.
-Grade strings such as `Absent` and
-`Non noté` and decimal coefficients stay strings; no averages are computed.
-Attachment downloads, attachment URLs, teacher identities, account metadata,
-other students and class averages are excluded. Links in descriptions are
-omitted. An empty successful result means no published records in that exact
-scope; it does not mean there is no schoolwork elsewhere.
+Dates are inclusive ISO `YYYY-MM-DD`, resolved using **Europe/Paris**.
+Homework defaults to today through seven days ahead (eight inclusive days),
+announcements to the last eight days, tests to today through six days ahead,
+and timetable/menus/briefing to today. Homework, announcements and menus accept
+at most 31 inclusive days; timetable/tests at most seven. A briefing accepts
+one day and reads its homework/tests through six days ahead and announcements
+from seven days before that day through that day.
 
-Each uncached read opens a fresh parent session, resolves the allowed child
-against that session's children, saves the new token immediately and closes
-its HTTP session. Thread and account file locks serialize authentication across
-terminal, admin and CLI processes. There is no automatic session refresh/retry
-that could replay stale child IDs. The pinned SDK hook applies HTTP timeouts
-(up to ten seconds per request, bounded by the operation deadline), suppresses
-credential-bearing SDK logs, and rejects PRONOTE write methods. The terminal's
-existing worker deadline and SOMMAIRE cancellation still apply; a late worker
-may finish token housekeeping but cannot display or store its answer.
+Periods default to the most recent started period. Future periods are never
+chosen implicitly. When starts tie, the shorter interval wins, then the name.
+This avoids relying on sometimes missing parent `current_period` metadata.
+Omitted/null/blank/`current`/`latest` selectors use that default; an explicit
+period must match its actual name. Errors return available names for clarification.
+An empty current period stays empty. `pronote_get_report(period="published")`
+checks up to eight started periods, newest first, for the latest published report;
+no published report produces `report_unavailable`. An explicit report period
+never substitutes another report. `BULLETIN` uses the published selector.
 
-Cache: ten minutes, in memory only, scoped by operation, child, dates/period,
-configuration, enrollment UUID and school date. A network outage can return the
-same cached scope for up to 24 hours, marked **possibly outdated**, with its
-original retrieval timestamp. Authentication errors and missing children never
-use this fallback. New enrollment or mapping changes invalidate the relevant
-cache. Each process has its own cache. Results are bounded to 100 records,
-24,000 JSON characters and 2,000 characters per homework description;
-truncation is declared in the display footer. Cached/live state and retrieval
-time are added locally, so the model cannot silently omit them.
+No averages are calculated. Nonnumeric values such as `Absent` and `Non noté`,
+scales and decimal coefficients retain their supplied values. The SDK grade
+`comment` can be a test description; it is not a separate report appreciation.
+Report grading scales are not supplied by this SDK. Competency evaluations are
+separate from numeric marks. Test flags provide no assessment description.
 
-School answers are displayed identically in the admin preview and on the
-terminal: plain vertical lists wrapped to 39 characters, leaving the terminal's
-40th column free to avoid automatic wrapping. The prompt forbids Markdown
-tables and aligned columns. A local display formatter also converts any table
-the model still emits into labelled vertical rows, keeping every cell, grade
-string, coefficient and date. Ordinary prose and literal code blocks are
-retained; long-word tails are wrapped rather than dropped. The selected period
-is shown in the local footer. Only display text is reformatted: factual history
-and normalized school results are unchanged. Public factual answers retain
-their existing rendering and full browser URLs.
+### Direct keyboard mode
 
-School questions first use a tool-only Conversations request with web search
-absent. Functions execute locally; only sanitized school results reach Mistral,
-using `store=false`. Enrollment, tokens, PINs, full child names from configuration,
-account URLs and raw SDK objects never enter model payloads or logs.
-There are at most two function rounds/four calls under the existing total
-answer deadline. The final synthesis request has no tools and explicitly sets
-`completion_args.tool_choice=none`, so the model must answer from the results
-already returned. A tool error goes straight to this final synthesis instead
-of being retried; its original error code remains visible in the local footer.
-Repeated identical calls reuse the first result without repeating the local
-lookup and then force final synthesis. A provider response requesting tools
-despite that restriction is still rejected. The limits are not raised.
-Tool descriptions and homework are evidence, not instructions.
-Public questions pass to the existing factual/web adapter after the local
-planner returns without a school call. The public request removes prior school
-answers and their paired questions. This adds one planning request to public
-questions while PRONOTE is enabled. School data cannot be supplied to the
-hosted web-search tool by these requests. SOMMAIRE clears conversational memory.
-Disabling PRONOTE restores the normal request path and still strips private
-school turns before public search.
+Type `PRONOTE`, then **ENVOI**. One authorized child is selected automatically;
+with several, choose an alias or its displayed number. No child is selected
+arbitrarily. `ENFANT` lists choices and clears the retained result. Selecting a
+child or changing alias configuration clears previous detail/print data.
+
+| Command | Result |
+| --- | --- |
+| `NOTES` | Current-period published grades |
+| `MOYENNES` | Subject averages |
+| `DEVOIRS` | Upcoming homework |
+| `COURS` | Today's lessons |
+| `CONTROLES` | Upcoming timetable assessment flags |
+| `ABSENCES` / `RETARDS` | Current-period attendance records |
+| `BULLETIN` | Latest published report |
+| `COMPETENCES` | Current-period competency evaluations |
+| `INFOS` | Recent school announcements/surveys |
+| `CANTINE` | Today's meals |
+| `BILAN` | Daily combined briefing |
+| `SANCTIONS` | Current-period disciplinary records |
+| `ENFANT` | Select another authorized child |
+| `AIDE` | Compact command list |
+| `RETOUR` | Restore normal conversation |
+
+Commands ignore case and accents; singular `NOTE`, `MOYENNE`, `DEVOIR`,
+`CONTROLE`, `INFO`, and `MENU` are accepted. `QUITTER`/`SORTIR` exit too.
+The menu and local errors use compact French wording, including in an English
+session; AI fallback retains the selected session language.
+
+Examples:
+
+```text
+COURS
+DEMAIN
+SEMAINE
+2026-10-16
+DEVOIRS DEMAIN
+CANTINE LUNDI
+NOTES
+MATHS
+MOYENNES Trimestre 1
+BULLETIN Trimestre 1
+```
+
+`DEMAIN`, `HIER`, `AUJOURDHUI`, `SEMAINE`, ISO dates and weekday names refine the
+current dated view, or follow its command on the same line. A weekday means its
+next occurrence including today. `SEMAINE` means this Monday through Sunday;
+`BILAN SEMAINE` is rejected because a briefing is one day. A subject word after
+`NOTES` filters loaded marks locally (`MATHS` also matches `Mathématiques`).
+A period follows the numeric/period command; `PERIODE exact-name` refines it.
+If a period-selection error supplied names, their typed case/accents are matched
+locally to those exact names.
+
+Reports, competencies and announcements show numbered entries first. Daily
+lessons use short time/subject/room lines; long homework and grade comments are
+shortened only in the initial screen view, with `TEXTE` showing the loaded text. `LIRE 2`
+shows one loaded entry; `TEXTE` shows all loaded details. Paging/detail/filtering
+makes no network or model request. `IMPRIMER` prints the complete retained
+result, including all loaded pages, through the existing text printer; weekly
+printing includes full lessons even though the screen shows a compact weekly
+summary. It does not print/download attachments. Printer installation and
+hardware readiness remain separate requirements.
+
+**ENVOI** submits, **SUITE** pages loaded text, **SOMMAIRE** resets the whole
+session and **GUIDE** keeps its existing administration behavior. **RETOUR**
+exits direct mode, including during a read or on a paginated result. Ordinary
+conversation retains its existing correction-key behavior. Reads run in the
+existing single background-worker/wait contract; abandoned replies cannot enter
+another session and overlapping requests get a recoverable busy message.
+
+Unrecognized meaningful input gets one call to the existing school LLM
+orchestrator, with current view/date/period context and tools restricted to the
+selected child. No web search is offered and the backend still validates every
+call. With another provider or no AI key, use `AIDE`; deterministic commands
+continue working. There is no recursive fallback. This path does not keep an
+independent conversational history: ambiguous requests should name the feature.
+
+Normal mode still accepts, for example:
+
+- `Quels devoirs a Alex demain ?`
+- `Quelle est la moyenne de classe du dernier contrôle de maths d'Alex ?`
+- `Y a-t-il des cours annulés pour Sam cette semaine ?`
+- `Combien d'absences non justifiées ce trimestre pour Alex ?`
+- `Résume les dernières annonces scolaires de Sam.`
+
+### Sessions, bounds and privacy
+
+Each uncached read opens a fresh parent session, resolves the authorized child
+against that session's children, saves the rotated token immediately and closes
+HTTP resources. Thread and account-file locks serialize terminal/admin/CLI
+access. There is no automatic refresh/retry with expired child IDs. HTTP requests
+use at most ten seconds, bounded by the operation deadline. Enrollment, token
+storage and private file permissions retain their existing behavior.
+
+A briefing uses **one login and one selected child**. A single weekly lesson read
+serves both its daily timetable and upcoming tests. Other components fail
+independently and the result declares `partial`; an expired session fails the
+operation rather than continuing with stale authentication.
+
+The read allowlist adds `PageBulletins`, `DernieresEvaluations`, `PagePresence`,
+`PageActualites` and `PageMenus` to the existing endpoints. In pinned 2.15.7,
+announcement content uses `PageActualites` with `genreRequeteActualite=1`;
+read-state changes use the blocked `SaisieActualites`. No homework completion,
+survey answer, message, announcement-read or other school write is permitted.
+Only explicitly selected object fields leave the service. Credentials, account
+URLs, identifiers and attachment URLs never enter model payloads. Link attachment
+names are omitted; file metadata includes only a sanitized filename/type.
+
+School output is transient: direct mode never records requests/results in the
+persistent memory journal. Normal-mode private school answers and their paired
+questions are excluded from journal/recent memory and public web history.
+School requests still use Mistral `store=false`; this does not guarantee absence
+of all provider retention. Logs retain fixed tool/status and secret-free error
+metadata, never school records or arbitrary SDK exception messages.
+
+The existing school orchestrator keeps its two-round/four-call limit, handles
+repeated calls locally, and makes final synthesis with no tools. Errors are not
+retried. Public requests retain their factual/web adapter and strip private turns.
+No new runtime dependency is required.
+
+Cache remains ten minutes, in memory only, scoped by operation, child, dates or
+period, configuration, enrollment UUID and school date. A network outage can use
+that exact cached scope for up to 24 hours with its timestamp and stale warning.
+Authentication/child errors never use stale fallback. Re-enrollment or changed
+mappings invalidate the relevant scope. Each process has its own cache.
+
+Results are capped at 100 records and 24,000 JSON characters for items/extra
+metadata, with declared record truncation. Existing homework descriptions retain
+their 2,000-character limit. New scalar text fields are capped at 500 characters,
+announcement text at 2,000, list metadata at 30 elements, attachments at ten and
+detention schedules at twenty. A briefing retains up to twenty records per
+component, declaring component truncation. These caps can omit long comments.
+
+Announcement content/attachment metadata is fetched only for the **five newest
+entries in a requested range**, bounding extra server requests. Older entries
+have `content_error=detail_limit`; narrow the date range to obtain their content.
+Other detail-fetch failures keep metadata and declare a partial result. Survey
+content is the SDK's first content block, not an interactive survey form.
+Schools can disable features or leave them unpublished. An empty successful
+list means no published records in that exact scope; it is not evidence that a
+feature is globally unsupported. An unrecognized/malformed server response is
+reported as such, rather than silently converted to an empty list.
+
+Screen output uses vertical lists and 39-column wrapping. Existing character
+normalization runs at the terminal boundary; unusual names/accents remain
+readable ASCII. Weekly timetables show daily counts and status/test exceptions;
+select a day for full detail. The serial link and real keyboard/CRT still need
+physical usability checks.
 
 ## Error codes
 
@@ -211,6 +331,10 @@ retry are still needed to confirm enrollment on a particular school server.
   second enrollment login keeps the initial token for recovery.
 - `unknown_child`, `child_unavailable`: check aliases and exact names.
 - `select_period`: choose one returned period name.
+- `feature_unavailable`: the SDK reports that the school does not support the feature.
+- `report_unavailable`: unpublished/unavailable report in the requested scope.
+- `malformed_response`: missing or invalid SDK/server fields; do not treat as no records.
+- `permission_denied`: an explicit HTTP 403; other unclassified school refusals remain `unavailable`.
 - `busy`, `timeout`, `unavailable`: wait or check the Pi's network/school
   service. These errors expose no credential-bearing SDK exception text.
 
@@ -243,3 +367,54 @@ Primary references checked for this adapter:
 [PronotePy quickstart](https://pronotepy.readthedocs.io/en/stable/quickstart.html),
 [the pinned SDK release](https://github.com/bain3/pronotepy/tree/v2.15.7),
 and [Mistral Conversations entry contracts](https://docs.mistral.ai/api/endpoint/beta/conversations).
+
+## Offline checks and manual acceptance
+
+The baseline at `5e22118` passes 244 tests with the runtime and optional Gmail,
+PRONOTE and printing dependencies installed. Run the full offline suite and lint:
+
+```bash
+.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/ruff check services/pronote_records.py services/pronote_mode.py tests/test_pronote_expansion.py tests/test_pronote_terminal_mode.py
+.venv/bin/ruff check --select F services/pronote.py services/pronote_answers.py services/minitel_chatgpt.py scripts/pronote_setup.py
+```
+
+The expanded suite passes **269 tests**. Expansion tests use synthetic data and pinned real SDK objects for averages,
+unpublished reports and announcement content. They cover every new tool/command,
+child changes, stale isolation, date bounds, partial failures, endpoint writes,
+thread serialization, real terminal-loop routing, function keys, full printing
+and worker cancellation. No live school/model, Pi, printer or Minitel success is
+claimed by these checks.
+
+Local CLI diagnostics now accept every tool suffix, for example:
+
+```bash
+.venv/bin/python scripts/pronote_setup.py read averages Alex
+.venv/bin/python scripts/pronote_setup.py read report Alex --period published
+.venv/bin/python scripts/pronote_setup.py read announcements Alex --from 2026-10-12 --to 2026-10-14
+.venv/bin/python scripts/pronote_setup.py read briefing Alex
+.venv/bin/python scripts/terminal_console.py
+```
+
+These diagnostics read real school data when enrolled; keep their output private.
+The console shares the actual dispatcher/rendering/key decoder but has no 1200
+baud pacing. On the Pi and then the physical Minitel:
+
+1. Confirm enrollment/version and authorized aliases in administration. Open
+   `PRONOTE` without an AI key and try `DEVOIRS`, `NOTES`, `MOYENNES`, `COURS`.
+2. Try `DEMAIN`, `SEMAINE`, an ISO day and a weekday; check weekly counts against
+   PRONOTE, then inspect one day. Check accents, long names and SUITE paging.
+3. Inspect `BULLETIN`/`LIRE 1`/`TEXTE`, `COMPETENCES`, `ABSENCES`, `RETARDS`,
+   `SANCTIONS`, `INFOS`, `CANTINE` and `BILAN`. Confirm published/unavailable
+   distinctions, survey read state unchanged and actual class/competency values.
+4. Switch via `ENFANT`; verify details/printing cannot display the previous child's
+   records. Test an unknown alias/date/period, reset and re-entry.
+5. Exit with RETOUR, including during a read/page; reset with SOMMAIRE and check
+   that ordinary AI, Gmail, calculator, memory and GUIDE still work normally.
+6. With Mistral configured, try an ordinary school question and a direct-mode
+   summary. Verify private school content is absent from local memory journals.
+7. If the printer is installed, print multi-page homework and a weekly timetable;
+   verify first/last records and accents on paper. Printer hardware acceptance
+   is separate from text-format checks.
+8. Compare two consecutive uncached reads with live school data; verify token
+   rotation, cache timestamps and recoverable timeout/outage behavior.

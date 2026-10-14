@@ -21,11 +21,12 @@ from dotenv import load_dotenv
 import requests
 
 try:  # Support both systemd's direct script and package imports in tests.
-    from . import mistral_answers, pronote, pronote_answers, gmail_mail, memory_session, calculator, printing_session
+    from . import mistral_answers, pronote, pronote_answers, pronote_mode, gmail_mail, memory_session, calculator, printing_session
 except ImportError:
     import mistral_answers
     import pronote
     import pronote_answers
+    import pronote_mode
     import gmail_mail
     import memory_session
     import calculator
@@ -521,6 +522,36 @@ def start_answer(system_prompt, history, language, options, knowledge,
     return worker, output, started
 
 
+def start_pronote(request, school, language, options, knowledge):
+    """Reuse the single-worker wait contract without persisting school turns."""
+    output = Queue(maxsize=1)
+    started = time.monotonic()
+
+    def read():
+        try:
+            if "tool" in request:
+                result = school.execute(request["tool"], request["arguments"], started + options[2])
+                output.put(({"records": result}, None))
+            elif PROVIDER == "mistral" and options[0] == "conversations":
+                if not MISTRAL_KEY or MISTRAL_KEY == "...":
+                    output.put(({"display": "Interpreteur IA indisponible. Utilisez AIDE."}, None))
+                    return
+                question = "PRONOTE pour " + request["child"] + ": " + request["fallback"]
+                if request.get("context", {}).get("operation"):
+                    question += "\nCurrent school view: " + json.dumps(request["context"], ensure_ascii=False)
+                result = pronote_answers.answer([{"role": "user", "content": question}], language,
+                                               MISTRAL_KEY, MODEL, False, options[2], knowledge, pronote_mode.ScopedBackend(school, request["child"]))
+                output.put(({"display": pronote_answers.render(result, language)}, None))
+            else:
+                output.put(({"display": "Commande inconnue. AIDE pour les commandes."}, None))
+        except Exception as error:
+            output.put((None, error))
+
+    worker = threading.Thread(target=read, daemon=True)
+    worker.start()
+    return worker, output, started
+
+
 def wait_answer(t, pending, timeout, allow_retour=False):
     """Reset stops local waiting; provider work/billing may continue."""
     _, output, started = pending
@@ -752,7 +783,7 @@ def read_question(t: Term, allow_empty=False, calculator_mode=False):
             buf.append(chr(c))       # pas d'écho (le Minitel l'affiche)
 
 
-def show_response(t: Term, text: str, language="fr"):
+def show_response(t: Term, text: str, language="fr", allow_retour=False):
     """Affiche la réponse en pages. Retourne 'sommaire' / 'done' / 'timeout'."""
     lines = wrap(text)
     pages = [lines[i:i+CONTENT_ROWS] for i in range(0, len(lines), CONTENT_ROWS)] or [[""]]
@@ -771,6 +802,8 @@ def show_response(t: Term, text: str, language="fr"):
                 if kind == 'timeout':
                     return 'timeout'
                 if kind == 'fn':
+                    if allow_retour and code in (K_RETOUR, K_GUIDE):
+                        return 'retour' if code == K_RETOUR else 'guide'
                     if code == K_SUITE:
                         break
                     if code == K_SOMMAIRE:
@@ -874,6 +907,7 @@ def run(term=None):
                 memory.remember_language(language)
         system_prompt = session_prompt(system_prompt, language)
         calc = calculator.Session()
+        school_mode = pronote_mode.Session()
         if language == "en":
             question_msg = UI[language]["question"]
             loading_msg = UI[language]["loading"]
@@ -891,12 +925,52 @@ def run(term=None):
         show_question_prompt(t, question_msg)
 
         while True:  # boucle conversation
-            question, action = read_question(t, calculator_mode=calc.mode)
+            question, action = read_question(t, calculator_mode=calc.mode or school_mode.mode)
             if action == 'guide':
                 show_guide(t, language)
                 break          # retour au sommaire après l'écran d'aide
             if action in ('sommaire', 'timeout'):
                 break
+
+            direct = school_mode.prepare(question)
+            if direct is not None:
+                if "display" in direct:
+                    answer = direct["display"]
+                    if direct.get("print"):
+                        if printing_session.installed():
+                            document = printing_session.PrintDocument("3615 IA / PRONOTE", (printing_session.TextBlock(answer),))
+                            answer = execute_print(t, document, language)
+                        else:
+                            answer = "SERVICE REPROGRAPHIE NON INSTALLE"
+                elif pending is not None and pending[0].is_alive():
+                    answer = "Requete precedente en cours. Reessayez bientot."
+                else:
+                    t.w(bytes([CR, LF]))
+                    t.center("CONSULTATION PRONOTE")
+                    pending = start_pronote(direct, school_mode.backend, language, options, knowledge)
+                    response, action = wait_answer(t, pending, options[2], allow_retour=True)
+                    if action in ("sommaire", "guide"):
+                        if action == "guide":
+                            show_guide(t, language)
+                        break
+                    if action == "retour":
+                        school_mode.reset()
+                        answer = "Retour a la conversation."
+                    elif response and "records" in response:
+                        answer = school_mode.receive(response["records"], direct["operation"])
+                    elif response:
+                        answer = response["display"]
+                    else:
+                        answer = "PRONOTE: " + ("timeout" if action == "deadline" else "unavailable")
+                result = show_response(t, safe_display(answer), language, allow_retour=True)
+                if result in ("sommaire", "timeout", "guide"):
+                    if result == "guide":
+                        show_guide(t, language)
+                    break
+                if result == "retour":
+                    school_mode.reset()
+                show_question_prompt(t, "PRONOTE / AIDE / RETOUR" if school_mode.mode else question_msg)
+                continue
 
             # A selected email is a document in its own right, not an LLM turn.
             # Always print its full body, never the preview or summary.
@@ -954,8 +1028,12 @@ def run(term=None):
                 show_question_prompt(t, question_msg)
                 continue
 
-            memory.record("user", question)
-
+            try:
+                private_question = pronote_answers.school_question([{"role": "user", "content": question}],
+                                                                   pronote.backend().config().get("children", {}))
+                private_question = private_question and pronote.backend().config().get("enabled", False)
+            except pronote.PronoteError:
+                private_question = False
             t.w(bytes([CR, LF]))
             calculator_request = calc.explicit(question) or (
                 calculator.candidate(question) and not calculator_blocked(mail, memory))
@@ -1000,9 +1078,11 @@ def run(term=None):
             channel = ("theatre" if response and response.get("calculator") else
                        "memory" if response and response.get("memory") else
                        "gmail" if response and response.get("review_ticket") else "chat")
+            if not private_question and not (response and (response.get("turn") or {}).get("private")):
+                memory.record("user", question)
             if response and response.get("calculator"):
                 memory.record("assistant", answer, channel, factual=response.get("factual"))
-            else:
+            elif not (response and (response.get("turn") or {}).get("private")):
                 memory.record("assistant", answer, channel)
             result = (show_calculator_scene(t, response["scene"], language)
                       if response and response.get("scene") else show_response(t, safe_display(answer), language))
