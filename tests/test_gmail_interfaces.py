@@ -90,7 +90,8 @@ class AdminMailTests(unittest.TestCase):
         self.assertEqual(self.api.method_calls, api_calls)
         self.assertEqual(self.model.method_calls, model_calls)
         self.assertTrue(self.mail.review_valid(ticket))
-        self.assertIn(mail.SIGNATURE, response.text)
+        # The longer hardware signature wraps at the terminal's 39-column width.
+        self.assertIn(mail.SIGNATURE, " ".join(" ".join(item["pages"]).split()))
         self.assertNotRegex(response.text, r'value="send" disabled')
         self.command("ENVOYER", ticket)
         self.api.send.assert_called_once()
@@ -264,7 +265,7 @@ class TerminalMailTests(unittest.TestCase):
         self.assertEqual(terminal.show_response(term, text), "done")
         session.acknowledge(ticket)
         self.assertIn(
-            "Envoye depuis mon Minitel - 3615 IA", startup.screen_text(uart.output)
+            "Envoye depuis Minitel 722079V (138121)", startup.screen_text(uart.output)
         )
         session.handle("ENVOYER", ticket)
         client.send.assert_called_once()

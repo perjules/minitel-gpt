@@ -37,7 +37,7 @@ except ImportError:
         reply_addresses,
     )
 
-SIGNATURE = "Envoyé depuis mon Minitel — 3615 IA"
+SIGNATURE = "Envoyé depuis Minitel 722079V (138121) — 3615 IA"
 CONTEXT_LIMIT = 12000
 DRAFT_LIMIT = 12000
 
