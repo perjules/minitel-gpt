@@ -847,7 +847,7 @@ def run(term=None):
         if memory is not None:
             memory.close()
         memory = None
-        mail = gmail_mail.MailSession() if gmail_mail.enabled() else None
+        mail = None
         review_ticket = None
         printer.reset()
         history = []
@@ -857,6 +857,7 @@ def run(term=None):
             show_guide(t)
         if user_action in ('guide', 'sommaire'):
             continue
+        mail = gmail_mail.MailSession(username=memory.username) if gmail_mail.enabled() else None
         language = memory.saved_language()
         action = user_action
         if language not in ("fr", "en"):

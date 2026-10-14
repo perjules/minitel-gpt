@@ -296,8 +296,13 @@ Select an owner-controlled test message, then:
 2. Read the entire recipient address, subject and outgoing body through **SUITE**.
    Python appends the exact outgoing signature:
    **Envoyé par Minitel 722079V (138121) — 3615 IA**.
-   A personal closing/name requested by the user is part of the draft body and
-   is preserved separately from this automatic footer. After `MODIFIER`, the next
+   Initial drafts include the current session username as the personal sign-off;
+   an unnamed/shared session uses **MinitelGPT**. Python adds this default only to
+   fresh drafts. `MODIFIER` can replace or remove the personal sign-off, and later
+   revisions do not force the original name back in. The enrolled Gmail account's
+   From address remains unchanged. Python always restores the automatic Minitel
+   footer, including when an edit asks to remove or change it; the complete outgoing
+   body remains visible during review. After `MODIFIER`, the next
    editing instruction directly revises the existing draft instead of being
    classified as a new message. Failed edits retain this editing state and keep
    the previous review invalid; ANNULER/SOMMAIRE discards it.

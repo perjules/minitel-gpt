@@ -40,9 +40,12 @@ except ImportError:
 SIGNATURE = "Envoyé par Minitel 722079V (138121) — 3615 IA"
 DRAFT_RULES = (
     "User writing/editing instructions are commands for the draft, not facts to announce "
-    "to its recipient. A request such as 'signe avec Camille' means add Camille as the "
+    "to its recipient. During revision, a request such as 'signe avec Camille' means add Camille as the "
     "sender's closing name; it does not mean anyone signed a document. Include a personal "
     "closing/name when requested, preserving it in later edits unless asked to remove it. "
+    "For initial drafts omit the sender's name: Python adds the session username by default. "
+    "For revisions the existing personal closing is editable; replace or remove it when asked, "
+    "rather than adding a second name. "
     "Do not invent facts or include headers. Do not generate the automatic Minitel footer; "
     "Python appends it separately. For revisions return the complete revised body, "
     "preserving all unchanged content and meaning."
@@ -63,10 +66,12 @@ def pages(text):
     return ["\n".join(lines[i : i + 18]) for i in range(0, len(lines), 18)] or [""]
 
 
-def signed(body):
-    # The signature is application-owned and always part of the reviewed body.
+def signed(body, default_name=None):
+    # Only the footer is mandatory. Initial personal names are editable thereafter.
     body = printable(body).strip()
     body = body.replace(SIGNATURE, "").rstrip()
+    if default_name and body and body.splitlines()[-1].strip() != default_name:
+        body += "\n\n" + default_name
     if not body or len(body) > DRAFT_LIMIT:
         raise GmailError("draft_size_limit")
     return body + "\n\n" + SIGNATURE
@@ -268,8 +273,9 @@ class MailModel:
 
 
 class MailSession:
-    def __init__(self, client=None, model=None, self_aliases=None):
+    def __init__(self, client=None, model=None, self_aliases=None, username=""):
         self.client, self.model = client or GmailClient(), model or MailModel()
+        self.username = username.strip() or "MinitelGPT"
         self.lock = threading.RLock()
         self.epoch = 0
         self.busy = False
@@ -977,6 +983,7 @@ class MailSession:
             msg["References"] = " ".join(
                 refs + ([] if refs and refs[-1] == parent_id else [parent_id])
             )
+        body = signed(body, self.username if previous is None else None)
         msg.set_content(body)
         draft = {
             "kind": "reply" if selected is not None else "new",

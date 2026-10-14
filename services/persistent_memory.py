@@ -102,7 +102,7 @@ def user_key(name):
     name = unicodedata.normalize("NFKC", name or "")
     name = re.sub(r"\s+", " ", name.strip())
     if not name:
-        return "shared", "Mémoire commune"
+        return "shared", "MinitelGPT"
     name = clean_text(name, 60)
     if any(c in name for c in "/\\") or name in {".", ".."}:
         raise MemoryProblem("Utilisez un nom simple, sans chemin de fichier.")

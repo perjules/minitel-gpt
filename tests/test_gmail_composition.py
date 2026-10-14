@@ -319,6 +319,36 @@ class ModelContractTests(unittest.TestCase):
 
 
 class CompositionSessionTests(unittest.TestCase):
+    def test_initial_signoff_defaults_to_current_username_or_minitelgpt(self):
+        for username, expected in (("Camille", "Camille"), ("", "MinitelGPT")):
+            with self.subTest(username=username):
+                _, client, model = compose_session()
+                session = mail.MailSession(client, model, username=username)
+                result = session.handle("ECRIRE Alice : mardi")
+                self.assertIn("review_ticket", result)
+                self.assertTrue(session.draft["body"].endswith("\n\n" + expected + "\n\n" + mail.SIGNATURE))
+                mime = BytesParser(policy=policy.default).parsebytes(session.draft["raw"])
+                self.assertIn(expected, mime.get_content())
+                self.assertEqual(mime["From"], "me@example.org")
+                client.send.assert_not_called()
+
+    def test_personal_name_can_be_replaced_or_removed_but_footer_is_always_restored(self):
+        _, client, model = compose_session()
+        session = mail.MailSession(client, model, username="Camille")
+        session.handle("ECRIRE Alice : mardi")
+        self.assertIn("\n\nCamille\n\n", session.draft["body"])
+        for instruction, body in (("Signe avec Alex", "Bonjour.\n\nAlex"),
+                                  ("Retire mon nom et le pied de page Minitel", "Bonjour.")):
+            with self.subTest(instruction=instruction):
+                model.composition.return_value = ("Mardi", body)
+                session.handle("MODIFIER")
+                session.handle(instruction)
+                self.assertEqual(session.draft["body"], body + "\n\n" + mail.SIGNATURE)
+                self.assertNotIn("Camille", session.draft["body"])
+                self.assertEqual(session.draft["body"].count(mail.SIGNATURE), 1)
+                self.assertFalse(session.draft["reviewed"])
+        client.send.assert_not_called()
+
     def test_modify_then_personal_signoff_edits_existing_new_message_without_router(self):
         session, client, _ = compose_session()
         old_ticket = session.handle("ECRIRE Alice : confirmer mardi")["review_ticket"]

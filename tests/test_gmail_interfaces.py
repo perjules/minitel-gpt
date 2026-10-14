@@ -16,6 +16,20 @@ from services import memory_session
 
 
 class RecipientAddressRoutingTests(unittest.TestCase):
+    def test_admin_uses_selected_username_and_restarts_mail_state_on_user_switch(self):
+        admin.MAIL_SESSIONS.clear()
+        with admin.app.test_request_context():
+            first = admin.mail_entry("Camille")
+            self.assertEqual(first["mail"].username, "Camille")
+            first["mail"].draft = {"body": "Camille's private draft"}
+            second = admin.mail_entry("Alex")
+            self.assertEqual(second["mail"].username, "Alex")
+            self.assertIsNone(second["mail"].draft)
+            self.assertIsNone(first["mail"].draft)
+            shared = admin.mail_entry("")
+            self.assertEqual(shared["mail"].username, "MinitelGPT")
+        admin.MAIL_SESSIONS.clear()
+
     def test_explicit_modify_keeps_note_as_edit_instruction_instead_of_memory(self):
         with TemporaryDirectory() as root:
             session, client, model = compose_session()

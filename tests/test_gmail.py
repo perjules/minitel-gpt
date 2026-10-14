@@ -235,6 +235,20 @@ class WorkflowTests(unittest.TestCase):
         self.assertFalse(session.review_valid(result["review_ticket"]))
         client.send.assert_not_called()
 
+    def test_reply_defaults_to_current_username_and_does_not_reapply_it_after_edit(self):
+        for username, expected in (("Camille", "Camille"), ("", "MinitelGPT")):
+            with self.subTest(username=username):
+                _, client, model = make_session()
+                session = mail.MailSession(client, model, username=username)
+                draft(session)
+                self.assertTrue(session.draft["body"].endswith("\n\n" + expected + "\n\n" + mail.SIGNATURE))
+                session.handle("MODIFIER")
+                model.complete.return_value = "Merci.\n\nAlex"
+                session.handle("Signe avec Alex")
+                self.assertEqual(session.draft["body"], "Merci.\n\nAlex\n\n" + mail.SIGNATURE)
+                self.assertFalse(session.draft["reviewed"])
+                client.send.assert_not_called()
+
     def test_revision_old_ticket_cannot_approve_and_ordinary_words_cannot_send(self):
         session, client, model = make_session()
         old = draft(session)

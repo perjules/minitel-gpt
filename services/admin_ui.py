@@ -1481,13 +1481,15 @@ def discard_mail(identifier):
             item["mail"].reset()
 
 
-def mail_entry():
+def mail_entry(username=""):
     with MAIL_SESSIONS_LOCK:
         now = time.monotonic()
         for identifier, item in list(MAIL_SESSIONS.items()):
             if now - item["used"] > MAIL_TTL:
                 discard_mail(identifier)
         identifier = session.get("gmail_session")
+        if identifier in MAIL_SESSIONS and MAIL_SESSIONS[identifier]["mail"].username != (username.strip() or "MinitelGPT"):
+            discard_mail(identifier)
         if identifier not in MAIL_SESSIONS:
             while len(MAIL_SESSIONS) >= 8:
                 discard_mail(next(iter(MAIL_SESSIONS)))
@@ -1495,6 +1497,7 @@ def mail_entry():
             session["gmail_session"] = identifier
             MAIL_SESSIONS[identifier] = {
                 "mail": gmail_mail.MailSession(
+                    username=username,
                     model=gmail_mail.MailModel(
                         settings=lambda: (mistral_key(), mistral_model())
                     )
@@ -1542,8 +1545,8 @@ def gmail_admin():
         request.form.get("csrf", "").encode(), session["gmail_csrf"].encode()
     ):
         return "Requête refusée", 403
-    item = mail_entry()
     selected = memory_entry()
+    item = mail_entry(selected.username)
     cancelling = request.method == "POST" and (
         request.form.get("action") in ("cancel", "reset")
         or request.form.get("question", "").strip().upper() in ("ANNULER", "SOMMAIRE")

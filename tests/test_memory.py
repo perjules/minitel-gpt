@@ -389,7 +389,7 @@ class MemoryInterfaces(unittest.TestCase):
         self.assertFalse(admin.MEMORY_SESSIONS)
 
     def test_real_uart_username_blank_and_invalid_name(self):
-        for name, expected in (("Alice", "Alice"), ("", "Mémoire commune")):
+        for name, expected in (("Alice", "Alice"), ("", "MinitelGPT")):
             uart = FakeSerial(name.encode() + fn(chat.K_ENVOI))
             with patch.object(chat.serial, "Serial", return_value=uart):
                 term = chat.Term()
