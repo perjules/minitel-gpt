@@ -552,16 +552,37 @@ def start_pronote(request, school, language, options, knowledge):
     return worker, output, started
 
 
+def retour_requested(kind, code, typed):
+    """Recognize a physical RETOUR or a submitted exit word during a wait.
+
+    The bounded buffer belongs to that wait/page only. Other typed requests
+    cannot trigger tools or become input to a later screen.
+    """
+    if kind == 'fn' and code == K_RETOUR:
+        return True
+    if (kind == 'fn' and code == K_ENVOI) or (kind == 'char' and code in (CR, LF)):
+        command = "".join(typed).strip().upper()
+        typed.clear()
+        return command in ("RETOUR", "SORTIR", "QUITTER")
+    if (kind == 'fn' and code == K_CORR) or (kind == 'char' and code in (BS, 0x7F)):
+        if typed:
+            typed.pop()
+    elif kind == 'char' and 0x20 <= code <= 0x7E and len(typed) < 40:
+        typed.append(chr(code))
+    return False
+
+
 def wait_answer(t, pending, timeout, allow_retour=False):
     """Reset stops local waiting; provider work/billing may continue."""
     _, output, started = pending
     deadline = started + timeout
+    typed = []
     while time.monotonic() < deadline:
         try:
             result, error = output.get_nowait()
         except Empty:
             kind, code = t.read_key(min(0.1, max(0, deadline - time.monotonic())))
-            if allow_retour and kind == 'fn' and code == K_RETOUR:
+            if allow_retour and retour_requested(kind, code, typed):
                 return None, 'retour'
             if kind == 'fn' and code in (K_SOMMAIRE, K_GUIDE):
                 return None, 'guide' if code == K_GUIDE else 'sommaire'
@@ -797,10 +818,13 @@ def show_response(t: Term, text: str, language="fr", allow_retour=False):
             t.w(bytes([CR, LF]))
             t.w(FG_CYAN)
             t.center(UI[language]["next_page"])
+            typed = []
             while True:
                 kind, code = t.read_key(IDLE_TIMEOUT)
                 if kind == 'timeout':
                     return 'timeout'
+                if allow_retour and retour_requested(kind, code, typed):
+                    return 'retour'
                 if kind == 'fn':
                     if allow_retour and code in (K_RETOUR, K_GUIDE):
                         return 'retour' if code == K_RETOUR else 'guide'
@@ -969,6 +993,10 @@ def run(term=None):
                     break
                 if result == "retour":
                     school_mode.reset()
+                if not school_mode.mode:
+                    # An explicit exit ends school follow-ups as well as the
+                    # local parser state. Keep unrelated public conversation.
+                    history = pronote_answers.public_history(history)
                 # Keep the result/error on screen while accepting the next
                 # command, like ordinary conversation. The startup prompt
                 # helper clears the screen and would erase this last page.

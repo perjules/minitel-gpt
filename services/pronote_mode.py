@@ -205,6 +205,10 @@ class Session:
         word = normalize(text)
         if not self.mode and word != "PRONOTE":
             return None
+        # Leaving a local mode must never depend on a school/configuration read.
+        if word in ("RETOUR", "SORTIR", "QUITTER"):
+            self.reset()
+            return {"display": "Retour a la conversation."}
         try:
             config = self.backend.config()
         except pronote.PronoteError as error:
@@ -222,9 +226,6 @@ class Session:
             self.child = aliases[0] if len(aliases) == 1 else None
             self.last = None
         self.mode = True
-        if word in ("RETOUR", "SORTIR", "QUITTER"):
-            self.reset()
-            return {"display": "Retour a la conversation."}
         if word in ("PRONOTE", "AIDE", "HELP"):
             return {"display": self.help() + ("\n" + self.children(aliases) if not self.child else "")}
         if word == "ENFANT":

@@ -84,6 +84,52 @@ class TerminalModeTests(unittest.TestCase):
         uart = startup.FakeSerial(startup.fn(chat.K_SUITE) * 3)
         self.assertEqual(chat.show_response(chat.Term(transport=uart), "\n".join(["x" * 39] * 40), allow_retour=True), "done")
 
+    def test_typed_retour_on_a_page_restores_normal_conversation(self):
+        backend = Mock()
+        backend.config.return_value = {"enabled": True, "children": {"Alex": {"name": "private"}}}
+
+        def start(*args):
+            output = Queue()
+            output.put(({"display": "\n".join(f"Cours {i}" for i in range(36))}, None))
+            return Mock(is_alive=lambda: False), output, chat.time.monotonic()
+
+        keys = b"fr" + startup.fn(chat.K_ENVOI) + startup.fn(chat.K_SUITE)
+        for text in ("PRONOTE", "COURS", "retour", "Hello"):
+            keys += text.encode() + startup.fn(chat.K_ENVOI)
+        with patch.object(chat.pronote, "backend", return_value=backend), patch.object(chat, "start_pronote", side_effect=start) as school:
+            _, normal = startup.StartupTests().run_session(keys)
+        self.assertEqual(school.call_count, 1)
+        self.assertEqual(len(normal), 1)
+        self.assertEqual(normal[0][1], [{"role": "user", "content": "Hello"}])
+
+    def test_typed_exit_while_waiting_does_not_become_a_school_request(self):
+        for text in (b"RETOUR", b"quitter", b"SORTIX\x08R"):
+            with self.subTest(text=text):
+                pending = (Mock(is_alive=lambda: True), Queue(), chat.time.monotonic())
+                term = chat.Term(transport=startup.FakeSerial(text + startup.fn(chat.K_ENVOI)))
+                self.assertEqual(chat.wait_answer(term, pending, 30, allow_retour=True), (None, "retour"))
+
+    def test_exit_forgets_private_school_context_but_keeps_public_conversation(self):
+        backend = Mock()
+        backend.config.return_value = {"enabled": True, "children": {"Alex": {"name": "private"}}}
+        seen = []
+
+        def answer(history, *args, **kwargs):
+            seen.append([dict(t) for t in history])
+            self.assertIs(kwargs.get("pronote"), backend)
+            private = history[-1]["content"] == "Notes de Alex"
+            return {"status": "ordinary", "text": "PRIVATE RECORD" if private else "Public answer",
+                    "chunks": [], "references": [], "private": private}
+
+        keys = b"fr" + startup.fn(chat.K_ENVOI) + startup.fn(chat.K_SUITE)
+        for text in ("Soleil", "Notes de Alex", "PRONOTE", "RETOUR", "Hello"):
+            keys += text.encode() + startup.fn(chat.K_ENVOI)
+        with patch.object(chat.pronote, "backend", return_value=backend):
+            startup.StartupTests().run_session(keys, factual_reply=answer)
+        self.assertEqual(len(seen), 3)
+        self.assertEqual([t["content"] for t in seen[-1]], ["Soleil", "Public answer", "Hello"])
+        self.assertFalse(any(t.get("private") for t in seen[-1]))
+
     def test_full_print_content_does_not_use_last_displayed_page(self):
         backend = Mock()
         backend.config.return_value = {"enabled": True, "children": {"Alex": {"name": "private"}}}

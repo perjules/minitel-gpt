@@ -175,6 +175,18 @@ class ExpansionTests(unittest.TestCase):
         self.assertFalse(session.mode)
         self.assertIsNone(session.prepare("NOTES"))
 
+    def test_exit_does_not_depend_on_working_configuration(self):
+        session = mode.Session(self.backend)
+        session.prepare("PRONOTE")
+        session.prepare("Alex")
+        session.receive(self.execute("grades"), "grades")
+        with patch.object(self.backend, "config", side_effect=pn.PronoteError("configuration_error")) as config:
+            self.assertIn("Retour a la conversation", session.prepare("RETOUR")["display"])
+            config.assert_not_called()
+        self.assertFalse(session.mode)
+        self.assertIsNone(session.last)
+        self.assertIsNone(session.child)
+
     def test_context_dates_accents_subject_period_and_detail_views(self):
         session = mode.Session(self.backend)
         session.prepare("PRONOTE")

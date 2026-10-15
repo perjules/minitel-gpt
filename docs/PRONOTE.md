@@ -217,7 +217,12 @@ hardware readiness remain separate requirements.
 
 **ENVOI** submits, **SUITE** pages loaded text, **SOMMAIRE** resets the whole
 session and **GUIDE** keeps its existing administration behavior. **RETOUR**
-exits direct mode, including during a read or on a paginated result. Ordinary
+exits direct mode, including during a read or on a paginated result. Typing
+`RETOUR`, `SORTIR` or `QUITTER` followed by ENVOI also exits at those waits,
+without requiring SUITE first. Exit works even if configuration cannot be read,
+and removes earlier private school turns from the LLM's active conversation
+while preserving public discussion. Normal-mode school questions remain available.
+Ordinary
 conversation retains its existing correction-key behavior. Reads run in the
 existing single background-worker/wait contract; abandoned replies cannot enter
 another session and overlapping requests get a recoverable busy message.
@@ -381,7 +386,7 @@ PRONOTE and printing dependencies installed. Run the full offline suite and lint
 .venv/bin/ruff check --select F services/pronote.py services/pronote_answers.py services/minitel_chatgpt.py scripts/pronote_setup.py
 ```
 
-The expanded suite passes **270 tests**. Expansion tests use synthetic data and pinned real SDK objects for averages,
+The expanded suite passes **274 tests**. Expansion tests use synthetic data and pinned real SDK objects for averages,
 unpublished reports and announcement content. They cover every new tool/command,
 child changes, stale isolation, date bounds, partial failures, endpoint writes,
 thread serialization, real terminal-loop routing, function keys, full printing
