@@ -13,6 +13,20 @@ from services import mistral_answers as engine
 
 
 class WaitingTests(unittest.TestCase):
+    def test_failure_logging_has_safe_reason_and_http_status_without_provider_body(self):
+        response = Mock(status_code=422)
+        error = engine.requests.HTTPError("SECRET provider body and credentials", response=response)
+        output = chat.Queue()
+        output.put((None, error))
+        with self.assertLogs(chat.log, level="WARNING") as logs:
+            self.assertEqual(chat.wait_answer(Mock(), (Mock(), output, chat.time.monotonic()), 30), (None, "error"))
+        self.assertIn("http_status=422", str(logs.output))
+        self.assertNotIn("SECRET", str(logs.output))
+        output.put((None, ValueError("Sources without observed search execution")))
+        with self.assertLogs(chat.log, level="WARNING") as logs:
+            chat.wait_answer(Mock(), (Mock(), output, chat.time.monotonic()), 30)
+        self.assertIn("code=unverified_references", str(logs.output))
+
     def test_sommaire_discards_late_response_and_next_worker_has_own_queue(self):
         release = threading.Event()
         entered = threading.Event()

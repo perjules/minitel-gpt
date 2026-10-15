@@ -51,7 +51,20 @@ def inputs(history):
     return result
 
 
-def parse_response(data):
+def prior_references(history):
+    """Previously validated public sources, not evidence of a new search."""
+    references = {}
+    for turn in history:
+        if turn.get("role") != "assistant" or turn.get("private"):
+            continue
+        for ref in turn.get("references", []):
+            if isinstance(ref, dict) and isinstance(ref.get("url"), str) and isinstance(ref.get("title"), str):
+                references.setdefault(ref["url"], ref["title"])
+    return references
+
+
+def parse_response(data, previous_references=None):
+    previous_references = previous_references or {}
     if not isinstance(data, dict) or not isinstance(data.get("outputs"), list):
         raise TypeError("Malformed Conversations outputs")
     search = []
@@ -104,7 +117,7 @@ def parse_response(data):
                 raise ValueError("Invalid source URL")
             if url not in by_url:
                 by_url[url] = len(references) + 1
-                references.append({"title": title, "url": url})
+                references.append({"title": previous_references.get(url, title) if not search else title, "url": url})
             chunks.append({"type": "tool_reference", "tool": "web_search",
                            "title": references[by_url[url] - 1]["title"], "url": url})
         elif kind == "thinking":
@@ -114,7 +127,7 @@ def parse_response(data):
     text = "".join(chunk["text"] for chunk in chunks if chunk["type"] == "text")
     if not text.strip():
         raise ValueError("Empty factual answer")
-    if references and not search:
+    if references and not search and any(ref["url"] not in previous_references for ref in references):
         raise ValueError("Sources without observed search execution")
     status = "ordinary"
     if search:
@@ -127,6 +140,7 @@ def parse_response(data):
     if not isinstance(usage, dict):
         raise TypeError("Malformed provider usage")
     return {"text": text, "chunks": chunks, "references": references,
+            **({"reused_sources": True} if references and not search else {}),
             "search": search, "usage": usage, "status": status}
 
 
@@ -170,7 +184,7 @@ def answer(history, language, key, model, web_search=True, timeout=60, knowledge
                                  json=payload, timeout=timeout)
         response.raise_for_status()
         status = "malformed"
-        result = parse_response(response.json())
+        result = parse_response(response.json(), prior_references(history))
         question = history[-1]["content"]
         if explicit_search(question) and not result["search"]:
             result["status"] = "search_not_executed" if web_search else "search_disabled"

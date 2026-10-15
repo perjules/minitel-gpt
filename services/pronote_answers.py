@@ -123,8 +123,8 @@ def answer(history, language, key, model, web_search, timeout, knowledge, backen
         calls = [entry for entry in data["outputs"]
                  if isinstance(entry, dict) and entry.get("type") == "function.call"]
         if not calls:
-            result = engine.parse_response(data)
-            if result["search"] or result["references"]:
+            result = engine.parse_response(data, engine.prior_references(history))
+            if result["search"]:
                 raise ValueError("Unexpected web search in private request")
             if not calls_count:
                 is_school = school_question(history, backend.config()["children"])
@@ -136,6 +136,8 @@ def answer(history, language, key, model, web_search, timeout, knowledge, backen
                     "Aucune donnee PRONOTE consultee. Precisez l'enfant et la rubrique souhaitee."
                     if language != "en" else
                     "No PRONOTE records retrieved. Specify the child and the school records requested.")} ]})
+            if result["references"]:
+                raise ValueError("Unexpected web search in private request")
             result["private"] = True
             result["pronote"] = receipts
             log.info("endpoint=conversations local=pronote calls=%d status=complete", calls_count)

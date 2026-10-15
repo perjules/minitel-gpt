@@ -243,6 +243,16 @@ material; put fictional world-building in the personality prompt, not those file
 Source follow-ups retain the preceding answer's ordered real references; Mistral
 may search again because previous tool execution state is not replayed.
 
+A later reply can reuse an exact source URL already validated in public history
+without a new search execution. Such replies retain the earlier source title,
+are marked `reused_sources`, and are not classified as freshly searched. An
+explicit request to search still receives the unverified notice if no new search
+runs. Unknown URLs still require an observed search. Private school references
+cannot establish public provenance. The school planner may echo known public
+citations before routing to the public adapter; its discarded planning prose is
+not treated as school evidence. This fixes a reproduced follow-up failure where
+repeated citations caused a generic connection error.
+
 Factual prose is passed through unchanged before the terminal's existing ASCII
 transliteration and wrapping. Python adds numbered markers at source chunks and a
 complete numbered domain footer; exact-URL duplicates share one number. Unicode
@@ -283,6 +293,8 @@ semantic classifier. The model is also instructed to report missing evidence.
 Logs record endpoint/model, elapsed time, observed search, reference count, status
 and allowlisted token counters. They omit questions, credentials and arbitrary
 provider diagnostics. No premium tool, new account or runtime dependency is needed.
+Terminal worker failures additionally log the exception class, an allowlisted
+reason code and HTTP status when available, never provider response bodies.
 
 ### Validation and remaining checks
 

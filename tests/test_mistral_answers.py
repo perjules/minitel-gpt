@@ -124,6 +124,66 @@ class AnswerTests(unittest.TestCase):
         self.assertEqual(result["status"], "insufficient_sources")
         self.assertIn("No reliable evidence", result["text"])
 
+    def test_followup_can_reuse_verified_sources_without_a_fresh_search(self):
+        first = engine.parse_response(fixture())
+        history = [{"role": "user", "content": "Price?"},
+                   {"role": "assistant", "content": first["text"], "chunks": first["chunks"],
+                    "references": first["references"]},
+                   {"role": "user", "content": "Explain that price"}]
+        citation = copy.deepcopy(first["chunks"][1])
+        data = ordinary([{"type": "text", "text": "The earlier price is "}, citation])
+        result, _ = self.request(data, history)
+        self.assertEqual(result["status"], "ordinary")
+        self.assertEqual(result["search"], [])
+        self.assertTrue(result["reused_sources"])
+        self.assertEqual(result["references"], [first["references"][0]])
+        history[-1]["content"] = "Search the web to verify again"
+        result, _ = self.request(data, history)
+        self.assertEqual(result["status"], "search_not_executed")
+
+    def test_unknown_followup_source_still_requires_real_search(self):
+        first = engine.parse_response(fixture())
+        history = [{"role": "assistant", "content": first["text"], "references": first["references"]},
+                   {"role": "user", "content": "Explain"}]
+        data = ordinary([{"type": "text", "text": "Claim"},
+                         {"type": "tool_reference", "tool": "web_search", "title": "Invented",
+                          "url": "https://unknown.example/claim"}])
+        with self.assertRaisesRegex(ValueError, "Sources without observed search"):
+            self.request(data, history)
+
+    def test_price_search_then_multiple_followups_with_school_planner_enabled(self):
+        backend = Mock()
+        backend.tools.return_value = [{"type": "function", "function": {"name": "pronote_list_children"}}]
+        backend.config.return_value = {"enabled": True, "children": {"Alex": {}}}
+        first = engine.parse_response(fixture())
+        followup = ordinary([{"type": "text", "text": "The previously quoted price "}, first["chunks"][1]])
+        responses = []
+        for data in (ordinary("Public"), fixture(), followup, followup, ordinary("Public"), ordinary("Other answer")):
+            response = Mock()
+            response.json.return_value = data
+            responses.append(response)
+        history = []
+        with patch.object(engine.requests, "post", side_effect=responses) as post:
+            for question in ("Price of a bicycle?", "Explain that price", "How far can it travel?"):
+                candidate = history + [{"role": "user", "content": question}]
+                result = engine.answer(candidate, "fr", "synthetic", "model", pronote=backend)
+                self.assertFalse(result.get("private"))
+                self.assertFalse(engine.notice(result["status"], "fr"))
+                history = engine.bound_history(candidate + [{"role": "assistant", "content": result["text"],
+                                                             "chunks": result["chunks"], "references": result["references"]}])
+        self.assertEqual(post.call_count, 6)
+        self.assertEqual(history[-1]["content"], "Other answer")
+        backend.execute.assert_not_called()
+
+    def test_private_sources_are_not_trusted_for_public_followups(self):
+        first = engine.parse_response(fixture())
+        history = [{"role": "user", "content": "PRIVATE QUESTION"},
+                   {"role": "assistant", "content": "PRIVATE ANSWER", "private": True,
+                    "references": first["references"]}, {"role": "user", "content": "Public"}]
+        data = ordinary([{"type": "text", "text": "Claim"}, first["chunks"][1]])
+        with self.assertRaisesRegex(ValueError, "Sources without observed search"):
+            self.request(data, history)
+
     def test_malformed_empty_and_ambiguous_final_entries_fail_recoverably(self):
         bad = [None, {}, {"outputs": []}, ordinary(" "), ordinary(None),
                {"outputs": [ordinary()["outputs"][0]] * 2},

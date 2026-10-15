@@ -398,7 +398,7 @@ PRONOTE and printing dependencies installed. Run the full offline suite and lint
 .venv/bin/ruff check --select F services/pronote.py services/pronote_answers.py services/minitel_chatgpt.py scripts/pronote_setup.py
 ```
 
-The expanded suite passes **278 tests**. Expansion tests use synthetic data and pinned real SDK objects for averages,
+The expanded suite passes **284 tests**. Expansion tests use synthetic data and pinned real SDK objects for averages,
 unpublished reports and announcement content. They cover every new tool/command,
 child changes, stale isolation, date bounds, partial failures, endpoint writes,
 thread serialization, real terminal-loop routing, function keys, full printing

@@ -134,6 +134,23 @@ class LocalAnswerTests(unittest.TestCase):
         self.local.execute.assert_not_called()
         self.assertNotIn("private", result)
 
+    def test_public_followup_planner_can_echo_a_prior_verified_citation(self):
+        citation = {"type": "tool_reference", "tool": "web_search", "title": "Price source",
+                    "url": "https://example.org/price"}
+        history = [{"role": "user", "content": "Price of a bicycle?"},
+                   {"role": "assistant", "content": "2 000 EUR", "chunks": [
+                       {"type": "text", "text": "2 000 EUR"}, citation],
+                    "references": [{"title": citation["title"], "url": citation["url"]}]},
+                   {"role": "user", "content": "What about the warranty?"}]
+        planner = final([{"type": "text", "text": "Public follow-up "}, citation])
+        result, calls = self.request([planner, final("Warranty details")], history)
+        self.assertEqual(result["text"], "Warranty details")
+        self.assertNotIn("private", result)
+        self.assertEqual(len(calls), 2)
+        self.assertNotIn("web_search", json.dumps(calls[0].kwargs["json"]["tools"]))
+        self.assertEqual(calls[1].kwargs["json"]["tools"], [{"type": "web_search"}])
+        self.local.execute.assert_not_called()
+
     def test_no_private_history_reaches_web_after_feature_is_disabled(self):
         history = [{"role": "user", "content": "PRIVATE QUESTION"},
                    {"role": "assistant", "content": "PRIVATE RECORD", "private": True},

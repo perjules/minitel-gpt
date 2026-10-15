@@ -588,7 +588,18 @@ def wait_answer(t, pending, timeout, allow_retour=False):
                 return None, 'guide' if code == K_GUIDE else 'sommaire'
             continue
         if error:
-            log.warning("answer status=api_error error=%s", type(error).__name__)
+            # Fixed diagnostic codes only; never log provider bodies or arbitrary
+            # exception messages containing questions, tokens or school records.
+            reason = {
+                "Sources without observed search execution": "unverified_references",
+                "Unexpected web search in private request": "private_web_output",
+                "Expected one final assistant entry": "ambiguous_final",
+                "Empty factual answer": "empty_answer",
+                "Local tool call limit": "local_tool_limit",
+            }.get(str(error), "unclassified")
+            status = getattr(getattr(error, "response", None), "status_code", None)
+            log.warning("answer status=api_error error=%s code=%s http_status=%s",
+                        type(error).__name__, reason, status if type(status) is int else "-")
             return None, 'error'
         return result, 'done'
     log.warning("answer status=deadline elapsed=%.2f", time.monotonic() - started)
