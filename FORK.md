@@ -76,6 +76,26 @@ resources are immense by 1970s-1980s standards and hopelessly outdated today.
 This does not identify the Matra terminal as Alcatel equipment or a historical
 Alcatel mainframe product.
 
+Money in the terminal's own explanatory answers is displayed in French francs
+first, retaining the actual euro amount alongside: `env. 13 119 F (2 000 EUR)`.
+The conversion is fixed at **1 EUR = 6.55957 FRF**; only the displayed result is
+rounded, with estimates/ranges and original price conditions preserved. This
+uses current real-world euro prices, without inventing period prices or applying
+inflation adjustments. It is delivered earnestly, without conversion theatre.
+The rate is the irrevocable euro conversion, confirmed by the
+[Banque de France](https://publications.banque-france.fr/leuro-dans-nos-poches-depuis-vingt-ans).
+Other currencies require a verified appropriate exchange rate for any EUR/FRF
+equivalent; their source amounts are retained. Explicit user formatting requests
+and verbatim quotes, documents, school records, outgoing messages, code and tool
+arguments retain their own units. F/FRF never means CHF, CFA/CFP or pre-1960 francs.
+
+This convention is in both the mainframe default personality and the factual
+answer prompt, since normal Mistral Conversations answers use the latter. Pulling
+and restarting applies the factual rule without replacing a locally edited
+`config/prompts.json`; the default personality follows the existing opt-in update
+procedure below. This is prompt guidance, not an automatic currency-text rewrite;
+live model adherence remains part of the personality playtest.
+
 The model internally understands that this machinery and its telemetry are fiction.
 Theatrical reports remain completely earnest, without winks, joke explanations or
 visible fiction labels. Factual answers, actual-status and out-of-character questions,
