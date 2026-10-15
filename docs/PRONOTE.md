@@ -203,6 +203,18 @@ A period follows the numeric/period command; `PERIODE exact-name` refines it.
 If a period-selection error supplied names, their typed case/accents are matched
 locally to those exact names.
 
+`NOTES` displays **one test per screen**, with a `Note n/total` counter.
+While this grade view is active, the **SUITE** key (or typed `SUIVANT`/`SUITE`)
+advances and the **RETOUR** key (or typed `PRECEDENT`) goes back. Moving back
+from the first test returns to the PRONOTE command menu; moving forward from the
+last test keeps that last test visible. Navigation uses loaded data, including
+subject-filtered results, without PRONOTE/LLM requests. `QUITTER`/`SORTIR` leave
+PRONOTE immediately; the typed command `RETOUR` also retains its exit meaning.
+`LIRE n` opens complete details for a test in the displayed selection. Exceptional
+long fields are visibly shortened to keep one physical page, with a detail hint;
+original fields remain in the loaded result. `IMPRIMER` prints every loaded test
+in the current selection, rather than just the visible test.
+
 Reports, competencies and announcements show numbered entries first. Daily
 lessons use short time/subject/room lines; long homework and grade comments are
 shortened only in the initial screen view, with `TEXTE` showing the loaded text. `LIRE 2`
@@ -386,7 +398,7 @@ PRONOTE and printing dependencies installed. Run the full offline suite and lint
 .venv/bin/ruff check --select F services/pronote.py services/pronote_answers.py services/minitel_chatgpt.py scripts/pronote_setup.py
 ```
 
-The expanded suite passes **274 tests**. Expansion tests use synthetic data and pinned real SDK objects for averages,
+The expanded suite passes **278 tests**. Expansion tests use synthetic data and pinned real SDK objects for averages,
 unpublished reports and announcement content. They cover every new tool/command,
 child changes, stale isolation, date bounds, partial failures, endpoint writes,
 thread serialization, real terminal-loop routing, function keys, full printing

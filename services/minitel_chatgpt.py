@@ -766,7 +766,7 @@ def show_guide(t: Term, language="fr"):
     t.read_key(120)
 
 
-def read_question(t: Term, allow_empty=False, calculator_mode=False):
+def read_question(t: Term, allow_empty=False, calculator_mode=False, navigation_mode=False):
     """Lit une question. Retourne (texte, 'envoi') / (None,'sommaire') / (None,'timeout')."""
     t.w(FG_GREEN)
     t.w("> ")
@@ -777,6 +777,8 @@ def read_question(t: Term, allow_empty=False, calculator_mode=False):
         if kind == 'timeout':
             return None, 'timeout'
         if kind == 'fn':
+            if navigation_mode and code in (K_SUITE, K_RETOUR):
+                return 'SUIVANT' if code == K_SUITE else 'PRECEDENT', 'envoi'
             if calculator_mode and code == K_RETOUR:
                 return 'RETOUR', 'envoi'
             if code == K_SOMMAIRE:
@@ -916,7 +918,7 @@ def run(term=None):
         if user_action in ('guide', 'sommaire'):
             continue
         mail = gmail_mail.MailSession(username=memory.username) if gmail_mail.enabled() else None
-        language = memory.saved_language()
+        language = "fr" if memory.key == "shared" else memory.saved_language()
         action = user_action
         if language not in ("fr", "en"):
             show_home(t, title_lines, title_msg)
@@ -949,7 +951,8 @@ def run(term=None):
         show_question_prompt(t, question_msg)
 
         while True:  # boucle conversation
-            question, action = read_question(t, calculator_mode=calc.mode or school_mode.mode)
+            question, action = read_question(t, calculator_mode=calc.mode or school_mode.mode,
+                                             navigation_mode=school_mode.grade_view)
             if action == 'guide':
                 show_guide(t, language)
                 break          # retour au sommaire après l'écran d'aide
@@ -986,7 +989,16 @@ def run(term=None):
                         answer = response["display"]
                     else:
                         answer = "PRONOTE: " + ("timeout" if action == "deadline" else "unavailable")
-                result = show_response(t, safe_display(answer), language, allow_retour=True)
+                answer = safe_display(answer)
+                if school_mode.grade_view and not direct.get("print"):
+                    # One test per physical page, even with unusually long
+                    # names/comments. Full fields remain available with LIRE.
+                    lines = wrap(answer)
+                    if len(lines) > CONTENT_ROWS:
+                        answer = "\n".join(lines[:CONTENT_ROWS - 2] + [
+                            f"... LIRE {school_mode.grade_index + 1}: detail",
+                            "SUITE:suiv / RETOUR:prec / QUITTER"])
+                result = show_response(t, answer, language, allow_retour=True)
                 if result in ("sommaire", "timeout", "guide"):
                     if result == "guide":
                         show_guide(t, language)
@@ -1002,7 +1014,8 @@ def run(term=None):
                 # helper clears the screen and would erase this last page.
                 t.w(bytes([CR, LF]))
                 t.w(FG_WHITE)
-                t.center("PRONOTE / AIDE / RETOUR" if school_mode.mode else UI[language]["follow_up"])
+                t.center("Matiere / LIRE n / IMPRIMER" if school_mode.grade_view else
+                         "PRONOTE / AIDE / RETOUR" if school_mode.mode else UI[language]["follow_up"])
                 t.w(bytes([CR, LF]))
                 continue
 

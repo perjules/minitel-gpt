@@ -7,7 +7,8 @@ La casse ne distingue pas deux noms; revenez avec le même nom après un redéma
 Choisissez ensuite la langue pour un nouveau nom : ce choix est enregistré dans
 son `memory.json` et repris automatiquement aux démarrages suivants, sans nouveau
 prompt de langue. Un nom existant sans langue enregistrée reçoit aussi ce prompt.
-Les sessions communes demandent toujours la langue, sans conserver un choix global.
+Un nom vide ouvre directement une session commune en français, sans demander la
+langue ni conserver de préférence de langue globale.
 Un timeout utilise le français sans enregistrer ce choix implicite. Pour refaire
 le choix d'un utilisateur connu, retirez le champ `language` de son `memory.json`
 pendant que les deux services sont arrêtés, puis redémarrez-les.

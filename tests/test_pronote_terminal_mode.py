@@ -84,6 +84,62 @@ class TerminalModeTests(unittest.TestCase):
         uart = startup.FakeSerial(startup.fn(chat.K_SUITE) * 3)
         self.assertEqual(chat.show_response(chat.Term(transport=uart), "\n".join(["x" * 39] * 40), allow_retour=True), "done")
 
+    def test_one_grade_per_page_with_forward_and_backward_function_keys(self):
+        backend = Mock()
+        backend.config.return_value = {"enabled": True, "children": {"Alex": {"name": "private"}}}
+        items = [{"subject": name, "grade": str(i + 10), "out_of": "20"}
+                 for i, name in enumerate(("ALPHA", "BETA", "GAMMA"))]
+
+        def start(*args):
+            output = Queue()
+            output.put(({"records": {"child": "Alex", "items": items}}, None))
+            return Mock(is_alive=lambda: False), output, chat.time.monotonic()
+
+        keys = b"fr" + startup.fn(chat.K_ENVOI) + startup.fn(chat.K_SUITE)
+        for text in ("PRONOTE", "NOTES"):
+            keys += text.encode() + startup.fn(chat.K_ENVOI)
+        keys += startup.fn(chat.K_SUITE) + startup.fn(chat.K_RETOUR)
+        keys += b"SUIVANT" + startup.fn(chat.K_ENVOI) + startup.fn(chat.K_SUITE) * 2
+        for text in ("QUITTER", "Hello"):
+            keys += text.encode() + startup.fn(chat.K_ENVOI)
+        with patch.object(chat.pronote, "backend", return_value=backend), patch.object(chat, "start_pronote", side_effect=start) as request:
+            screens, normal = startup.StartupTests().run_session(keys)
+        pages = [s for s in screens if any(f"Note {i}/3" in s for i in range(1, 4))]
+        expected = ("ALPHA", "BETA", "ALPHA", "BETA", "GAMMA", "GAMMA")
+        self.assertEqual(len(pages), len(expected))
+        for page, subject in zip(pages, expected):
+            self.assertIn(subject, page)
+            self.assertEqual(sum(name in page for name in ("ALPHA", "BETA", "GAMMA")), 1)
+        request.assert_called_once()
+        self.assertEqual(len(normal), 1)
+        self.assertEqual(normal[0][1], [{"role": "user", "content": "Hello"}])
+
+    def test_long_grade_stays_on_one_physical_page_with_complete_detail_available(self):
+        backend = Mock()
+        backend.config.return_value = {"enabled": True, "children": {"Alex": {"name": "private"}}}
+        item = {"subject": "Œuvre très longue " * 10, "comment": "Commentaire " * 30,
+                "grade": "Non note " * 5, "out_of": "20", "class_average": "12,5 " * 8,
+                "minimum": "0 " * 20, "maximum": "20 " * 13, "coefficient": "1 " * 20}
+
+        def start(*args):
+            output = Queue()
+            output.put(({"records": {"child": "Alex", "items": [item]}}, None))
+            return Mock(is_alive=lambda: False), output, chat.time.monotonic()
+
+        keys = b"fr" + startup.fn(chat.K_ENVOI) + startup.fn(chat.K_SUITE)
+        for text in ("PRONOTE", "NOTES"):
+            keys += text.encode() + startup.fn(chat.K_ENVOI)
+        with patch.object(chat.pronote, "backend", return_value=backend), patch.object(chat, "start_pronote", side_effect=start):
+            helper = startup.StartupTests()
+            helper.run_session(keys)
+        screen = Screen()
+        screen.write(helper.uart.output)
+        visible = "\n".join("".join(row) for row in screen.rows)
+        self.assertIn("Note 1/1", visible)
+        self.assertIn("LIRE 1: detail", visible)
+        self.assertIn("RETOUR:prec", visible)
+        self.assertLessEqual(screen.row, 22)
+
     def test_typed_retour_on_a_page_restores_normal_conversation(self):
         backend = Mock()
         backend.config.return_value = {"enabled": True, "children": {"Alex": {"name": "private"}}}

@@ -176,9 +176,33 @@ class Session:
         self.last = None
         self.selecting = False
         self.scope = None
+        self.grade_view = False
+        self.grade_items = []
+        self.grade_index = 0
 
     def reset(self):
         self.__init__(self.backend)
+
+    def clear_grades(self):
+        self.grade_view = False
+        self.grade_items = []
+        self.grade_index = 0
+
+    def open_grades(self, items):
+        self.grade_items = items
+        self.grade_index = 0
+        self.grade_view = bool(items)
+        return self.grade_page() if items else render(self.last, "grades")
+
+    def grade_page(self):
+        text = render({**self.last, "items": [self.grade_items[self.grade_index]]}, "grades")
+        text = text.replace("\n1. ", f"\n{self.grade_index + 1}. ", 1)
+        text = text.replace("Matiere / TEXTE / IMPRIMER", "")
+        state = "CACHE POSSIBLEMENT PERIME\n" if self.last.get("stale") else ""
+        if self.last.get("truncated"):
+            state += "Liste tronquee\n"
+        return narrow(f"Note {self.grade_index + 1}/{len(self.grade_items)}\n" + state + text.rstrip()
+                      + "\nSUITE:suiv / RETOUR:prec / QUITTER")
 
     def help(self):
         return narrow("PRONOTE" + (" / " + self.child if self.child else "") + "\n"
@@ -212,6 +236,7 @@ class Session:
         try:
             config = self.backend.config()
         except pronote.PronoteError as error:
+            self.clear_grades()
             return {"display": "PRONOTE: " + str(error)}
         if not config.get("enabled"):
             self.reset()
@@ -221,11 +246,25 @@ class Session:
         if self.scope != config:
             self.last = None
             self.child = None
+            self.clear_grades()
             self.scope = copy.deepcopy(config)
         if self.child not in aliases:
             self.child = aliases[0] if len(aliases) == 1 else None
             self.last = None
+            self.clear_grades()
         self.mode = True
+        if word in ("SUIVANT", "SUITE", "PRECEDENT"):
+            if not self.grade_view:
+                return {"display": "Aucune note affichee. Tapez NOTES."}
+            if word == "PRECEDENT" and self.grade_index == 0:
+                self.clear_grades()
+                return {"display": self.help()}
+            step = -1 if word == "PRECEDENT" else 1
+            self.grade_index = min(len(self.grade_items) - 1, self.grade_index + step)
+            return {"display": self.grade_page()}
+        selected_grades = self.grade_items if self.grade_view else None
+        if word != "IMPRIMER":
+            self.clear_grades()
         if word in ("PRONOTE", "AIDE", "HELP"):
             return {"display": self.help() + ("\n" + self.children(aliases) if not self.child else "")}
         if word == "ENFANT":
@@ -248,11 +287,12 @@ class Session:
                 return {"display": "Aucun resultat selectionne."}
             if word.startswith("LIRE "):
                 index = int(word.split()[1]) - 1
-                items = self.last.get("items", [])
+                items = selected_grades if selected_grades is not None else self.last.get("items", [])
                 if not 0 <= index < len(items):
                     return {"display": "Numero indisponible."}
                 return {"display": narrow(details(items[index]))}
-            return {"display": render(self.last, self.operation, full=True), "print": word == "IMPRIMER"}
+            result = {**self.last, "items": selected_grades} if selected_grades is not None else self.last
+            return {"display": render(result, self.operation, full=True), "print": word == "IMPRIMER"}
         command, _, suffix = word.partition(" ")
         command = ALIASES.get(command, command)
         operation = COMMANDS.get(command)
@@ -302,13 +342,16 @@ class Session:
                 subject_filter = "MATH" if suffix == "MATHS" else suffix
                 filtered = [i for i in self.last["items"] if subject_filter in normalize(i.get("subject") or "")]
                 if filtered:
-                    return {"display": render({**self.last, "items": filtered}, operation)}
+                    return {"display": self.open_grades(filtered)}
             return self.fallback(text)
         return {"tool": "pronote_get_" + operation, "arguments": args, "operation": operation}
 
     def receive(self, result, operation):
         self.operation = operation
         self.last = copy.deepcopy(result)
+        self.clear_grades()
+        if operation == "grades" and not result.get("error"):
+            return self.open_grades(self.last.get("items", []))
         return render(result, operation)
 
 

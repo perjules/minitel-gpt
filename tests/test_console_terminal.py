@@ -65,9 +65,9 @@ class ConsoleTests(unittest.TestCase):
         self.assertEqual(key_bytes("é"), b"")
 
     def test_real_loop_startup_paging_history_calculator_and_reset(self):
-        # Blank username -> shared scope -> English -> SUITE. Page a long reply,
+        # Blank username -> shared scope/French -> SUITE. Page a long reply,
         # ask a follow-up, use local arithmetic, then reset to username selection.
-        keys = (list("\nen\n") + ["\x0e"] + list("hello\n")
+        keys = (list("\n") + ["\x0e"] + list("hello\n")
                 + ["\x0e"] + list("follow up\nCALC 2+3\n") + ["\x10"])
         console = ConsoleSerial(Window(keys))
         snapshots = []
@@ -112,7 +112,8 @@ class ConsoleTests(unittest.TestCase):
         self.assertEqual(calls[1][-1]["content"], "follow up")
         visible = "\n".join(snapshots)
         self.assertIn("BOOT TEST", visible)
-        self.assertTrue(any(chat.UI["en"]["next_page"] in screen for screen in snapshots))
+        self.assertTrue(any(chat.UI["fr"]["next_page"] in screen for screen in snapshots))
+        self.assertNotIn("Choose language", visible)
         self.assertIn("2+3", visible)
         self.assertIn("5", visible)
         self.assertIn("Nom / name", snapshots[-1])

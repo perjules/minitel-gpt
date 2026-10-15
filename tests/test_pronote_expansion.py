@@ -206,6 +206,50 @@ class ExpansionTests(unittest.TestCase):
         self.assertIn("Bonjour", session.prepare("TEXTE")["display"])
         self.assertIn("indisponible", session.prepare("LIRE 999")["display"])
 
+    def test_grade_pages_move_both_directions_locally_and_stop_at_boundaries(self):
+        session = mode.Session(self.backend)
+        session.prepare("PRONOTE")
+        session.prepare("Alex")
+        result = {"child": "Alex", "period": "Trimestre 1", "items": [
+            {"subject": f"Test-{i}", "grade": str(10 + i), "out_of": "20"} for i in range(3)]}
+        first = session.receive(result, "grades")
+        self.assertIn("Note 1/3", first)
+        self.assertNotIn("Test-1", first)
+        self.assertIn("Test-1", session.prepare("SUIVANT")["display"])
+        self.assertIn("Test-2", session.prepare("SUITE")["display"])
+        self.assertIn("Test-2", session.prepare("SUIVANT")["display"])
+        self.assertIn("Test-1", session.prepare("PRECEDENT")["display"])
+        self.assertIn("Test-0", session.prepare("PRECEDENT")["display"])
+        self.assertIn("NOTES / MOYENNES", session.prepare("PRECEDENT")["display"])
+        self.assertFalse(session.grade_view)
+        self.assertTrue(session.mode)
+        session.prepare("QUITTER")
+        self.assertFalse(session.mode)
+        self.factory.token_login.assert_not_called()
+
+    def test_filtered_grade_pages_keep_details_and_complete_print_output(self):
+        session = mode.Session(self.backend)
+        session.prepare("PRONOTE")
+        session.prepare("Alex")
+        items = [{"subject": "Francais", "comment": "FRENCH"},
+                 {"subject": "Maths", "comment": "MATH FIRST"},
+                 {"subject": "Maths", "comment": "MATH LAST"}]
+        session.receive({"child": "Alex", "items": items}, "grades")
+        self.assertIn("Note 1/2", session.prepare("MATHS")["display"])
+        self.assertIn("MATH LAST", session.prepare("SUIVANT")["display"])
+        printable = session.prepare("IMPRIMER")
+        self.assertIn("MATH FIRST", printable["display"])
+        self.assertIn("MATH LAST", printable["display"])
+        self.assertNotIn("FRENCH", printable["display"])
+        self.assertTrue(session.grade_view)
+        self.assertIn("MATH LAST", session.prepare("LIRE 2")["display"])
+        self.assertFalse(session.grade_view)
+        session.receive({"child": "Alex", "items": items}, "grades")
+        session.prepare("ENFANT")
+        self.assertEqual(session.grade_items, [])
+        self.assertFalse(session.grade_view)
+        self.factory.token_login.assert_not_called()
+
     def test_switch_and_reconfiguration_discard_private_detail_and_print(self):
         session = mode.Session(self.backend)
         session.prepare("PRONOTE")

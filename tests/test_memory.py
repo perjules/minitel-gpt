@@ -468,7 +468,7 @@ class MemoryInterfaces(unittest.TestCase):
         for path in Path(self.temp.name).glob("users/*/logs/*.jsonl"):
             self.assertNotIn("PERIPHERIQUES", path.read_text())
 
-    def test_username_first_remembers_language_and_shared_still_prompts(self):
+    def test_username_first_remembers_language_and_shared_defaults_to_french(self):
         def visit(name, language, question):
             keys = name.encode() + fn(chat.K_ENVOI)
             if language is not None:
@@ -485,8 +485,8 @@ class MemoryInterfaces(unittest.TestCase):
             visit("Alice", "en", "Hello")
             + visit("ALICE", None, "Again")
             + visit("Bob", "fr", "Bonjour")
-            + visit("", "fr", "Salut")
-            + visit("", "en", "Hi")
+            + visit("", None, "Salut")
+            + visit("", None, "Encore")
         )
 
         def synchronous(*args, **kwargs):
@@ -516,15 +516,15 @@ class MemoryInterfaces(unittest.TestCase):
             chat.run()
         self.assertEqual(
             [call.args[0] for call in boot.call_args_list],
-            ["en", "en", "fr", "fr", "en"],
+            ["en", "en", "fr", "fr", "fr"],
         )
         self.assertEqual(
             [call.args[1] for call in answer.call_args_list],
-            ["en", "en", "fr", "fr", "en"],
+            ["en", "en", "fr", "fr", "fr"],
         )
         visible = screen_text(uart.output)
         self.assertLess(visible.index("Nom / name"), visible.index("Choose language"))
-        self.assertEqual(visible.count("Choose language"), 4)
+        self.assertEqual(visible.count("Choose language"), 2)
         store = memory.MemoryStore(self.temp.name)
         self.assertEqual(store.read(memory.user_key("Alice")[0])["language"], "en")
         self.assertEqual(store.read(memory.user_key("Bob")[0])["language"], "fr")

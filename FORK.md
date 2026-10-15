@@ -86,20 +86,23 @@ Reference: the personality workshop's updated v0.4 harness, archive version 38,
 10 October 2026, specifically `data/world.json` and `prompts/personality.txt`.
 The policy is adapted to the existing single chat prompt and independent boot request.
 
-The terminal starts with its logo and a language prompt. Submit `en`/`English`
+The terminal first asks for a name. Leaving it blank starts the common session
+directly in French without asking for a language. Named users reuse their saved
+language; a new named user sees the language prompt. Submit `en`/`English`
 or `fr`/`French` with **ENVOI** (case-insensitive). Blank, unrecognised or timed-out
 input silently selects French. A fictional mainframe startup aims for roughly one
 screen and scrolls automatically when longer. **SUITE** opens the question prompt;
-**SOMMAIRE** returns to language selection, and **GUIDE** retains access to administration. Boot-screen
+**SOMMAIRE** returns to name selection, and **GUIDE** retains access to administration. Boot-screen
 inactivity returns to the start screen after five minutes.
 
 The language applies to terminal messages and the model's default answer language;
 function keys always retain their French names. French question/loading messages
 retain the active preset's custom wording; English uses the terminal's translated
 wording. Language selection and startup diagnostics are never conversation turns.
-**SOMMAIRE** resets both language selection and conversation history.
+**SOMMAIRE** resets the current session and conversation history; saved named-user
+language preferences remain available.
 
-After language submission, a short waiting message appears while one independent
+After name/language selection, a short waiting message appears while one independent
 request generates boot diagnostics, aiming for 12-18 lines without a hard line-count
 limit. It uses the configured Mistral or Claude model and credentials, with an
 eight-second HTTP request timeout and no
