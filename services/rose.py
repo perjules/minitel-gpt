@@ -92,7 +92,7 @@ def moderation_rejected(status, data):
     if not isinstance(result, dict):
         return False
     result = result.get("moderation_llm_v2", {})
-    if not isinstance(result, dict) or result.get("error"):
+    if not isinstance(result, dict) or "error" in result:
         return False
     decisions = result.get("decisions", {})
     return (result.get("action") == "block" and result.get("violated") is True
@@ -278,7 +278,7 @@ def bill(messages, persona_fees, reason):
     charges = [
         ("Connexion discrète", 1800, "Ouverture de ligne réservée"),
         ("Mise en relation", 2900, "Acheminement à titre personnel"),
-        (f"{messages} messages à 3,50 F", messages * 350, "Soumissions de conversation"),
+        (f"{messages} message{'s' if messages != 1 else ''} à 3,50 F", messages * 350, "Soumissions de conversation"),
         ("Réserve de discrétion", 1300, "Traitement sans publicité"),
         ("Mot d'arrêt disponible", 1000, "Disponibilité pendant la session"),
         ("Entretien de la ligne", 1100, "Contrôle des silences"),

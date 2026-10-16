@@ -199,6 +199,18 @@ def show_bill(term, receipt, row_delay=0.32):
 
 
 def run(term, alias, model, timeout=30, row_delay=0.32):
+    """Scope even the shared console keyboard hint to French, then restore it."""
+    previous_hint = getattr(term.s, "hint", None)
+    if isinstance(previous_hint, str):
+        term.s.hint = "Entree ENVOI | ^N SUITE | ^P SOMMAIRE | ^G AIDE | ^R RETOUR | ^Q fermer"
+    try:
+        return _run(term, alias, model, timeout, row_delay)
+    finally:
+        if isinstance(previous_hint, str):
+            term.s.hint = previous_hint
+
+
+def _run(term, alias, model, timeout=30, row_delay=0.32):
     """Return ordinary-loop action and any outstanding isolated worker tuple."""
     accepted, action = gate(term)
     if not accepted:

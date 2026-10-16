@@ -161,7 +161,7 @@ La référence protocole 1B n'établit pas le support exact du Minitel 1 posséd
 ## Validation et prochaine séance
 
 Les 284 tests existants passent dans cet environnement avec leurs dépendances.
-Les 24 premiers contrôles rose passent : porte exacte/sans écho console,
+Les 31 contrôles rose passent : porte exacte/sans écho console,
 annulation, dépassement de saisie sans fuite, alias, profil/mot d'arrêt fixes,
 état borné, sortie/verrouillage, réponse tardive, deadline, comptage/conversion,
 défilement/skip/annulation et langue ordinaire anglaise préservée. Aucun
@@ -172,6 +172,13 @@ invisible, conversation, RETOUR, début du relevé automatique et SUITE vers le
 total 204,50 F / 31,18 EUR après un message. Correction de l'ouverture mock
 qui répondait initialement à son propre signal d'entrée. Correction aussi du
 bloc final qui aurait été effacé par le nouvel accueil après SOMMAIRE.
+Un deuxième parcours console avec Mireille a confirmé le bon signal d'ouverture,
+une réplique simulée en français à une demande mêlant anglais et intimité,
+la sortie par mot d'arrêt avec casse/espaces variés, puis le relevé complet
+jusqu'au total. Ce sont des répliques d'exemple écrites, pas une validation
+de comportement Mistral. Le pied de console est désormais français pendant
+la porte et la conversation, puis son libellé ordinaire est restauré.
+Le décompte distingue `1 message`. Bilan combiné : **315 tests passent**.
 
 Pas de clé Mistral autorisée dans cet environnement ; **aucun appel réel**,
 modèle réellement observé, mesure de coût ou rejet réel. Configuration prévue :

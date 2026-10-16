@@ -86,6 +86,7 @@ class ConsoleSerial:
         self.screen = Screen()
         self.pending = deque()
         self.local_echo = True
+        self.hint = "Enter ENVOI | ^N SUITE | ^P SOMMAIRE | ^G GUIDE | ^R RETOUR | ^Q quit"
         window.keypad(True)
         window.timeout(100)
 
@@ -106,8 +107,7 @@ class ConsoleSerial:
                     # ncurses reports ERR after writing the bottom-right cell.
                     pass
             if height > 24:
-                hint = "Enter ENVOI | ^N SUITE | ^P SOMMAIRE | ^G GUIDE | ^R RETOUR | ^Q quit"
-                self.window.addnstr(24, 0, hint, width - 1)
+                self.window.addnstr(24, 0, self.hint, width - 1)
             self.window.move(self.screen.row, self.screen.column)
         self.window.refresh()
 

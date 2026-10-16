@@ -171,6 +171,24 @@ class HostTests(unittest.TestCase):
         self.assertNotIn("password", prompt.lower())
         self.assertNotIn("fixture", str(captured))
 
+    def test_opening_replay_begins_with_user_cue_without_counting_it(self):
+        session = rose.Session("Bertrand")
+        captured = []
+
+        def model(prompt, history):
+            captured.append(copy.deepcopy(history))
+            return rose.Reply("Bonsoir.")
+
+        job = session.start(model)
+        job.thread.join(1)
+        session.receive(job.output.get_nowait())
+        job = session.start(model, "Bonjour")
+        job.thread.join(1)
+        turns = captured[-1]
+        self.assertEqual([turn["role"] for turn in turns], ["user", "assistant", "user"])
+        self.assertEqual(turns[-1]["content"], "Bonjour")
+        self.assertEqual(session.messages, 1)
+
     def test_billing_arithmetic_reference_expanded_and_fine(self):
         self.assertEqual(rose.euros(19700), Decimal("30.03"))
         self.assertEqual(rose.euros(21800), Decimal("33.23"))
@@ -199,6 +217,9 @@ class ProviderTests(unittest.TestCase):
         false_decision = violation()
         false_decision["guardrails"]["results"]["moderation_llm_v2"]["decisions"]["sexual"]["violated"] = False
         cases.append((403, false_decision))
+        inconsistent_error = violation()
+        inconsistent_error["guardrails"]["results"]["moderation_llm_v2"]["error"] = {}
+        cases.append((403, inconsistent_error))
         for status, data in cases:
             self.assertFalse(rose.moderation_rejected(status, data))
 
@@ -296,9 +317,87 @@ class CancellationTests(unittest.TestCase):
         self.assertFalse(scrolling)
         self.assertIn("Total", "\n".join(screen))
         self.assertIn("facture telephonique.", "\n".join(screen))
+        self.assertTrue(screen[0].startswith("Total"))
+
+    def test_outstanding_worker_is_returned_for_main_loop_overlap_guard(self):
+        release = threading.Event()
+        entered = threading.Event()
+
+        def model(prompt, history):
+            entered.set()
+            release.wait(2)
+            return rose.Reply("STALE")
+
+        adapter = Mock(ready=lambda: True, side_effect=model)
+        term = KeyTerm(typed("fixture") + [("fn", chat.K_RETOUR)])
+        pending = None
+        try:
+            with patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}), patch.object(terminal, "show_bill", return_value="done"):
+                action, pending = terminal.run(term, "Mireille", adapter)
+            self.assertEqual(action, "retour")
+            self.assertTrue(entered.is_set())
+            self.assertTrue(pending[0].is_alive())
+            adapter.assert_called_once()
+        finally:
+            release.set()
+            if pending:
+                pending[0].join(1)
+        self.assertTrue(pending[1].empty())
 
 
 class IntegrationTests(unittest.TestCase):
+    def test_missing_key_after_gate_does_not_generate_or_bill(self):
+        with patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}), patch.object(terminal, "show_bill") as billing, patch.object(rose.requests, "post") as post:
+            terminal.run(KeyTerm(typed("fixture")), "Jacqueline", rose.MistralModel("", "model"))
+        post.assert_not_called()
+        billing.assert_not_called()
+
+    def test_rejected_submission_counts_once_no_extra_persona_call(self):
+        replies = iter([rose.Reply("Bonsoir."), rose.Reply(status="moderation")])
+        model = Mock(ready=lambda: True, side_effect=lambda prompt, history: next(replies))
+        term = KeyTerm(typed("fixture") + typed("fictional rejected submission"))
+        with patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}), patch.object(terminal, "wait", side_effect=completed), patch.object(terminal, "show_bill", return_value="done") as billing:
+            terminal.run(term, "Jacqueline", model)
+        self.assertEqual(model.call_count, 2)
+        receipt = billing.call_args.args[1]
+        self.assertEqual(receipt.messages, 1)
+        self.assertEqual(receipt.total, 70450)
+        self.assertNotIn("rejected submission", str(receipt))
+
+    def test_footer_is_french_through_gate_then_restored(self):
+        term = KeyTerm(typed("wrong"))
+        term.s.hint = "English keyboard"
+        observed = []
+        original = terminal.display
+
+        def display(term, text):
+            observed.append(term.s.hint)
+            original(term, text)
+
+        with patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}), patch.object(terminal, "display", side_effect=display):
+            terminal.run(term, "Jacqueline", rose.MockModel())
+        self.assertTrue(all("Entree ENVOI" in hint for hint in observed))
+        self.assertEqual(term.s.hint, "English keyboard")
+
+    def test_recoverable_failure_waits_for_next_input_without_fine(self):
+        replies = iter([rose.Reply("Bonsoir."), rose.Reply(status="error"), rose.Reply("Reprenons.")])
+        model = Mock(ready=lambda: True, side_effect=lambda prompt, history: next(replies))
+        term = KeyTerm(typed("fixture") + typed("premier essai") + typed("second essai") + typed("RETOUR"))
+        with patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}), patch.object(terminal, "wait", side_effect=completed), patch.object(terminal, "show_bill", return_value="done") as billing:
+            terminal.run(term, "Jacqueline", model)
+        self.assertEqual(model.call_count, 3)
+        receipt = billing.call_args.args[1]
+        self.assertEqual(receipt.messages, 2)
+        self.assertNotIn("Amende", str(receipt))
+        self.assertIn("Reprenons", str(term.rows))
+
+    def test_username_prompt_after_sommaire_preserves_bill_on_screen(self):
+        uart = startup.FakeSerial(b"owner" + startup.fn(chat.K_ENVOI))
+        with patch.object(chat.memory_session, "MemorySession") as memory:
+            chat.select_memory_user(chat.Term(uart), preserve_display=True)
+        self.assertNotIn(chat.FF, uart.output)
+        memory.assert_called_once_with("owner")
+
     def test_full_gate_conversation_help_exit_bill_rejection_and_roster(self):
         real_bill = terminal.show_bill
         for alias, keys in [("Jacqueline", typed("fixture") + typed("Bonjour") + typed("AIDE") + typed("RETOUR")),
