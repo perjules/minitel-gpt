@@ -1,7 +1,8 @@
 # 3615 rose — prototype personnel
 
-État au 16 octobre 2026 : framework implémenté localement sur `minitel_rose`,
-basé sur `origin/develop` à `8f6ceb7`. Aucun push, fusion ou déploiement Pi.
+État au 17 octobre 2026 : framework publié sur `minitel_rose` à `f182b77`,
+basé sur `origin/develop` à `8f6ceb7`. Révision des prompts et modules
+implémentée localement après cette publication. Aucune fusion ou déploiement Pi.
 Usage strictement personnel par le propriétaire. Les invités, la distribution
 et une exploitation commerciale sont hors périmètre.
 
@@ -17,8 +18,9 @@ proposition ci-dessous n'est présentée comme une décision acceptée par Julia
 Le laboratoire de profils de rencontre est une autre expérience.
 
 Décisions conservées : mot de passe fixe local, français uniquement,
-session séparée et bornée, personnages essentiellement humains avec de très
-rares accrocs, un homme et une femme asexuels et chaleureux, sorties fiables,
+session séparée et bornée, personnages humains sans connaissance du monde
+interne du Minitel (révision du 17 octobre : accrocs informatiques supprimés),
+un homme et une femme asexuels et chaleureux, sorties fiables,
 facture France Télécom en francs avec équivalent euro et taxe du cul,
 sortie immédiate avec amende fictive sur rejet de modération identifiable.
 
@@ -164,6 +166,20 @@ toutes les paraphrases. RETOUR et le mot d'arrêt restent les sorties garanties.
   Jacqueline et Jean-Marc restent vanilla et ouverts aux avances non explicites.
   Les deux profils asexuels restent romantiques et chaleureux par les mots,
   sans toucher, sexe, déshabillage ou promesse d'escalade.
+- Révision du 17 octobre : le prompt commun ne décrit plus les capacités
+  domestiques absentes, la mythologie du Minitel, le mot d'arrêt ou la facture.
+  Ces garanties restent dans Python et dans cette spécification. La voix porte
+  le tempérament ; `kinks` sélectionne zéro ou plusieurs instructions dans
+  `config/rose_kinks.json`. Le flag `asexual` charge séparément
+  `config/rose_asexual_prompt.txt`, exclusivement pour les deux profils concernés.
+  Jacqueline, Jean-Marc et les stubs de test ont une liste vide.
+  Seuls les modules sélectionnés sont envoyés ; détails, catégories, sources et
+  exemple d'édition : [ROSE_PREFERENCES.md](ROSE_PREFERENCES.md).
+- La demande du propriétaire d'autoriser et rechercher des descriptions
+  sexuelles explicites **n'est pas appliquée** : limite de l'assistant auteur,
+  pas constat sur Mistral. La restriction non graphique du prompt existant est
+  conservée ; les modules ajoutés sont des indications non graphiques. Aucun
+  résultat de modération ou de personnalité Mistral n'est déduit de ce choix.
 - La langue ordinaire n'est jamais modifiée. Porte, aide, erreurs, dialogue
   demandé au modèle et facture restent français. Le respect linguistique et
   littéraire du modèle reste à éprouver ; aucune détection linguistique factice.
@@ -230,7 +246,7 @@ La référence protocole 1B n'établit pas le support exact du Minitel 1 posséd
 ## Validation et prochaine séance
 
 Les 284 tests existants passent dans cet environnement avec leurs dépendances.
-Les 49 contrôles rose passent : porte exacte/sans écho console,
+Les 52 contrôles rose passent : porte exacte/sans écho console,
 annulation, dépassement de saisie sans fuite, alias, profil/mot d'arrêt fixes,
 état borné, sortie/verrouillage, réponse tardive, deadline, comptage/conversion,
 défilement/skip/annulation et langue ordinaire anglaise préservée. Aucun
@@ -255,10 +271,15 @@ filtrées, les alias aléatoires respectant le choix et le refus d'accréditatio
 sont également couverts. Sept contrôles supplémentaires vérifient la petite
 requête de prénom, ses labels stricts, la sélection et l'alias, les erreurs,
 l'annulation/réponse tardive, le comptage et l'absence d'appel avant la porte.
-Bilan combiné : **333 tests passent**. Le tirage 10 %, les bornes des années 80
+Bilan combiné : **336 tests passent**. Le tirage 10 %, les bornes des années 80
 et la sortie sans appel/facture sont également vérifiés. Les fixtures de prénoms sont synthétiques,
 pas une mesure de justesse du classificateur réel. Tester des prénoms européens
 courants et ambigus avec le modèle configuré avant de conclure à sa fiabilité.
+Trois régressions du 17 octobre vérifient tous les payloads des dix profils et
+des deux stubs, la sélection de plusieurs modules sans doublon, l'alias, le
+snapshot par session, l'effacement et l'échec local d'un identifiant invalide
+sans génération ni facture. Le mock asexuel utilise désormais le module.
+Ruff et `git diff --check` passent. Aucune validation réelle des nouveaux prompts.
 
 Retour du propriétaire, 16 octobre, via `terminal_console.py` : boucle globale
 fonctionnelle, mot de passe du `.env` appliqué et mauvaise saisie rejetée,

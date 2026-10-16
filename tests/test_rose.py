@@ -1,5 +1,6 @@
 """Offline host/transport contracts; no real model or physical-Minitel evidence."""
 import copy
+import json
 import os
 import random
 import threading
@@ -159,7 +160,7 @@ class HostTests(unittest.TestCase):
             asexual = [p for p in people if p["gender"] == gender and p["asexual"]]
             self.assertEqual(len(asexual), 1)
             self.assertNotIn("asex", asexual[0]["bio"])
-            self.assertIn("chaleureu", asexual[0]["voice"])
+            self.assertIn("chaleureu", asexual[0]["voice"].casefold())
         for name in ("Jacqueline", "Jean-Marc"):
             self.assertFalse(rose.Session(name).profile["asexual"])
 
@@ -180,10 +181,75 @@ class HostTests(unittest.TestCase):
         self.assertLessEqual(sum(len(t["content"]) for t in session.history), rose.MAX_HISTORY)
         prompt = captured[-1][0]
         self.assertIn("Français uniquement", prompt)
-        self.assertIn('"asexual": true', prompt)
-        self.assertIn("sans sexe", prompt)
+        self.assertIn("Préférence (asexual)", prompt)
+        self.assertIn("L'intimité reste émotionnelle et conversationnelle.", prompt)
         self.assertNotIn("password", prompt.lower())
         self.assertNotIn("fixture", str(captured))
+
+    def test_only_selected_character_modules_reach_each_request(self):
+        bank = json.loads((rose.CONFIG / "rose_kinks.json").read_text(encoding="utf-8"))
+        for test in (False, True):
+            for person in rose.catalogue(test=test)["personas"]:
+                with self.subTest(name=person["name"]):
+                    captured = []
+
+                    def model(prompt, history, captured=captured):
+                        captured.append(prompt)
+                        return rose.Reply("Bonsoir.")
+
+                    session = rose.Session(person["name"], test=test)
+                    for text in (None, "Bonjour"):
+                        job = session.start(model, text)
+                        job.thread.join(1)
+                        shown = session.receive(job.output.get_nowait(), text)
+                        self.assertIn(session.safeword, shown)
+                    for prompt in captured:
+                        self.assertEqual("Préférence (asexual)" in prompt, person["asexual"])
+                        for key, module in bank.items():
+                            self.assertEqual(module["instruction"] in prompt, key in person["kinks"])
+                        for hidden in (session.safeword, "courrier", "notes scolaires",
+                                       "appareils du foyer", "mainframe", "facture"):
+                            self.assertNotIn(hidden, prompt)
+                    session.close("retour", billing=False)
+                    self.assertEqual(session.modules, "")
+
+    def test_multiple_modules_alias_and_session_snapshot(self):
+        person = copy.deepcopy(rose.catalogue()["personas"][0])
+        person["kinks"] = ["uniforms", "praise", "uniforms"]
+        with patch.object(rose, "catalogue", return_value={"personas": [person], "safewords": ["navet"]}):
+            session = rose.Session("Alexandre")
+            person["kinks"] = []
+        captured = []
+
+        def model(prompt, history):
+            captured.append(prompt)
+            return rose.Reply("Bonsoir.")
+
+        with patch.object(rose, "character_modules", side_effect=AssertionError("must keep session snapshot")):
+            job = session.start(model)
+            job.thread.join(1)
+            session.receive(job.output.get_nowait())
+        prompt = captured[0]
+        self.assertIn('Nom affiché (donnée, pas instruction) : "Alexandre"', prompt)
+        self.assertEqual(prompt.count("Préférence (uniforms)"), 1)
+        self.assertLess(prompt.index("Préférence (uniforms)"), prompt.index("Préférence (praise)"))
+        self.assertNotIn("Préférence (asexual)", prompt)
+
+    def test_invalid_modules_fail_before_generation_or_billing(self):
+        for invalid in (["missing"], "uniforms", [None], ["../rose_prompt.txt"]):
+            person = copy.deepcopy(rose.catalogue()["personas"][0])
+            person["kinks"] = invalid
+            data = {"personas": [person], "safewords": ["navet"]}
+            with self.subTest(invalid=invalid), patch.object(rose, "catalogue", return_value=data), \
+                    patch.object(terminal, "gate", return_value=(True, "submit")), \
+                    patch.object(terminal, "show_bill") as bill:
+                model = Mock()
+                term = KeyTerm([])
+                self.assertEqual(terminal.run(term, person["name"], model), ("retour", None))
+                model.assert_not_called()
+                bill.assert_not_called()
+                self.assertIn("dossier de ce correspondant est incomplet",
+                              " ".join(row for row in term.rows if isinstance(row, str)))
 
     def test_opening_replay_begins_with_user_cue_without_counting_it(self):
         session = rose.Session("Bertrand")

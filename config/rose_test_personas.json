@@ -7,6 +7,7 @@
       "aliases": [],
       "gender": "homme",
       "asexual": false,
+      "kinks": [],
       "bio": "Personnalité de test A. Description provisoire à remplacer.",
       "voice": "Profil provisoire A : courtois, chaleureux et attentif. Personnalité à développer ultérieurement.",
       "fees": [["Attention particulière", 900], ["Prolongation de conversation", 1200]]
@@ -17,6 +18,7 @@
       "aliases": [],
       "gender": "femme",
       "asexual": false,
+      "kinks": [],
       "bio": "Personnalité de test B. Description provisoire à remplacer.",
       "voice": "Profil provisoire B : courtois, chaleureux et attentif. Personnalité à développer ultérieurement.",
       "fees": [["Attention particulière", 900], ["Prolongation de conversation", 1200]]

@@ -288,7 +288,11 @@ def _run(term, alias, model, timeout=30, row_delay=0.32, test=False):
         if not any(p["gender"] == gender for p in rose.catalogue(test=test)["personas"]):
             display(term, "Aucun correspondant disponible pour ce prénom.")
             return "retour", pending
-    session = rose.Session(alias, test=test, gender=gender)
+    try:
+        session = rose.Session(alias, test=test, gender=gender)
+    except (OSError, ValueError, KeyError, TypeError):
+        display(term, "Le dossier de ce correspondant est incomplet.\n\nMise en relation suspendue.")
+        return "retour", None
     reason = "retour"
     try:
         display(term, "3615 rose\nService de conversation adulte fictive.\n\n"
