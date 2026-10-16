@@ -999,7 +999,7 @@ def run(term=None):
                 if rose_pending is not None:
                     pending = rose_pending
                 if result == "sommaire":
-                    keep_bill = True
+                    keep_bill = not rose_test
                     break
                 # Preserve the final bill and the unchanged main language.
                 t.line()

@@ -67,7 +67,11 @@ de contexte que `3615`. Le flag `--test` sélectionne seulement
 et **Test B**. Leur schéma est identique au catalogue principal ; on pourra
 les remplacer ou en ajouter sans modifier le programme. Le nombre de pages
 s'adapte à la taille du catalogue. La porte, le harness, le fournisseur,
-le rendu, l'isolation, les sorties et la facture utilisent le même code.
+le rendu, l'isolation et les sorties utilisent le même code. En mode test,
+la facture est entièrement omise : aucune préparation ni aucun défilement,
+y compris après un rejet de modération. La session est effacée et reverrouillée
+normalement ; SOMMAIRE réaffiche l'accueil ordinaire. Le mode normal conserve
+sa facture.
 `--test` conserve les appels Mistral réels ; ajouter `--mock` pour les simuler.
 Les entrées ordinaires continuent d'utiliser `config/rose_personas.json`.
 
@@ -179,7 +183,7 @@ La référence protocole 1B n'établit pas le support exact du Minitel 1 posséd
 ## Validation et prochaine séance
 
 Les 284 tests existants passent dans cet environnement avec leurs dépendances.
-Les 35 contrôles rose passent : porte exacte/sans écho console,
+Les 36 contrôles rose passent : porte exacte/sans écho console,
 annulation, dépassement de saisie sans fuite, alias, profil/mot d'arrêt fixes,
 état borné, sortie/verrouillage, réponse tardive, deadline, comptage/conversion,
 défilement/skip/annulation et langue ordinaire anglaise préservée. Aucun
@@ -198,7 +202,8 @@ de comportement Mistral. Le pied de console est désormais français pendant
 la porte et la conversation, puis son libellé ordinaire est restauré.
 Le décompte distingue `1 message`. Les contrôles du catalogue de test couvrent
 la sélection indépendante des profils, le flag CLI, la commande `3615 TEST`,
-la porte et la facture communes. Bilan combiné : **319 tests passent**.
+la porte commune et les sorties sans facture, y compris après rejet de
+modération, avec effacement de l'état. Bilan combiné : **320 tests passent**.
 
 Pas de clé Mistral autorisée dans cet environnement ; **aucun appel réel**,
 modèle réellement observé, mesure de coût ou rejet réel. Configuration prévue :

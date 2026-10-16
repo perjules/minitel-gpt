@@ -244,13 +244,13 @@ class Session:
         banner = "3615 rose - conversation fictive.\n" if text is None else ""
         return "Mot d'arrêt : " + self.safeword + "\n" + banner + "\n" + reply.text
 
-    def close(self, reason):
+    def close(self, reason, billing=True):
         if not self.active:
             return None
         self.active = False  # relock before constructing any receipt/output
         if self.job:
             self.job.cancel()
-        receipt = bill(self.messages, self.profile["fees"], reason)
+        receipt = bill(self.messages, self.profile["fees"], reason) if billing else None
         self.history.clear()
         self.alias = self.safeword = ""
         self.profile.clear()

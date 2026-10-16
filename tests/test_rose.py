@@ -357,7 +357,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertIn(unknown.profile["id"], {"test-a", "test-b"})
         self.assertEqual(unknown.alias, "Jacqueline")
 
-    def test_test_roster_uses_stub_payload_and_same_gate_exit_and_bill(self):
+    def test_test_roster_uses_stub_payload_and_same_gate_without_bill(self):
         term = KeyTerm(typed("fixture") + [("fn", chat.K_SUITE)]
                        + typed("Test B") + typed("Bonjour") + typed("RETOUR"))
         prompts = []
@@ -374,12 +374,44 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(len(prompts), 2)
         self.assertTrue(all("Profil provisoire B" in prompt for prompt in prompts))
         self.assertTrue(all("Français uniquement" in prompt for prompt in prompts))
-        self.assertEqual(billing.call_args.args[1].messages, 1)
-        self.assertEqual(billing.call_args.args[1].total, 20450)
+        billing.assert_not_called()
         with patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}), patch.object(terminal, "show_bill") as billing:
             terminal.run(KeyTerm(typed("wrong")), "Test A", adapter, test=True)
         self.assertEqual(len(prompts), 2)
         billing.assert_not_called()
+
+    def test_test_mode_all_exits_clear_state_without_creating_or_showing_bill(self):
+        original_session = rose.Session
+        data = rose.catalogue(test=True)
+        data["safewords"] = ["navet"]
+        for exit_text, status, expected in [("RETOUR", "done", "retour"),
+                                            ("SOMMAIRE", "done", "sommaire"),
+                                            (" NAVET ", "done", "retour"),
+                                            ("", "moderation", "retour")]:
+            sessions = []
+
+            def make_session(*args, sessions=sessions, **kwargs):
+                session = original_session(*args, **kwargs)
+                sessions.append(session)
+                return session
+
+            term = KeyTerm(typed("fixture") + (typed(exit_text) if exit_text else []))
+            model = Mock(ready=lambda: True, return_value=rose.Reply("Bonsoir.", status))
+            with (self.subTest(exit=exit_text, status=status),
+                  patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}),
+                  patch.object(rose, "catalogue", return_value=data),
+                  patch.object(rose, "Session", side_effect=make_session),
+                  patch.object(terminal, "wait", side_effect=completed),
+                  patch.object(rose, "bill") as prepare_bill,
+                  patch.object(terminal, "show_bill") as show_bill):
+                action, pending = terminal.run(term, "Test A", model, test=True)
+            self.assertEqual(action, expected)
+            self.assertIsNone(pending)
+            prepare_bill.assert_not_called()
+            show_bill.assert_not_called()
+            self.assertFalse(sessions[0].active)
+            self.assertEqual(sessions[0].history, [])
+            self.assertEqual(sessions[0].profile, {})
 
     def test_main_test_command_opens_gated_test_roster(self):
         uart = startup.FakeSerial(b"3615 TEST" + startup.fn(chat.K_ENVOI))

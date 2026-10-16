@@ -258,12 +258,12 @@ def _run(term, alias, model, timeout=30, row_delay=0.32, test=False):
             if action != "submit":
                 reason = action
                 break
-        receipt = session.close(reason)
+        receipt = session.close(reason, billing=not test)
         flush(term)
-        action = show_bill(term, receipt, row_delay)
+        action = show_bill(term, receipt, row_delay) if receipt is not None else "done"
         return ("sommaire" if reason == "sommaire" or action == "sommaire" else "retour"), (
             session.job.pending() if session.job and session.job.thread.is_alive() else None)
     finally:
         # KeyboardInterrupt/disconnect also clears state; no crash-replayed bill.
         if session.active:
-            session.close("disconnect")
+            session.close("disconnect", billing=False)
