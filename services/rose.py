@@ -13,6 +13,7 @@ import threading
 import time
 import unicodedata
 from dataclasses import dataclass
+from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from queue import Queue
@@ -66,6 +67,15 @@ def catalogue(test=False):
 def known_name(alias, test=False):
     return any(normalized(alias) in [normalized(p["name"]), *map(normalized, p["aliases"])]
                for p in catalogue(test=test)["personas"])
+
+
+def last_seen(rng=None):
+    """One throwaway 10% lookup gag; no presence/history record is retained."""
+    rng = rng or random.SystemRandom()
+    if rng.randrange(10) != 0:
+        return None
+    first, last = date(1980, 1, 1), date(1989, 12, 31)
+    return first + timedelta(days=rng.randrange((last - first).days + 1))
 
 
 def stop_reason(text, safeword=""):

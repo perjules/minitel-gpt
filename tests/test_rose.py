@@ -4,6 +4,7 @@ import os
 import random
 import threading
 import unittest
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -55,6 +56,19 @@ def completed(term, job, safeword, timeout):
 
 
 class HostTests(unittest.TestCase):
+    def test_last_seen_has_one_in_ten_chance_and_valid_eighties_dates(self):
+        # Exercise all ten equiprobable rolls, without statistical/flaky tests.
+        for roll in range(10):
+            rng = Mock()
+            rng.randrange.side_effect = [roll, 0]
+            seen = rose.last_seen(rng)
+            self.assertEqual(seen, date(1980, 1, 1) if roll == 0 else None)
+            self.assertEqual(rng.randrange.call_args_list[0].args, (10,))
+            self.assertEqual(rng.randrange.call_count, 2 if roll == 0 else 1)
+        rng = Mock()
+        rng.randrange.side_effect = [0, (date(1989, 12, 31) - date(1980, 1, 1)).days]
+        self.assertEqual(rose.last_seen(rng), date(1989, 12, 31))
+
     def test_aliases_unknown_binding_and_independent_fixed_safeword(self):
         for alias, identifier in [(" JaQuElInE ", "jacqueline"), ("Jean   Marc", "jean-marc")]:
             session = rose.Session(alias)
@@ -364,6 +378,32 @@ class CancellationTests(unittest.TestCase):
 
 
 class IntegrationTests(unittest.TestCase):
+    def setUp(self):
+        # Keep unrelated routing tests deterministic; the gag has focused checks.
+        presence = patch.object(rose, "last_seen", return_value=None)
+        self.presence = presence.start()
+        self.addCleanup(presence.stop)
+
+    def test_archived_unknown_name_exits_without_model_session_or_bill(self):
+        for test in (False, True):
+            term = KeyTerm(typed("fixture"))
+            model = Mock(ready=lambda: True)
+            with (patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}),
+                  patch.object(rose, "last_seen", return_value=date(1984, 2, 29)) as presence,
+                  patch.object(rose, "Session") as session,
+                  patch.object(terminal, "show_bill") as billing):
+                action, pending = terminal.run(term, "Robert", model, test=test)
+            self.assertEqual((action, pending), ("retour", None))
+            presence.assert_called_once_with()
+            model.classify_name.assert_not_called()
+            model.assert_not_called()
+            session.assert_not_called()
+            billing.assert_not_called()
+            output = str(term.rows)
+            self.assertIn("Annuaire central", output)
+            self.assertIn("Robert", output)
+            self.assertIn("Derniere connexion : 29/02/1984", output)
+
     def test_unknown_name_classifies_once_then_binds_matching_profile_and_alias(self):
         original_session = rose.Session
         for test in (False, True):
@@ -416,6 +456,7 @@ class IntegrationTests(unittest.TestCase):
                 terminal.run(KeyTerm(typed("fixture") + typed("RETOUR")), name, model)
             model.classify_name.assert_not_called()
             model.assert_called_once()
+        self.presence.assert_not_called()
 
     def test_name_classification_is_cancellable_and_late_result_discarded(self):
         release, entered = threading.Event(), threading.Event()
@@ -474,6 +515,7 @@ class IntegrationTests(unittest.TestCase):
             model.classify_name.assert_not_called()
             model.assert_not_called()
             billing.assert_not_called()
+        self.presence.assert_not_called()
 
     def test_welcome_accepts_partner_gender_words_and_shortcuts(self):
         for choice, gender in [("M", "homme"), ("Monsieur", "homme"),

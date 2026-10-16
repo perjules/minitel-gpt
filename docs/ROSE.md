@@ -87,6 +87,15 @@ sélectionne uniquement un profil du catalogue de test. `--mock` ne contacte
 aucun fournisseur : quelques labels d'exemple sont écrits localement, les
 autres noms donnent `unclear`.
 
+Un nom inconnu a aussi **10 %** de chances de recevoir une réponse de
+l'annuaire central : `Dernière connexion : jj/mm/aaaa`, avec une date valide
+choisie entre le 1er janvier 1980 et le 31 décembre 1989, puis
+`Correspondant indisponible.` Cette branche quitte sans personnage, appel de
+classification ou facture. Elle s'applique également aux alias inconnus saisis
+dans une liste filtrée et au catalogue de test ; jamais aux noms connus.
+Le tirage reste derrière la porte et le contrôle de configuration. La date est
+une réplique éphémère, sans état de présence, journal, cache ou mémorisation.
+
 ### Catalogue de test séparé
 
 ```bash
@@ -221,7 +230,7 @@ La référence protocole 1B n'établit pas le support exact du Minitel 1 posséd
 ## Validation et prochaine séance
 
 Les 284 tests existants passent dans cet environnement avec leurs dépendances.
-Les 47 contrôles rose passent : porte exacte/sans écho console,
+Les 49 contrôles rose passent : porte exacte/sans écho console,
 annulation, dépassement de saisie sans fuite, alias, profil/mot d'arrêt fixes,
 état borné, sortie/verrouillage, réponse tardive, deadline, comptage/conversion,
 défilement/skip/annulation et langue ordinaire anglaise préservée. Aucun
@@ -246,7 +255,8 @@ filtrées, les alias aléatoires respectant le choix et le refus d'accréditatio
 sont également couverts. Sept contrôles supplémentaires vérifient la petite
 requête de prénom, ses labels stricts, la sélection et l'alias, les erreurs,
 l'annulation/réponse tardive, le comptage et l'absence d'appel avant la porte.
-Bilan combiné : **331 tests passent**. Les fixtures de prénoms sont synthétiques,
+Bilan combiné : **333 tests passent**. Le tirage 10 %, les bornes des années 80
+et la sortie sans appel/facture sont également vérifiés. Les fixtures de prénoms sont synthétiques,
 pas une mesure de justesse du classificateur réel. Tester des prénoms européens
 courants et ambigus avec le modèle configuré avant de conclure à sa fiabilité.
 

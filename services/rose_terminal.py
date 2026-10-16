@@ -260,7 +260,14 @@ def _run(term, alias, model, timeout=30, row_delay=0.32, test=False):
     if not model.ready():
         display(term, "Service indisponible. Clé Mistral non configurée.")
         return "retour", None
-    if gender is None and not rose.known_name(alias, test=test):
+    unknown = not rose.known_name(alias, test=test)
+    seen = rose.last_seen() if unknown else None
+    if seen is not None:
+        display(term, "Annuaire central\n" + alias + "\n\n"
+                "Dernière connexion : " + seen.strftime("%d/%m/%Y") + "\n\n"
+                "Correspondant indisponible.")
+        return "retour", None
+    if gender is None and unknown:
         display(term, "Consultation du registre des correspondants.\n\nRETOUR : annuler.")
         job = rose.Job(lambda prompt, history: model.classify_name(alias), "", [])
         result, action = wait(term, job, "", min(timeout, 8))
