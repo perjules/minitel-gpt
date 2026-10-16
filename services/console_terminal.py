@@ -85,6 +85,7 @@ class ConsoleSerial:
         self.window = window
         self.screen = Screen()
         self.pending = deque()
+        self.local_echo = True
         window.keypad(True)
         window.timeout(100)
 
@@ -127,7 +128,7 @@ class ConsoleSerial:
             data = key_bytes(key)
             if self.window.getmaxyx()[0] < 24 or self.window.getmaxyx()[1] < 40:
                 return b""
-            if len(data) == 1:
+            if len(data) == 1 and self.local_echo:
                 self.screen.write(data)
                 self.redraw()
             self.pending.extend(data)
@@ -136,3 +137,10 @@ class ConsoleSerial:
     def reset_output_buffer(self):
         # Output is synchronous; nothing remains queued after an interruption.
         pass
+
+    def set_local_echo(self, enabled):
+        self.local_echo = bool(enabled)
+
+    def reset_input_buffer(self):
+        self.pending.clear()
+        curses.flushinp()

@@ -32,6 +32,13 @@ except ImportError:
     import calculator
     import printing_session
 
+try:
+    from . import rose, rose_terminal
+except ImportError:
+    # Direct systemd script: share the package identity with the rose adapter.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from services import rose, rose_terminal
+
 # Translittération vers ASCII affichable sur Minitel (é→e, œ→oe, …) :
 # évite les « ? » que produisait encode('ascii','replace').
 _ASCII_REPL = {
@@ -651,10 +658,15 @@ def choose_language(text):
     return "en" if (text or "").strip().lower() in ("en", "english") else "fr"
 
 
-def select_memory_user(t, language="fr", title_lines=None, title_msg="3615 IA"):
+def select_memory_user(t, language="fr", title_lines=None, title_msg="3615 IA", preserve_display=False):
     """The name chooses a memory folder, not an authenticated identity."""
     while True:
-        show_home(t, title_lines or [], title_msg, username=True)
+        if preserve_display:
+            t.line()
+            t.line("Nom / name (vide / blank = commun)")
+            preserve_display = False
+        else:
+            show_home(t, title_lines or [], title_msg, username=True)
         name, action = read_question(t, allow_empty=True)
         if action in ('sommaire', 'guide'):
             return None, action
@@ -908,6 +920,7 @@ def run(term=None):
     mail = None
     memory = None
     printer = printing_session.Session()
+    keep_bill = False
 
     while True:  # boucle sommaire
         # Recharger le preset à chaque retour au sommaire (prise en compte des édits)
@@ -923,7 +936,9 @@ def run(term=None):
         printer.reset()
         history = []
         knowledge = factual_knowledge()
-        memory, user_action = select_memory_user(t, title_lines=title_lines, title_msg=title_msg)
+        user_options = {"preserve_display": True} if keep_bill else {}
+        memory, user_action = select_memory_user(t, title_lines=title_lines, title_msg=title_msg, **user_options)
+        keep_bill = False
         if user_action == 'guide':
             show_guide(t)
         if user_action in ('guide', 'sommaire'):
@@ -969,6 +984,26 @@ def run(term=None):
                 break          # retour au sommaire après l'écran d'aide
             if action in ('sommaire', 'timeout'):
                 break
+
+            rose_alias = rose.entry(question)
+            if (rose_alias is not None and not calc.mode and not school_mode.mode
+                    and not calculator_blocked(mail, memory)):
+                if pending is not None and pending[0].is_alive():
+                    rose_terminal.display(t, "Requête précédente en cours. Réessayez bientôt.")
+                    continue
+                result, rose_pending = rose_terminal.run(
+                    t, rose_alias, rose.MistralModel(MISTRAL_KEY, MISTRAL_MODEL,
+                                                   min(options[2], 30)),
+                    timeout=min(options[2], 30))
+                if rose_pending is not None:
+                    pending = rose_pending
+                if result == "sommaire":
+                    keep_bill = True
+                    break
+                # Preserve the final bill and the unchanged main language.
+                t.line()
+                t.center(UI[language]["follow_up"])
+                continue
 
             direct = school_mode.prepare(question)
             if direct is not None:

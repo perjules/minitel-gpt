@@ -1,5 +1,9 @@
 # Console de test sans Minitel
 
+Le prototype personnel `3615 rose` dispose aussi de son atelier isolé :
+[ROSE.md](ROSE.md) (porte locale obligatoire, `scripts/rose_console.py`,
+dialogue simulé optionnel, conversations transitoires).
+
 Depuis Bash sur le Pi, par SSH ou Raspberry Pi Connect :
 
 ```bash
