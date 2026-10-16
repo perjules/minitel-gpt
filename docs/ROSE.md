@@ -47,8 +47,16 @@ valeurs existantes `MISTRAL_KEY` et `MISTRAL_MODEL` du `.env`/environnement.
 Pas de nouveau fournisseur, compte ou clé. Clé absente : service indisponible,
 sans appel ni facture. Terminal interactif 40 × 24 minimum ; `ssh -t` si besoin.
 
-Sans `--name`, le catalogue apparaît **après** le mot de passe. Deux biographies
-par page, SUITE pour avancer, nom directement saisissable à tout moment.
+Sans `--name`, un accueil composé pour l'écran Minitel apparaît **après** le
+mot de passe. Il demande avec qui converser : **Monsieur / Mademoiselle**,
+avec **M / F** également acceptés (`Messieur` est aussi reconnu). Ce choix
+désigne le correspondant, jamais le genre du participant. Seules les
+biographies du genre choisi sont ensuite affichées : deux par page, SUITE
+pour avancer, nom directement saisissable à tout moment. Un nom connu de
+l'autre liste ne contourne pas le choix ; un alias inconnu est associé au
+hasard uniquement à un profil du genre choisi. Les raccourcis nommés directs
+(`3615 JACQUELINE`, `--name Jacqueline`) conservent leur accès direct après
+le mot de passe, sans sélection redondante.
 Jacqueline/Jaqueline et Jean-Marc/Jean Marc sont des alias stables. Un nom
 inconnu choisit un profil statique au hasard une seule fois et garde le nom
 demandé comme alias. Le genre du participant n'est jamais inféré du nom.
@@ -74,6 +82,10 @@ normalement ; SOMMAIRE réaffiche l'accueil ordinaire. Le mode normal conserve
 sa facture.
 `--test` conserve les appels Mistral réels ; ajouter `--mock` pour les simuler.
 Les entrées ordinaires continuent d'utiliser `config/rose_personas.json`.
+
+Un mauvais mot de passe quitte toujours immédiatement, sans appel modèle,
+mais affiche désormais le refus des services centraux d'accréditation :
+« L'enthousiasme ne vaut pas habilitation. » Aucun nouvel acquittement requis.
 
 Dans l'application habituelle :
 
@@ -183,7 +195,7 @@ La référence protocole 1B n'établit pas le support exact du Minitel 1 posséd
 ## Validation et prochaine séance
 
 Les 284 tests existants passent dans cet environnement avec leurs dépendances.
-Les 36 contrôles rose passent : porte exacte/sans écho console,
+Les 40 contrôles rose passent : porte exacte/sans écho console,
 annulation, dépassement de saisie sans fuite, alias, profil/mot d'arrêt fixes,
 état borné, sortie/verrouillage, réponse tardive, deadline, comptage/conversion,
 défilement/skip/annulation et langue ordinaire anglaise préservée. Aucun
@@ -203,7 +215,17 @@ la porte et la conversation, puis son libellé ordinaire est restauré.
 Le décompte distingue `1 message`. Les contrôles du catalogue de test couvrent
 la sélection indépendante des profils, le flag CLI, la commande `3615 TEST`,
 la porte commune et les sorties sans facture, y compris après rejet de
-modération, avec effacement de l'état. Bilan combiné : **320 tests passent**.
+modération, avec effacement de l'état. L'accueil, ses choix M/F, les listes
+filtrées, les alias aléatoires respectant le choix et le refus d'accréditation
+sont également couverts. Bilan combiné : **324 tests passent**.
+
+Retour du propriétaire, 16 octobre, via `terminal_console.py` : boucle globale
+fonctionnelle, mot de passe du `.env` appliqué et mauvaise saisie rejetée,
+descriptions correctement rendues, entrée en conversation et premières réponses
+en personnage. Il s'agit d'un premier essai rapporté par le propriétaire,
+sans playtest approfondi ni validation physique. Le modèle/configuration exacts
+de cette séance ne sont pas relevés ici. Aucun changement de police n'est
+effectué dans cette itération.
 
 Pas de clé Mistral autorisée dans cet environnement ; **aucun appel réel**,
 modèle réellement observé, mesure de coût ou rejet réel. Configuration prévue :

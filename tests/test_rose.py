@@ -346,6 +346,64 @@ class CancellationTests(unittest.TestCase):
 
 
 class IntegrationTests(unittest.TestCase):
+    def test_welcome_accepts_partner_gender_words_and_shortcuts(self):
+        for choice, gender in [("M", "homme"), ("Monsieur", "homme"),
+                               ("Messieur", "homme"), ("F", "femme"),
+                               ("Mademoiselle", "femme")]:
+            term = KeyTerm(typed("?") + typed(choice))
+            self.assertEqual(terminal.welcome(term), (gender, "submit"))
+            shown = str(term.rows)
+            self.assertIn("Correspondances confidentielles", shown)
+            self.assertIn("Vous souhaitez converser avec", shown)
+            self.assertIn("M   Monsieur", shown)
+            self.assertIn("F   Mademoiselle", shown)
+
+    def test_gender_filtered_catalogues_and_unknown_alias_binding(self):
+        for test in (False, True):
+            people = rose.catalogue(test=test)["personas"]
+            for gender in ("homme", "femme"):
+                matching = [p for p in people if p["gender"] == gender]
+                excluded = [p for p in people if p["gender"] != gender]
+                pages = (len(matching) + 1) // 2
+                # A name from the other list cannot bypass the chosen filter.
+                keys = typed(excluded[0]["name"]) + [("fn", chat.K_SUITE)] * pages + typed("Robert")
+                term = KeyTerm(keys)
+                self.assertEqual(terminal.roster(term, gender, test=test), ("Robert", "submit"))
+                output = str(term.rows)
+                for person in excluded:
+                    self.assertNotIn(person["name"], output)
+                self.assertIn(f"Catalogue {pages}/{pages}", output)
+                for seed in range(10):
+                    session = rose.Session("Robert", rng=random.Random(seed), test=test, gender=gender)
+                    self.assertEqual(session.profile["gender"], gender)
+                    self.assertEqual(session.alias, "Robert")
+
+    def test_welcome_cancellation_never_starts_persona_or_bill(self):
+        for key, expected in [(chat.K_RETOUR, "retour"), (chat.K_SOMMAIRE, "sommaire")]:
+            term = KeyTerm(typed("fixture") + [("fn", key)])
+            model = Mock()
+            with patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}), patch.object(terminal, "show_bill") as billing:
+                action, pending = terminal.run(term, "", model)
+            self.assertEqual(action, expected)
+            self.assertIsNone(pending)
+            model.assert_not_called()
+            billing.assert_not_called()
+            self.assertNotIn("Catalogue", str(term.rows))
+
+    def test_wrong_password_keeps_central_accreditation_rejection_visible(self):
+        term = KeyTerm(typed("wrong-password"))
+        model = Mock()
+        with patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}), patch.object(terminal, "show_bill") as billing:
+            terminal.run(term, "", model)
+        output = str(term.rows)
+        self.assertIn("Acces refuse", output)
+        self.assertIn("services centraux d'accreditation", output)
+        self.assertIn("L'enthousiasme ne vaut pas", output)
+        self.assertNotIn("wrong-password", output)
+        self.assertNotIn("Correspondances confidentielles", output)
+        model.assert_not_called()
+        billing.assert_not_called()
+
     def test_test_catalogue_is_separate_for_named_and_random_profiles(self):
         self.assertTrue(rose.test_entry(" 3615   test "))
         for text in ("3625 TEST", '"3615 TEST"', "A: 3615 TEST", "3615 TEST A"):
@@ -358,7 +416,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(unknown.alias, "Jacqueline")
 
     def test_test_roster_uses_stub_payload_and_same_gate_without_bill(self):
-        term = KeyTerm(typed("fixture") + [("fn", chat.K_SUITE)]
+        term = KeyTerm(typed("fixture") + typed("F") + [("fn", chat.K_SUITE)]
                        + typed("Test B") + typed("Bonjour") + typed("RETOUR"))
         prompts = []
 
@@ -500,7 +558,7 @@ class IntegrationTests(unittest.TestCase):
     def test_full_gate_conversation_help_exit_bill_rejection_and_roster(self):
         real_bill = terminal.show_bill
         for alias, keys in [("Jacqueline", typed("fixture") + typed("Bonjour") + typed("AIDE") + typed("RETOUR")),
-                            ("", typed("fixture") + [("fn", chat.K_SUITE)] + typed("Mireille") + typed("SOMMAIRE"))]:
+                            ("", typed("fixture") + typed("F") + [("fn", chat.K_SUITE)] + typed("Mireille") + typed("SOMMAIRE"))]:
             term = KeyTerm(keys)
             receipts = []
 

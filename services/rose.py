@@ -194,12 +194,13 @@ class Job:
 
 
 class Session:
-    def __init__(self, alias, rng=None, test=False):
+    def __init__(self, alias, rng=None, test=False, gender=None):
         rng = rng or random.SystemRandom()
         data = catalogue(test=test)
-        matches = [p for p in data["personas"]
+        people = [p for p in data["personas"] if gender is None or p["gender"] == gender]
+        matches = [p for p in people
                    if normalized(alias) in [normalized(p["name"]), *map(normalized, p["aliases"])]]
-        self.profile = copy.deepcopy(matches[0] if matches else rng.choice(data["personas"]))
+        self.profile = copy.deepcopy(matches[0] if matches else rng.choice(people))
         self.alias = self.profile["name"] if matches else alias
         self.safeword = rng.choice(data["safewords"])
         self.history = []

@@ -100,17 +100,46 @@ def gate(term):
         else:
             term.w(b"\x1b\x3b\x61\x58\x51")
     if not accepted and action == "submit":
-        display(term, "Accès refusé.")
+        display(term, "Accès refusé.\n\n"
+                "Les services centraux d'accréditation ont rejeté votre dossier.\n\n"
+                "L'enthousiasme ne vaut pas habilitation.")
     return accepted, action
 
 
-def roster(term, test=False):
+def welcome(term):
+    """Choose the partner's catalogue, never infer the participant's gender."""
+    text = "\n".join([
+        "3615 rose".center(39), "", "Correspondances confidentielles".center(39),
+        "", "", "Vous souhaitez converser avec :", "",
+        "    M   Monsieur", "    F   Mademoiselle", "", "",
+        "Votre choix, puis ENVOI.", "RETOUR : quitter.",
+    ])
+    while True:
+        display(term, text)
+        choice, action = read_field(term)
+        if action == "help":
+            continue
+        if action != "submit":
+            return None, action
+        choice = rose.normalized(choice)
+        if choice in ("M", "MONSIEUR", "MESSIEUR", "MESSIEURS", "HOMME", "HOMMES"):
+            return "homme", "submit"
+        if choice in ("F", "MADEMOISELLE", "MADAME", "FEMME", "FEMMES"):
+            return "femme", "submit"
+
+
+def roster(term, gender, test=False):
     """Provisional flat catalogue, two biographies/page; direct name at any point."""
-    people = rose.catalogue(test=test)["personas"]
+    catalogue = rose.catalogue(test=test)["personas"]
+    people = [p for p in catalogue if p["gender"] == gender]
+    if not people:
+        display(term, "Aucun correspondant disponible pour ce choix.")
+        return None, "retour"
     pages = (len(people) + 1) // 2
     page = 0
     while True:
-        text = f"3615 rose - Catalogue {page + 1}/{pages}\n\n"
+        title = "Messieurs" if gender == "homme" else "Mesdemoiselles"
+        text = f"3615 rose - {title}\nCatalogue {page + 1}/{pages}\n\n"
         text += "\n\n".join(p["name"] + "\n" + p["bio"] for p in people[page*2:page*2+2])
         display(term, text)
         term.line("SUITE / nom puis ENVOI / RETOUR")
@@ -122,6 +151,10 @@ def roster(term, test=False):
             alias = name.strip() if alias is None else alias
             # Same alias grammar as ordinary entry; no prompt as a name.
             if rose.entry("3615 " + alias) is not None and alias:
+                matched = next((p for p in catalogue if rose.normalized(alias) in
+                                [rose.normalized(p["name"]), *map(rose.normalized, p["aliases"])]), None)
+                if matched is not None and matched["gender"] != gender:
+                    continue
                 return alias, "submit"
         elif action != "help":
             return None, action
@@ -216,14 +249,18 @@ def _run(term, alias, model, timeout=30, row_delay=0.32, test=False):
     accepted, action = gate(term)
     if not accepted:
         return action, None
+    gender = None
     if not alias:
-        alias, action = roster(term, test=test)
+        gender, action = welcome(term)
+        if gender is None:
+            return action, None
+        alias, action = roster(term, gender, test=test)
         if alias is None:
             return action, None
     if not model.ready():
         display(term, "Service indisponible. Clé Mistral non configurée.")
         return "retour", None
-    session = rose.Session(alias, test=test)
+    session = rose.Session(alias, test=test, gender=gender)
     reason = "retour"
     try:
         display(term, "3615 rose\nService de conversation adulte fictive.\n\n"
