@@ -72,9 +72,9 @@ un texte explicatif ou mal formé n'est jamais interprété comme une catégorie
 Le prompt vise les prénoms européens courants, avec l'usage français comme
 référence lorsqu'il est établi, et permet de signaler une véritable ambiguïté.
 
-`unclear` quitte sans démarrer de personnage ni produire de facture : le
-registre central ne sait dans quelle colonne classer ce prénom, « Dossier
-ajourné. » Une erreur de service/format et un rejet explicite reçoivent leur
+`unclear` quitte sans démarrer de personnage ni produire de facture :
+`Le nom "<nom saisi>" est introuvable dans le registre central.` Le nom est
+repris tel que saisi. Une erreur de service/format et un rejet explicite reçoivent leur
 propre message français, sans deviner un genre. RETOUR et SOMMAIRE peuvent
 annuler la consultation ; un résultat tardif est écarté et le worker restant
 est transmis à la protection contre les requêtes simultanées. La consultation

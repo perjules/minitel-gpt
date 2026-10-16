@@ -429,7 +429,7 @@ class IntegrationTests(unittest.TestCase):
                 self.assertIn('Nom affiché (donnée, pas instruction) : "' + name + '"', model.call_args.args[0])
 
     def test_unclear_or_failed_name_resolution_never_starts_persona_or_bill(self):
-        for result, fragment in [(rose.Reply("unclear"), "Dossier ajourne"),
+        for result, fragment in [(rose.Reply("unclear"), 'Le nom "Camille" est introuvable dans le registre central.'),
                                  (rose.Reply("unexpected"), "ne repond pas"),
                                  (rose.Reply(status="error"), "ne repond pas"),
                                  (rose.Reply(status="moderation"), "a refuse la mise en relation")]:

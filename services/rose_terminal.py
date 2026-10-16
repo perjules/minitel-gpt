@@ -282,9 +282,7 @@ def _run(term, alias, model, timeout=30, row_delay=0.32, test=False):
                     "Aucune mise en relation n'a été effectuée.")
             return "retour", pending
         if result.text == "unclear":
-            display(term, "Erreur de mise en relation.\n\n"
-                    "Le registre central ne sait dans quelle colonne classer ce prénom.\n\n"
-                    "Dossier ajourné.")
+            display(term, f'Le nom "{alias}" est introuvable dans le registre central.')
             return "retour", pending
         gender = "homme" if result.text == "M" else "femme"
         if not any(p["gender"] == gender for p in rose.catalogue(test=test)["personas"]):
