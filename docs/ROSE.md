@@ -58,8 +58,34 @@ hasard uniquement à un profil du genre choisi. Les raccourcis nommés directs
 (`3615 JACQUELINE`, `--name Jacqueline`) conservent leur accès direct après
 le mot de passe, sans sélection redondante.
 Jacqueline/Jaqueline et Jean-Marc/Jean Marc sont des alias stables. Un nom
-inconnu choisit un profil statique au hasard une seule fois et garde le nom
-demandé comme alias. Le genre du participant n'est jamais inféré du nom.
+inconnu garde exactement le nom demandé comme alias. Pour une entrée directe
+comme `3615 ROBERT` ou `--name Robert`, une petite requête Mistral identifie
+l'association usuelle du prénom : `M`, `F` ou `unclear`. Le programme choisit
+ensuite au hasard un profil du genre correspondant, fixé pour toute la session.
+Le genre du participant n'est jamais inféré du nom.
+
+La requête utilise la clé et le modèle déjà configurés, température 0,
+8 tokens maximum, timeout de 8 s maximum, une seule tentative. Elle ne reçoit
+que le nom demandé et `config/rose_name_prompt.txt`, aucun mot de passe,
+historique, outil ou contexte personnel. Les sorties sont validées strictement ;
+un texte explicatif ou mal formé n'est jamais interprété comme une catégorie.
+Le prompt vise les prénoms européens courants, avec l'usage français comme
+référence lorsqu'il est établi, et permet de signaler une véritable ambiguïté.
+
+`unclear` quitte sans démarrer de personnage ni produire de facture : le
+registre central ne sait dans quelle colonne classer ce prénom, « Dossier
+ajourné. » Une erreur de service/format et un rejet explicite reçoivent leur
+propre message français, sans deviner un genre. RETOUR et SOMMAIRE peuvent
+annuler la consultation ; un résultat tardif est écarté et le worker restant
+est transmis à la protection contre les requêtes simultanées. La consultation
+précède l'ouverture de conversation et ne compte pas comme message envoyé.
+Elle ne produit jamais une facture de conversation à elle seule.
+
+Les noms connus du catalogue courant et les choix M/F déjà exprimés dans
+l'accueil évitent cet appel supplémentaire. En mode test, la même règle
+sélectionne uniquement un profil du catalogue de test. `--mock` ne contacte
+aucun fournisseur : quelques labels d'exemple sont écrits localement, les
+autres noms donnent `unclear`.
 
 ### Catalogue de test séparé
 
@@ -195,7 +221,7 @@ La référence protocole 1B n'établit pas le support exact du Minitel 1 posséd
 ## Validation et prochaine séance
 
 Les 284 tests existants passent dans cet environnement avec leurs dépendances.
-Les 40 contrôles rose passent : porte exacte/sans écho console,
+Les 47 contrôles rose passent : porte exacte/sans écho console,
 annulation, dépassement de saisie sans fuite, alias, profil/mot d'arrêt fixes,
 état borné, sortie/verrouillage, réponse tardive, deadline, comptage/conversion,
 défilement/skip/annulation et langue ordinaire anglaise préservée. Aucun
@@ -217,7 +243,12 @@ la sélection indépendante des profils, le flag CLI, la commande `3615 TEST`,
 la porte commune et les sorties sans facture, y compris après rejet de
 modération, avec effacement de l'état. L'accueil, ses choix M/F, les listes
 filtrées, les alias aléatoires respectant le choix et le refus d'accréditation
-sont également couverts. Bilan combiné : **324 tests passent**.
+sont également couverts. Sept contrôles supplémentaires vérifient la petite
+requête de prénom, ses labels stricts, la sélection et l'alias, les erreurs,
+l'annulation/réponse tardive, le comptage et l'absence d'appel avant la porte.
+Bilan combiné : **331 tests passent**. Les fixtures de prénoms sont synthétiques,
+pas une mesure de justesse du classificateur réel. Tester des prénoms européens
+courants et ambigus avec le modèle configuré avant de conclure à sa fiabilité.
 
 Retour du propriétaire, 16 octobre, via `terminal_console.py` : boucle globale
 fonctionnelle, mot de passe du `.env` appliqué et mauvaise saisie rejetée,

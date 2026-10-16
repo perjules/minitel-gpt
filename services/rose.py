@@ -63,6 +63,11 @@ def catalogue(test=False):
     return json.loads((CONFIG / filename).read_text(encoding="utf-8"))
 
 
+def known_name(alias, test=False):
+    return any(normalized(alias) in [normalized(p["name"]), *map(normalized, p["aliases"])]
+               for p in catalogue(test=test)["personas"])
+
+
 def stop_reason(text, safeword=""):
     command = normalized(text).strip(".!? ")
     command = re.sub(r"(?:,? (?:S'IL TE PLAIT|S'IL VOUS PLAIT|SVP|MERCI|PLEASE))$", "", command)
@@ -121,6 +126,18 @@ class MistralModel:
         return bool(self.key and self.key != "...")
 
     def __call__(self, prompt, history):
+        return self.complete(prompt, history, max_tokens=180, temperature=0.8, timeout=self.timeout)
+
+    def classify_name(self, name):
+        prompt = (CONFIG / "rose_name_prompt.txt").read_text(encoding="utf-8")
+        result = self.complete(prompt, [{"role": "user", "content": name}],
+                               max_tokens=8, temperature=0, timeout=min(self.timeout, 8))
+        if result.status != "done":
+            return result
+        label = {"m": "M", "f": "F", "unclear": "unclear"}.get(result.text.strip().casefold())
+        return Reply(label) if label else Reply(status="error")
+
+    def complete(self, prompt, history, *, max_tokens, temperature, timeout):
         if not self.ready():
             return Reply(status="configuration")
         try:
@@ -128,8 +145,8 @@ class MistralModel:
                 URL, headers={"Authorization": f"Bearer {self.key}"},
                 json={"model": self.model,
                       "messages": [{"role": "system", "content": prompt}] + history,
-                      "max_tokens": 180, "temperature": 0.8, "stream": False},
-                timeout=self.timeout,
+                      "max_tokens": max_tokens, "temperature": temperature, "stream": False},
+                timeout=timeout,
             )
             try:
                 data = response.json()
@@ -154,6 +171,11 @@ class MockModel:
     """Authored offline dialogue only; never represents observed model behavior."""
     def ready(self):
         return True
+
+    def classify_name(self, name):
+        # Authored offline fixtures, not a substitute for the live classifier.
+        label = {"ROBERT": "M", "ALICE": "F", "LUCA": "M", "SOFIA": "F"}.get(normalized(name), "unclear")
+        return Reply(label)
 
     def __call__(self, prompt, history):
         if history and history[-1]["content"] != "Ouvrez brièvement cette nouvelle conversation.":

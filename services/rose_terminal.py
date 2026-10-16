@@ -260,6 +260,29 @@ def _run(term, alias, model, timeout=30, row_delay=0.32, test=False):
     if not model.ready():
         display(term, "Service indisponible. Clé Mistral non configurée.")
         return "retour", None
+    if gender is None and not rose.known_name(alias, test=test):
+        display(term, "Consultation du registre des correspondants.\n\nRETOUR : annuler.")
+        job = rose.Job(lambda prompt, history: model.classify_name(alias), "", [])
+        result, action = wait(term, job, "", min(timeout, 8))
+        pending = job.pending() if job.thread.is_alive() else None
+        if action not in ("done", "deadline"):
+            return action, pending
+        if result and result.status == "moderation":
+            display(term, "Le contrôle central a refusé la mise en relation.")
+            return "retour", pending
+        if not result or result.status != "done" or result.text not in ("M", "F", "unclear"):
+            display(term, "Le service central des prénoms ne répond pas.\n\n"
+                    "Aucune mise en relation n'a été effectuée.")
+            return "retour", pending
+        if result.text == "unclear":
+            display(term, "Erreur de mise en relation.\n\n"
+                    "Le registre central ne sait dans quelle colonne classer ce prénom.\n\n"
+                    "Dossier ajourné.")
+            return "retour", pending
+        gender = "homme" if result.text == "M" else "femme"
+        if not any(p["gender"] == gender for p in rose.catalogue(test=test)["personas"]):
+            display(term, "Aucun correspondant disponible pour ce prénom.")
+            return "retour", pending
     session = rose.Session(alias, test=test, gender=gender)
     reason = "retour"
     try:
