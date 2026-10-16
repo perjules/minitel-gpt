@@ -985,7 +985,8 @@ def run(term=None):
             if action in ('sommaire', 'timeout'):
                 break
 
-            rose_alias = rose.entry(question)
+            rose_test = rose.test_entry(question)
+            rose_alias = "" if rose_test else rose.entry(question)
             if (rose_alias is not None and not calc.mode and not school_mode.mode
                     and not calculator_blocked(mail, memory)):
                 if pending is not None and pending[0].is_alive():
@@ -994,7 +995,7 @@ def run(term=None):
                 result, rose_pending = rose_terminal.run(
                     t, rose_alias, rose.MistralModel(MISTRAL_KEY, MISTRAL_MODEL,
                                                    min(options[2], 30)),
-                    timeout=min(options[2], 30))
+                    timeout=min(options[2], 30), test=rose_test)
                 if rose_pending is not None:
                     pending = rose_pending
                 if result == "sommaire":

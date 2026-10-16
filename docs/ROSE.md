@@ -53,6 +53,24 @@ Jacqueline/Jaqueline et Jean-Marc/Jean Marc sont des alias stables. Un nom
 inconnu choisit un profil statique au hasard une seule fois et garde le nom
 demandé comme alias. Le genre du participant n'est jamais inféré du nom.
 
+### Catalogue de test séparé
+
+```bash
+.venv/bin/python scripts/rose_console.py --test
+.venv/bin/python scripts/rose_console.py --test --mock --name "Test A"
+```
+
+Dans la console habituelle, la commande **`3615 TEST`** ouvre ce même catalogue.
+Elle est reconnue uniquement au prompt ordinaire, avec les mêmes protections
+de contexte que `3615`. Le flag `--test` sélectionne seulement
+`config/rose_test_personas.json`, qui contient actuellement les stubs **Test A**
+et **Test B**. Leur schéma est identique au catalogue principal ; on pourra
+les remplacer ou en ajouter sans modifier le programme. Le nombre de pages
+s'adapte à la taille du catalogue. La porte, le harness, le fournisseur,
+le rendu, l'isolation, les sorties et la facture utilisent le même code.
+`--test` conserve les appels Mistral réels ; ajouter `--mock` pour les simuler.
+Les entrées ordinaires continuent d'utiliser `config/rose_personas.json`.
+
 Dans l'application habituelle :
 
 ```bash
@@ -161,7 +179,7 @@ La référence protocole 1B n'établit pas le support exact du Minitel 1 posséd
 ## Validation et prochaine séance
 
 Les 284 tests existants passent dans cet environnement avec leurs dépendances.
-Les 31 contrôles rose passent : porte exacte/sans écho console,
+Les 35 contrôles rose passent : porte exacte/sans écho console,
 annulation, dépassement de saisie sans fuite, alias, profil/mot d'arrêt fixes,
 état borné, sortie/verrouillage, réponse tardive, deadline, comptage/conversion,
 défilement/skip/annulation et langue ordinaire anglaise préservée. Aucun
@@ -178,7 +196,9 @@ la sortie par mot d'arrêt avec casse/espaces variés, puis le relevé complet
 jusqu'au total. Ce sont des répliques d'exemple écrites, pas une validation
 de comportement Mistral. Le pied de console est désormais français pendant
 la porte et la conversation, puis son libellé ordinaire est restauré.
-Le décompte distingue `1 message`. Bilan combiné : **315 tests passent**.
+Le décompte distingue `1 message`. Les contrôles du catalogue de test couvrent
+la sélection indépendante des profils, le flag CLI, la commande `3615 TEST`,
+la porte et la facture communes. Bilan combiné : **319 tests passent**.
 
 Pas de clé Mistral autorisée dans cet environnement ; **aucun appel réel**,
 modèle réellement observé, mesure de coût ou rejet réel. Configuration prévue :

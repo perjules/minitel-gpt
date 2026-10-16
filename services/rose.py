@@ -39,6 +39,10 @@ def entry(text):
     return None if match is None else (match[1] or "").strip()
 
 
+def test_entry(text):
+    return re.fullmatch(r"\s*3615\s+TEST\s*", text, re.IGNORECASE) is not None
+
+
 def password_value():
     # One fixed local value; no accounts, remembered unlock or published default.
     if "ROSE_PASSWORD" in os.environ:
@@ -54,8 +58,9 @@ def authorized(attempt):
     return bool(secret) and hmac.compare_digest(attempt.encode(), secret.encode())
 
 
-def catalogue():
-    return json.loads((CONFIG / "rose_personas.json").read_text(encoding="utf-8"))
+def catalogue(test=False):
+    filename = "rose_test_personas.json" if test else "rose_personas.json"
+    return json.loads((CONFIG / filename).read_text(encoding="utf-8"))
 
 
 def stop_reason(text, safeword=""):
@@ -189,9 +194,9 @@ class Job:
 
 
 class Session:
-    def __init__(self, alias, rng=None):
+    def __init__(self, alias, rng=None, test=False):
         rng = rng or random.SystemRandom()
-        data = catalogue()
+        data = catalogue(test=test)
         matches = [p for p in data["personas"]
                    if normalized(alias) in [normalized(p["name"]), *map(normalized, p["aliases"])]]
         self.profile = copy.deepcopy(matches[0] if matches else rng.choice(data["personas"]))

@@ -346,6 +346,73 @@ class CancellationTests(unittest.TestCase):
 
 
 class IntegrationTests(unittest.TestCase):
+    def test_test_catalogue_is_separate_for_named_and_random_profiles(self):
+        self.assertTrue(rose.test_entry(" 3615   test "))
+        for text in ("3625 TEST", '"3615 TEST"', "A: 3615 TEST", "3615 TEST A"):
+            self.assertFalse(rose.test_entry(text))
+        normal = rose.Session("Jacqueline")
+        self.assertEqual(normal.profile["id"], "jacqueline")
+        self.assertEqual(rose.Session("Test B", test=True).profile["id"], "test-b")
+        unknown = rose.Session("Jacqueline", test=True)
+        self.assertIn(unknown.profile["id"], {"test-a", "test-b"})
+        self.assertEqual(unknown.alias, "Jacqueline")
+
+    def test_test_roster_uses_stub_payload_and_same_gate_exit_and_bill(self):
+        term = KeyTerm(typed("fixture") + [("fn", chat.K_SUITE)]
+                       + typed("Test B") + typed("Bonjour") + typed("RETOUR"))
+        prompts = []
+
+        def model(prompt, history):
+            prompts.append(prompt)
+            return rose.Reply("Bonsoir.")
+
+        adapter = Mock(ready=lambda: True, side_effect=model)
+        with patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}), patch.object(terminal, "wait", side_effect=completed), patch.object(terminal, "show_bill", return_value="done") as billing:
+            terminal.run(term, "", adapter, test=True)
+        self.assertIn("Catalogue 1/1", str(term.rows))
+        self.assertNotIn("Catalogue 2/", str(term.rows))
+        self.assertEqual(len(prompts), 2)
+        self.assertTrue(all("Profil provisoire B" in prompt for prompt in prompts))
+        self.assertTrue(all("Français uniquement" in prompt for prompt in prompts))
+        self.assertEqual(billing.call_args.args[1].messages, 1)
+        self.assertEqual(billing.call_args.args[1].total, 20450)
+        with patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}), patch.object(terminal, "show_bill") as billing:
+            terminal.run(KeyTerm(typed("wrong")), "Test A", adapter, test=True)
+        self.assertEqual(len(prompts), 2)
+        billing.assert_not_called()
+
+    def test_main_test_command_opens_gated_test_roster(self):
+        uart = startup.FakeSerial(b"3615 TEST" + startup.fn(chat.K_ENVOI))
+        memory = Mock(key="owner", username="owner", pending=None)
+        memory.saved_language.return_value = "en"
+        with (patch.object(chat, "select_memory_user", return_value=(memory, "envoi")),
+              patch.object(chat, "show_boot", return_value="done"), patch.object(chat, "prepare_boot", return_value=[]),
+              patch.object(chat, "load_preset", return_value=("persona", "3615 IA", "Question?", "WAIT", None)),
+              patch.object(chat, "build_title", return_value=["LOGO"]),
+              patch.object(chat.gmail_mail, "enabled", return_value=False),
+              patch.object(terminal, "run", return_value=("retour", None)) as run,
+              patch.object(chat.time, "sleep"), self.assertRaises(startup.EndOfInput)):
+            chat.run(chat.Term(uart))
+        self.assertEqual(run.call_args.args[1], "")
+        self.assertTrue(run.call_args.kwargs["test"])
+        memory.record.assert_not_called()
+
+    def test_cli_test_flag_changes_catalogue_without_enabling_mock(self):
+        from scripts import rose_console
+        term = Mock()
+        term.read_key.return_value = ("timeout", None)
+        with (patch("sys.argv", ["rose_console.py", "--test", "--name", "Test A"]),
+              patch("sys.stdin.isatty", return_value=True), patch("sys.stdout.isatty", return_value=True),
+              patch.object(rose_console.curses, "wrapper", side_effect=lambda session: session(Mock())),
+              patch.object(rose_console.curses, "raw"), patch.object(rose_console.curses, "curs_set"),
+              patch.object(chat, "Term", return_value=term),
+              patch.object(rose, "MistralModel") as live, patch.object(rose, "MockModel") as simulated,
+              patch.object(terminal, "run") as run):
+            self.assertEqual(rose_console.main(), 0)
+        simulated.assert_not_called()
+        self.assertEqual(run.call_args.args, (term, "Test A", live.return_value))
+        self.assertTrue(run.call_args.kwargs["test"])
+
     def test_missing_key_after_gate_does_not_generate_or_bill(self):
         with patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}), patch.object(terminal, "show_bill") as billing, patch.object(rose.requests, "post") as post:
             terminal.run(KeyTerm(typed("fixture")), "Jacqueline", rose.MistralModel("", "model"))

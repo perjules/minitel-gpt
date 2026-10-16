@@ -104,18 +104,19 @@ def gate(term):
     return accepted, action
 
 
-def roster(term):
+def roster(term, test=False):
     """Provisional flat catalogue, two biographies/page; direct name at any point."""
-    people = rose.catalogue()["personas"]
+    people = rose.catalogue(test=test)["personas"]
+    pages = (len(people) + 1) // 2
     page = 0
     while True:
-        text = f"3615 rose - Catalogue {page + 1}/5\n\n"
+        text = f"3615 rose - Catalogue {page + 1}/{pages}\n\n"
         text += "\n\n".join(p["name"] + "\n" + p["bio"] for p in people[page*2:page*2+2])
         display(term, text)
         term.line("SUITE / nom puis ENVOI / RETOUR")
         name, action = read_field(term, paging=True)
         if action == "next":
-            page = (page + 1) % 5
+            page = (page + 1) % pages
         elif action == "submit" and name.strip():
             alias = rose.entry(name)
             alias = name.strip() if alias is None else alias
@@ -198,31 +199,31 @@ def show_bill(term, receipt, row_delay=0.32):
         term.w(chat.SCROLL_OFF)
 
 
-def run(term, alias, model, timeout=30, row_delay=0.32):
+def run(term, alias, model, timeout=30, row_delay=0.32, test=False):
     """Scope even the shared console keyboard hint to French, then restore it."""
     previous_hint = getattr(term.s, "hint", None)
     if isinstance(previous_hint, str):
         term.s.hint = "Entree ENVOI | ^N SUITE | ^P SOMMAIRE | ^G AIDE | ^R RETOUR | ^Q fermer"
     try:
-        return _run(term, alias, model, timeout, row_delay)
+        return _run(term, alias, model, timeout, row_delay, test=test)
     finally:
         if isinstance(previous_hint, str):
             term.s.hint = previous_hint
 
 
-def _run(term, alias, model, timeout=30, row_delay=0.32):
+def _run(term, alias, model, timeout=30, row_delay=0.32, test=False):
     """Return ordinary-loop action and any outstanding isolated worker tuple."""
     accepted, action = gate(term)
     if not accepted:
         return action, None
     if not alias:
-        alias, action = roster(term)
+        alias, action = roster(term, test=test)
         if alias is None:
             return action, None
     if not model.ready():
         display(term, "Service indisponible. Clé Mistral non configurée.")
         return "retour", None
-    session = rose.Session(alias)
+    session = rose.Session(alias, test=test)
     reason = "retour"
     try:
         display(term, "3615 rose\nService de conversation adulte fictive.\n\n"

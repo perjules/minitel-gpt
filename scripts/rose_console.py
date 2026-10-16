@@ -27,6 +27,7 @@ def set_password(path):
 def main():
     parser = argparse.ArgumentParser(description="Atelier privé 3615 rose, sans conservation des conversations.")
     parser.add_argument("--mock", action="store_true", help="dialogue écrit localement, aucun appel API")
+    parser.add_argument("--test", action="store_true", help="utiliser le catalogue de personnalités de test")
     parser.add_argument("--name", default="", help="personnage ou alias ; catalogue si absent")
     parser.add_argument("--set-password", action="store_true", help="choisir la valeur locale privée sans écho")
     args = parser.parse_args()
@@ -48,7 +49,7 @@ def main():
         curses.raw()
         curses.curs_set(1)
         term = chat.Term(ConsoleSerial(window))
-        rose_terminal.run(term, args.name, model)
+        rose_terminal.run(term, args.name, model, test=args.test)
         term.line()
         term.line("Conversation terminée. ENVOI : fermer.")
         # Final receipt remains visible until the owner closes this standalone
