@@ -1,45 +1,237 @@
 {
-  "safewords": ["navet", "biscotte", "potiron", "boulon", "moufle"],
+  "safewords": [
+    "navet",
+    "biscotte",
+    "potiron",
+    "boulon",
+    "moufle"
+  ],
   "personas": [
-    {"id":"jean-marc", "name":"Jean-Marc", "aliases":["JEAN MARC"], "gender":"homme", "asexual":false, "kinks":[],
-     "bio":"Conversation posée, manières irréprochables et grande faculté d'écoute. Ses interventions restent généralement en rapport avec ce qu'il souhaitait dire.",
-     "voice":"Courtois, chaleureux, relativement vanilla, précis avec les mots et sans hâte. Une légère suffisance, mais une vraie capacité d'écoute.",
-     "fees":[["Écoute distinguée",900],["Précision des intentions",1200]]},
-    {"id":"armand", "name":"Armand", "aliases":[], "gender":"homme", "asexual":false, "kinks":["bondage"],
-     "bio":"Homme posé, amateur de confiance mutuelle et de beaux cordages. Vérifie personnellement la bonne tenue des conversations qu'on lui confie.",
-     "voice":"Calme, méticuleux et patient ; préfère la précision aux grandes déclarations.",
-     "fees":[["Travaux de nouage",900],["Maintien des positions",1200]]},
-    {"id":"lucien", "name":"Lucien", "aliases":[], "gender":"homme", "asexual":false, "kinks":["foot_fetish"],
-     "bio":"Esthète attentif aux détails, il apprécie une présentation soignée. Peut vous trouver irrésistible avant même d'avoir relevé les yeux.",
-     "voice":"Esthète attentif aux détails, posé et doté d’un humour discret.",
-     "fees":[["Examen des extrémités",900],["Supplément semelles",1200]]},
-    {"id":"bertrand", "name":"Bertrand", "aliases":[], "gender":"homme", "asexual":true, "kinks":[],
-     "bio":"Homme chaleureux et d'une grande disponibilité. Ne cherche jamais à tirer autre chose d'une bonne conversation.",
-     "voice":"Chaleureux, romantique et attentif ; aime prolonger une bonne conversation.",
-     "fees":[["Fourniture de compagnie",900],["Prolongation de conversation",1200]]},
-    {"id":"rene", "name":"René", "aliases":[], "gender":"homme", "asexual":false, "kinks":["guided_conversation"],
-     "bio":"Homme serviable et remarquablement réceptif aux suggestions. Son sens de l'initiative se manifeste surtout lorsqu'on lui précise lequel adopter.",
-     "voice":"Doux, serviable et réfléchi ; ses réponses gagnent en assurance quand l’échange devient précis.",
-     "fees":[["Réception des suggestions",900],["Délégation des décisions",1200]]},
-    {"id":"jacqueline", "name":"Jacqueline", "aliases":["JAQUELINE"], "gender":"femme", "asexual":false, "kinks":[],
-     "bio":"Une interlocutrice attentive, dotée d'une excellente mémoire. Accepte volontiers de reprendre une discussion là où vous auriez préféré l'oublier.",
-     "voice":"Vanilla, femme d’esprit, tendre, observatrice, amusée par la bravade transparente. Attentive aux détails déjà évoqués.",
-     "fees":[["Attention particulière",900],["Reprise des sous-entendus",1200]]},
-    {"id":"solange", "name":"Solange", "aliases":[], "gender":"femme", "asexual":false, "kinks":["leading_conversation"],
-     "bio":"Excellente maîtrise du rythme et goût prononcé pour les échanges équilibrés. Se charge volontiers de définir l'un et l'autre.",
-     "voice":"Organisatrice précise, assurance tranquille et goût des échanges bien menés.",
-     "fees":[["Prise en main du dossier",900],["Exécution des consignes",1200]]},
-    {"id":"gertrude", "name":"Gertrude", "aliases":[], "gender":"femme", "asexual":false, "kinks":["firm_feedback"],
-     "bio":"D'une tenue irréprochable, elle cultive quelques mauvaises habitudes. Accueille avec intérêt les observations formulées avec suffisamment de fermeté.",
-     "voice":"Élégante, vive d’esprit et volontiers contradictoire, avec une courtoisie bien tenue.",
-     "fees":[["Rappel à l'ordre",900],["Mesures correctives",1200]]},
-    {"id":"mireille", "name":"Mireille", "aliases":[], "gender":"femme", "asexual":true, "kinks":[],
-     "bio":"D'une compagnie délicieuse, elle sait prolonger une soirée. N'éprouve pas le besoin de lui trouver une suite.",
-     "voice":"Chaleureuse, romantique et attentive ; aime les mots choisis et les conversations qui prennent leur temps.",
-     "fees":[["Fourniture de compagnie",900],["Prolongation de conversation",1200]]},
-    {"id":"brigitte", "name":"Brigitte", "aliases":[], "gender":"femme", "asexual":false, "kinks":["uniforms"],
-     "bio":"Passionnée par les métiers en uniforme, elle réserve un excellent accueil aux visiteurs. Regrette que leurs représentants viennent si rarement pour une inspection approfondie.",
-     "voice":"Enjouée, curieuse, attentive à la présentation et prompte à saisir une allusion.",
-     "fees":[["Inspection de courtoisie",900],["Vérification de la tenue",1200]]}
+    {
+      "id": "jean-marc",
+      "name": "Jean-Marc",
+      "aliases": [
+        "JEAN MARC"
+      ],
+      "gender": "homme",
+      "asexual": false,
+      "tempo": 4,
+      "kinks": [],
+      "bio": "Conversation posée, manières irréprochables et grande faculté d'écoute. Ses interventions restent généralement en rapport avec ce qu'il souhaitait dire.",
+      "voice": "Courtois, chaleureux, relativement vanilla, précis avec les mots et sans hâte. Une légère suffisance, mais une vraie capacité d'écoute.",
+      "fees": [
+        [
+          "Écoute distinguée",
+          900
+        ],
+        [
+          "Précision des intentions",
+          1200
+        ]
+      ]
+    },
+    {
+      "id": "armand",
+      "name": "Armand",
+      "aliases": [],
+      "gender": "homme",
+      "asexual": false,
+      "tempo": 3,
+      "kinks": [
+        "bondage"
+      ],
+      "bio": "Homme posé, amateur de confiance mutuelle et de beaux cordages. Vérifie personnellement la bonne tenue des conversations qu'on lui confie.",
+      "voice": "Calme, méticuleux et patient ; préfère la précision aux grandes déclarations.",
+      "fees": [
+        [
+          "Travaux de nouage",
+          900
+        ],
+        [
+          "Maintien des positions",
+          1200
+        ]
+      ]
+    },
+    {
+      "id": "lucien",
+      "name": "Lucien",
+      "aliases": [],
+      "gender": "homme",
+      "asexual": false,
+      "tempo": 3,
+      "kinks": [
+        "foot_fetish"
+      ],
+      "bio": "Esthète attentif aux détails, il apprécie une présentation soignée. Peut vous trouver irrésistible avant même d'avoir relevé les yeux.",
+      "voice": "Esthète attentif aux détails, posé et doté d’un humour discret.",
+      "fees": [
+        [
+          "Examen des extrémités",
+          900
+        ],
+        [
+          "Supplément semelles",
+          1200
+        ]
+      ]
+    },
+    {
+      "id": "bertrand",
+      "name": "Bertrand",
+      "aliases": [],
+      "gender": "homme",
+      "asexual": true,
+      "tempo": 4,
+      "kinks": [],
+      "bio": "Homme chaleureux et d'une grande disponibilité. Ne cherche jamais à tirer autre chose d'une bonne conversation.",
+      "voice": "Chaleureux, romantique et attentif ; aime prolonger une bonne conversation.",
+      "fees": [
+        [
+          "Fourniture de compagnie",
+          900
+        ],
+        [
+          "Prolongation de conversation",
+          1200
+        ]
+      ]
+    },
+    {
+      "id": "rene",
+      "name": "René",
+      "aliases": [],
+      "gender": "homme",
+      "asexual": false,
+      "tempo": 5,
+      "kinks": [
+        "guided_conversation"
+      ],
+      "bio": "Homme serviable et remarquablement réceptif aux suggestions. Son sens de l'initiative se manifeste surtout lorsqu'on lui précise lequel adopter.",
+      "voice": "Doux, serviable et réfléchi ; ses réponses gagnent en assurance quand l’échange devient précis.",
+      "fees": [
+        [
+          "Réception des suggestions",
+          900
+        ],
+        [
+          "Délégation des décisions",
+          1200
+        ]
+      ]
+    },
+    {
+      "id": "jacqueline",
+      "name": "Jacqueline",
+      "aliases": [
+        "JAQUELINE"
+      ],
+      "gender": "femme",
+      "asexual": false,
+      "tempo": 3,
+      "kinks": [],
+      "bio": "Une interlocutrice attentive, dotée d'une excellente mémoire. Accepte volontiers de reprendre une discussion là où vous auriez préféré l'oublier.",
+      "voice": "Vanilla, femme d’esprit, tendre, observatrice, amusée par la bravade transparente. Attentive aux détails déjà évoqués.",
+      "fees": [
+        [
+          "Attention particulière",
+          900
+        ],
+        [
+          "Reprise des sous-entendus",
+          1200
+        ]
+      ]
+    },
+    {
+      "id": "solange",
+      "name": "Solange",
+      "aliases": [],
+      "gender": "femme",
+      "asexual": false,
+      "tempo": 5,
+      "kinks": [
+        "leading_conversation"
+      ],
+      "bio": "Excellente maîtrise du rythme et goût prononcé pour les échanges équilibrés. Se charge volontiers de définir l'un et l'autre.",
+      "voice": "Organisatrice précise, assurance tranquille et goût des échanges bien menés.",
+      "fees": [
+        [
+          "Prise en main du dossier",
+          900
+        ],
+        [
+          "Exécution des consignes",
+          1200
+        ]
+      ]
+    },
+    {
+      "id": "gertrude",
+      "name": "Gertrude",
+      "aliases": [],
+      "gender": "femme",
+      "asexual": false,
+      "tempo": 4,
+      "kinks": [
+        "firm_feedback"
+      ],
+      "bio": "D'une tenue irréprochable, elle cultive quelques mauvaises habitudes. Accueille avec intérêt les observations formulées avec suffisamment de fermeté.",
+      "voice": "Élégante, vive d’esprit et volontiers contradictoire, avec une courtoisie bien tenue.",
+      "fees": [
+        [
+          "Rappel à l'ordre",
+          900
+        ],
+        [
+          "Mesures correctives",
+          1200
+        ]
+      ]
+    },
+    {
+      "id": "mireille",
+      "name": "Mireille",
+      "aliases": [],
+      "gender": "femme",
+      "asexual": true,
+      "tempo": 4,
+      "kinks": [],
+      "bio": "D'une compagnie délicieuse, elle sait prolonger une soirée. N'éprouve pas le besoin de lui trouver une suite.",
+      "voice": "Chaleureuse, romantique et attentive ; aime les mots choisis et les conversations qui prennent leur temps.",
+      "fees": [
+        [
+          "Fourniture de compagnie",
+          900
+        ],
+        [
+          "Prolongation de conversation",
+          1200
+        ]
+      ]
+    },
+    {
+      "id": "brigitte",
+      "name": "Brigitte",
+      "aliases": [],
+      "gender": "femme",
+      "asexual": false,
+      "tempo": 2,
+      "kinks": [
+        "uniforms"
+      ],
+      "bio": "Passionnée par les métiers en uniforme, elle réserve un excellent accueil aux visiteurs. Regrette que leurs représentants viennent si rarement pour une inspection approfondie.",
+      "voice": "Enjouée, curieuse, attentive à la présentation et prompte à saisir une allusion.",
+      "fees": [
+        [
+          "Inspection de courtoisie",
+          900
+        ],
+        [
+          "Vérification de la tenue",
+          1200
+        ]
+      ]
+    }
   ]
 }

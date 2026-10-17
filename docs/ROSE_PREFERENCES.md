@@ -122,3 +122,33 @@ schéma de chaque entrée de la banque, survivent aux éditions manuelles ; ils
 n'ont pas pu être exécutés dans l'environnement de rédaction et ne valident
 aucun contenu éditorial. Aucun nouvel appel réel Mistral ni essai physique ;
 modération, naturel, fréquence des motifs et personnalité restent empiriques.
+
+## Tempo et usure (spécification ; code gelé)
+
+Deux nouveaux actifs éditoriaux, inertes tant que l'orchestrateur ne les
+charge pas ; `services/rose.py` n'est pas modifié à ce stade.
+
+**Tempo.** Chaque profil des catalogues porte un champ entier `tempo` :
+le nombre de premières réponses de théâtre d'attente avant d'aller droit
+au but si l'interlocuteur pousse. `0` signifie l'escalade immédiate —
+le maximum au sens de la vitesse — et c'est la valeur des 25 profils de
+test de `config/rose_test_personas.json` : la grille éprouve le registre,
+pas le rythme. Le catalogue principal échelonne de 2 (Brigitte) à 5
+(René, Solange). Le texte de consigne ne figure pas dans les voix :
+l'orchestrateur insère `config/rose_tempo_prompt.txt` — ou
+`config/rose_tempo_romantic_prompt.txt` pour les profils `asexual` —
+après la voix du profil, en substituant `{tempo}`. Spécification pour la
+future implémentation : champ absent vaut 0 ; valeur non entière = mise
+en relation suspendue localement, sans conversation ni facture, comme un
+identifiant de kink inconnu.
+
+**Usure.** `config/rose_weariness_prompt.txt` décrit les fuites
+discrètes de l'abstraction : méprises rares, dédain de la situation mais
+jamais de la personne, aucun aveu direct, le voile reste beige. Rédaction
+non genrée : la personne au poste peut être un homme comme une femme.
+Charge future décidée par l'orchestrateur (probabiliste ou après un seuil
+de messages) ; aucune probabilité ni horloge n'est fixée à ce stade.
+
+Le champ `tempo` ajouté aux deux catalogues est une clé supplémentaire
+ignorée par l'orchestrateur actuel ; les tests n'ont pas été relancés
+depuis cet ajout. Relancer `pytest` avant tout test en direct.
