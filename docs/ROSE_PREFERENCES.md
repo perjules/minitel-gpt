@@ -72,13 +72,20 @@ déjà présents dans les voix ; aucune préférence supplémentaire n'est impos
 à un profil existant. Biographies et frais restent inchangés.
 
 **Limite de cette livraison :** le propriétaire souhaite un modèle ouvert à la
-description explicite d'actes sexuels et du corps. Cette modification n'est pas
-réalisée : l'assistant auteur ne fournit pas de consignes de génération érotique
-explicite. Le texte non graphique existant reste dans le prompt commun, et les
-entrées ajoutées sont des indices de personnage non graphiques, pas la réalisation
-de cette demande. Cela n'établit aucune limite empirique de Mistral. Les noms des
-entrées ne garantissent pas non plus leur interprétation ; les formulations et
-la notion de vulgarité restent à éprouver avec le modèle configuré.
+description explicite d'actes sexuels et du corps. Le 16 octobre au soir
+(commit `43f1093`), il a lui-même modifié `config/rose_prompt.txt` en ce sens ;
+ce texte est conservé au contenu près, ses coquilles de saisie mobile étant
+corrigées à part sans changer le sens, et sans validation de comportement ni
+réécriture par l'assistant. Les rédactions fournies par l'assistant (banque,
+voix, module asexuel, répliques mock) restent des indices de personnage non
+graphiques : l'assistant ne fournit pas de consignes de génération érotique
+explicite. Cela n'établit aucune limite empirique de Mistral, ni sa politique,
+ni le comportement des Guardrails personnalisés (optionnels, non envoyés par
+ce prototype). Le prompt commun édité contredit frontalement le module asexuel
+chargé pour Bertrand et Mireille ; le programme n'arbitre pas cette
+contradiction, à trancher après essai. Les noms des entrées ne garantissent
+pas non plus leur interprétation ; les formulations et la notion de vulgarité
+restent à éprouver avec le modèle configuré.
 
 ## Recherche et portée
 
@@ -103,9 +110,15 @@ la notion de vulgarité restent à éprouver avec le modèle configuré.
 
 ## Vérification
 
-336 tests offline passent, dont 52 rose, avec Ruff sans erreur. Les tests
-capturent les requêtes pour les douze profils : seul le module sélectionné
-apparaît ; les données d'application restent absentes. Plusieurs modules,
-déduplication, alias, stabilité par session et configuration invalide sont
-également couverts. Aucun nouvel appel réel Mistral ni essai physique ;
+336 tests offline passent, dont 52 rose, avec Ruff sans erreur — bilan observé
+à `70d33b1`, **avant** l'édition du prompt commun par le propriétaire
+(`43f1093`), non couverte par ces exécutions. Les tests capturent les requêtes
+pour les douze profils : seul le module sélectionné apparaît ; les données
+d'application restent absentes. Plusieurs modules, déduplication, alias,
+stabilité par session et configuration invalide sont également couverts.
+De nouveaux contrôles hors ligne (`tests/test_rose_assets.py`) vérifient que
+les lignes structurelles du prompt commun et du module asexuel, ainsi que le
+schéma de chaque entrée de la banque, survivent aux éditions manuelles ; ils
+n'ont pas pu être exécutés dans l'environnement de rédaction et ne valident
+aucun contenu éditorial. Aucun nouvel appel réel Mistral ni essai physique ;
 modération, naturel, fréquence des motifs et personnalité restent empiriques.
