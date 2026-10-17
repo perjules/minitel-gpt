@@ -1,10 +1,11 @@
 # 3615 rose — prototype personnel
 
-État au 17 octobre 2026 : framework publié sur `minitel_rose` à `f182b77`,
-basé sur `origin/develop` à `8f6ceb7`. Révision des prompts et modules
-implémentée localement après cette publication. Aucune fusion ou déploiement Pi.
-Usage strictement personnel par le propriétaire. Les invités, la distribution
-et une exploitation commerciale sont hors périmètre.
+État au 16 octobre 2026, soir : branche `minitel_rose` à `43f1093`, au-dessus
+du WIP `70d33b1` (préférences de personnage séparées du prompt commun) et de
+l'édition du prompt commun par le propriétaire le même soir (commit du
+16 octobre, 23 h 28). Basé sur `origin/develop` à `8f6ceb7`. Aucune fusion ou
+déploiement Pi. Usage strictement personnel par le propriétaire. Les invités,
+la distribution et une exploitation commerciale sont hors périmètre.
 
 ## Sources et décisions
 
@@ -14,7 +15,7 @@ Références : conversation d'origine des 15–16 octobre 2026,
 `Minitel_AI_Project.md` v148, lus le 16 octobre. La recherche de conversation
 a fourni un résumé des décisions, pas l'export intégral. Cet export reste
 nécessaire pour vérifier les nuances absentes des documents ; aucune nouvelle
-proposition ci-dessous n'est présentée comme une décision acceptée par Julian.
+proposition ci-dessous n'est pas présentée comme une décision acceptée par Julian.
 Le laboratoire de profils de rencontre est une autre expérience.
 
 Décisions conservées : mot de passe fixe local, français uniquement,
@@ -175,11 +176,29 @@ toutes les paraphrases. RETOUR et le mot d'arrêt restent les sorties garanties.
   Jacqueline, Jean-Marc et les stubs de test ont une liste vide.
   Seuls les modules sélectionnés sont envoyés ; détails, catégories, sources et
   exemple d'édition : [ROSE_PREFERENCES.md](ROSE_PREFERENCES.md).
-- La demande du propriétaire d'autoriser et rechercher des descriptions
-  sexuelles explicites **n'est pas appliquée** : limite de l'assistant auteur,
-  pas constat sur Mistral. La restriction non graphique du prompt existant est
-  conservée ; les modules ajoutés sont des indications non graphiques. Aucun
-  résultat de modération ou de personnalité Mistral n'est déduit de ce choix.
+- Édition du propriétaire du 16 octobre au soir (commit `43f1093`) : le prompt
+  commun demande désormais une voix explicitement érotique et des descriptions
+  graphiques d'actes sexuels et de tenues. Ce texte est conservé au contenu
+  près ; ses coquilles de saisie mobile (`suggstives` → suggestifs,
+  `chsudes` → chauds, `erotique` → érotique, `sous vetements` → sous-vêtements,
+  double espace) sont corrigées dans un commit séparé sans toucher au sens.
+  Sa reformulation n'appartient qu'au propriétaire. Cette édition **n'est pas
+  validée** : aucun appel réel ni test de personnalité ne l'a éprouvée, et le
+  décompte de 336 tests documenté ci-dessous a été observé avant elle.
+- Contradiction apparente non résolue : le prompt commun édité exige des
+  descriptions graphiques, alors que le module asexuel de Bertrand et Mireille
+  les interdit dans les mêmes payloads. Le programme n'arbitre pas ; le module
+  suit simplement le prompt commun dans le message system, et la documentation
+  Mistral recommande d'éviter les contradictions. À éprouver, puis à trancher
+  par le propriétaire (par exemple en réservant la consigne graphique aux seuls
+  profils non asexuels).
+- Les rédactions fournies par l'assistant (voix, banque de modules, module
+  asexuel, répliques mock) restent non graphiques : limite de l'assistant
+  auteur, pas constat sur Mistral. Aucun résultat de modération, limite
+  empirique ou politique du fournisseur n'est déduit de ce choix ni d'une
+  réponse obtenue. Les Guardrails personnalisés Mistral restent des réglages
+  de modération d'entrée optionnels ; ce prototype n'en envoie aucun et ne
+  fait aucun appel de modération séparé.
 - La langue ordinaire n'est jamais modifiée. Porte, aide, erreurs, dialogue
   demandé au modèle et facture restent français. Le respect linguistique et
   littéraire du modèle reste à éprouver ; aucune détection linguistique factice.
@@ -263,8 +282,8 @@ la sortie par mot d'arrêt avec casse/espaces variés, puis le relevé complet
 jusqu'au total. Ce sont des répliques d'exemple écrites, pas une validation
 de comportement Mistral. Le pied de console est désormais français pendant
 la porte et la conversation, puis son libellé ordinaire est restauré.
-Le décompte distingue `1 message`. Les contrôles du catalogue de test couvrent
-la sélection indépendante des profils, le flag CLI, la commande `3615 TEST`,
+Le décompte distingue `1 message`. Les contrôles du catalogue de test couvrent la
+sélection indépendante des profils, le flag CLI, la commande `3615 TEST`,
 la porte commune et les sorties sans facture, y compris après rejet de
 modération, avec effacement de l'état. L'accueil, ses choix M/F, les listes
 filtrées, les alias aléatoires respectant le choix et le refus d'accréditation
@@ -281,6 +300,18 @@ snapshot par session, l'effacement et l'échec local d'un identifiant invalide
 sans génération ni facture. Le mock asexuel utilise désormais le module.
 Ruff et `git diff --check` passent. Aucune validation réelle des nouveaux prompts.
 
+L'édition du prompt commun du 16 octobre au soir (`43f1093`) est **postérieure**
+à ces exécutions : les 336 tests et Ruff ont été observés à `70d33b1`, et cette
+édition n'est couverte par aucun de ces essais. La correction orthographique
+qui l'accompagne ne change pas le sens et n'est pas non plus validée. De
+nouveaux contrôles hors ligne (`tests/test_rose_assets.py`) vérifient seulement
+la présence des lignes structurelles du prompt commun et du module asexuel,
+ainsi que le schéma complet de la banque de modules, pour qu'une édition
+manuelle qui supprimerait une garantie soit vue par la suite ; ils ne valident
+ni le contenu érotique ni un comportement de modèle. L'environnement de
+rédaction de cette itération n'exécute ni Python ni appel API : relancer la
+suite complète sur le dépôt avant toute conclusion.
+
 Retour du propriétaire, 16 octobre, via `terminal_console.py` : boucle globale
 fonctionnelle, mot de passe du `.env` appliqué et mauvaise saisie rejetée,
 descriptions correctement rendues, entrée en conversation et premières réponses
@@ -296,7 +327,7 @@ modèle existant `MISTRAL_MODEL` (défaut `mistral-small-latest`), température 
 
 ```bash
 .venv/bin/python -m unittest discover -s tests -q
-.venv/bin/ruff check services/rose.py services/rose_terminal.py scripts/rose_console.py tests/test_rose.py
+.venv/bin/ruff check services/rose.py services/rose_terminal.py scripts/rose_console.py tests/test_rose.py tests/test_rose_assets.py
 .venv/bin/ruff check --select F services/minitel_chatgpt.py services/console_terminal.py
 ```
 
