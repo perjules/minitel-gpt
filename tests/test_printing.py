@@ -1,7 +1,14 @@
-from pathlib import Path
 import tempfile
 import unittest
-from printing import ImageBlock, PrintApproval, PrintDocument, TextBlock, render_document
+from pathlib import Path
+
+from printing import (
+    ImageBlock,
+    PrintApproval,
+    PrintDocument,
+    TextBlock,
+    render_document,
+)
 
 
 class PrintingTests(unittest.TestCase):
@@ -30,8 +37,9 @@ class PrintingTests(unittest.TestCase):
             self.assertGreater(image.height, 384)
 
     def test_unicode_accents_and_symbols(self):
-        from printing.render import render_document_pages
         from PIL import ImageChops
+
+        from printing.render import render_document_pages
         samples = (
             "é è ê ë à â ù û î ï ô ç œ É Ç — €",
             "e e e e a a u u i i o c oe E C - EUR",

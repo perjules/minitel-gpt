@@ -1,6 +1,7 @@
 """Printing routing tests: no BLE hardware or model needed."""
 import unittest
 from unittest.mock import patch
+
 from services import printing_session
 
 
@@ -30,8 +31,8 @@ class PrintSessionTests(unittest.TestCase):
         self.assertIsNone(session.last_text)
 
     def test_long_document_prints_all_sections(self):
-        from printing.render import render_document_pages
         from printing import PrintDocument, TextBlock
+        from printing.render import render_document_pages
 
         # Three screenfuls of distinct content must survive paper sectioning.
         content = "\n".join(f"PRONOTE LIGNE {index:03d} NOTE {index}/20" for index in range(100))
@@ -42,8 +43,9 @@ class PrintSessionTests(unittest.TestCase):
         self.assertGreater(sum(page.height for page in pages), 600)
 
     def test_document_uses_one_ble_session(self):
-        from printing import PrintDocument, TextBlock
         from unittest.mock import AsyncMock
+
+        from printing import PrintDocument, TextBlock
         document = PrintDocument("3615 IA", (TextBlock("ligne\n" * 80),))
         with patch("printing.mxw01.MXW01") as driver:
             driver.return_value.print_images = AsyncMock()

@@ -111,7 +111,6 @@ def render_document_pages(document: PrintDocument, *, width: int = 384, max_heig
 
 def render_document(document: PrintDocument, *, width: int = 384, max_height: int = 6000):
     """Single-bitmap compatibility API for the standalone smoke test."""
-    from PIL import Image
 
     pages = render_document_pages(document, width=width, max_height=max_height)
     if len(pages) != 1:

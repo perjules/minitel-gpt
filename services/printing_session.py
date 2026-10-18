@@ -6,9 +6,9 @@ import asyncio
 import importlib.util
 import os
 import re
+import sys
 import threading
 import time
-import sys
 from pathlib import Path
 
 # systemd may execute services/minitel_chatgpt.py directly, with services/ as sys.path[0].
@@ -16,7 +16,7 @@ _ROOT = str(Path(__file__).resolve().parents[1])
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from printing import PrintDocument, PrintApproval, TextBlock
+from printing import PrintApproval, PrintDocument, TextBlock
 from printing.render import render_document_pages
 
 
@@ -88,7 +88,7 @@ def print_with_progress(document, report):
             pages = render_document_pages(document)
             address = os.environ.get("MXW01_ADDRESS", "48:0F:57:1E:0E:EB")
             asyncio.run(MXW01(address).print_images(pages))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - Forward every worker failure to the caller for reporting.
             errors.append(exc)
         finally:
             finished.set()

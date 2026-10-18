@@ -6,31 +6,41 @@ Touches : ENVOI = valider, SUITE = page suivante, SOMMAIRE = retour accueil.
 Timeout 5 min sans action → retour sommaire.
 """
 import json
-import os
-import sys
-import time
 import logging
+import os
 import re
 import subprocess
+import sys
 import textwrap
-import unicodedata
 import threading
-from queue import Queue, Empty
+import time
+import unicodedata
 from pathlib import Path
-from dotenv import load_dotenv
+from queue import Empty, Queue
+
 import requests
+from dotenv import load_dotenv
 
 try:  # Support both systemd's direct script and package imports in tests.
-    from . import mistral_answers, pronote, pronote_answers, pronote_mode, gmail_mail, memory_session, calculator, printing_session
+    from . import (
+        calculator,
+        gmail_mail,
+        memory_session,
+        mistral_answers,
+        printing_session,
+        pronote,
+        pronote_answers,
+        pronote_mode,
+    )
 except ImportError:
+    import calculator
+    import gmail_mail
+    import memory_session
     import mistral_answers
+    import printing_session
     import pronote
     import pronote_answers
     import pronote_mode
-    import gmail_mail
-    import memory_session
-    import calculator
-    import printing_session
 
 try:
     from . import rose, rose_terminal
@@ -58,6 +68,7 @@ def to_ascii(s: str) -> str:
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 import serial
+
 
 # ── Config ───────────────────────────────────────────────────────────────
 def detect_port():
@@ -195,9 +206,9 @@ def call_llm(system_prompt, history):
 def get_ip():
     """IP locale (wlan0) pour l'affichage de l'accès admin."""
     try:
-        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True).stdout
+        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True, check=False).stdout
         return out.split()[0] if out.split() else None
-    except Exception:
+    except OSError:
         return None
 
 # Journalisation : toujours sur la sortie standard (capturée par systemd/journald).
@@ -208,7 +219,7 @@ _handlers = [logging.StreamHandler(sys.stdout)]
 _LOG_FILE = Path(__file__).parent.parent / "logs" / "chatgpt.log"
 try:
     _handlers.insert(0, logging.FileHandler(_LOG_FILE))
-except Exception as _e:  # PermissionError, FileNotFoundError…
+except OSError as _e:  # PermissionError, FileNotFoundError…
     print(f"[minitel-gpt] log fichier indisponible ({_e}), sortie standard seule",
           file=sys.stderr)
 logging.basicConfig(
@@ -261,7 +272,8 @@ def load_knowledge(active_key):
     for f in sorted(folder.glob("*.txt")):
         try:
             txt = f.read_text(encoding="utf-8", errors="ignore").strip()
-        except Exception:
+        except OSError as error:
+            log.warning("Knowledge file unreadable (%s)", type(error).__name__)
             continue
         if not txt:
             continue
@@ -296,7 +308,7 @@ def load_preset():
             p.get("loading_msg", "Consultation en cours..."),
             p.get("title_art") or TITLE_ART_DEFAULT,
         )
-    except Exception as e:
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
         log.warning(f"prompts.json: {e}")
         return (FALLBACK_PROMPT, "*** MINITEL GPT ***",
                 "Posez votre question :", "Consultation en cours...", TITLE_ART_DEFAULT)
@@ -330,8 +342,8 @@ def build_title(title_art=None):
     est indisponible."""
     segments = title_art or TITLE_ART_DEFAULT
     try:
-        from pyfiglet import Figlet
-    except Exception as e:
+        from pyfiglet import Figlet, FigletError
+    except ImportError as e:
         log.warning(f"pyfiglet indisponible: {e}")
         return ["", "  " + "   ".join(" ".join(s.get("text", "")) for s in segments), ""]
     lines = []
@@ -348,7 +360,7 @@ def build_title(title_art=None):
                 log.warning(f"pyfiglet police '{font}': rendu non-ASCII, ignore")
                 continue
             lines.extend(seg_lines)
-        except Exception as e:
+        except (FigletError, OSError, ValueError, TypeError) as e:
             log.warning(f"pyfiglet police '{font}': {e}")
     if not lines:
         lines = ["", "  " + "   ".join(" ".join(s.get("text", "")) for s in segments), ""]
@@ -455,7 +467,7 @@ def call_answer(system_prompt, history, language, options, knowledge,
         return calc.handle(question, language, generate=lambda expr, lang:
                            calculator.generate_scene(expr, lang, MISTRAL_KEY, MISTRAL_MODEL))
     explicit_memory = memory_session.explicit_request(question)
-    note_request = re.match(r"^note\b", question, re.I)
+    note_request = re.match(r"^note\b", question, re.IGNORECASE)
     school = pronote.backend() if PROVIDER == "mistral" and api == "conversations" else None
     school_enabled = school is not None and bool(school.tools())
     school_request = (school_enabled and not explicit_memory and not note_request
@@ -520,7 +532,7 @@ def start_answer(system_prompt, history, language, options, knowledge,
             if calc is not None:
                 optional["calc"] = calc
             output.put((call_answer(system_prompt, history, language, options, knowledge, **optional), None))
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - Forward every worker failure to the UART owner.
             output.put((None, error))
 
     worker = threading.Thread(target=request, daemon=True)
@@ -551,7 +563,7 @@ def start_pronote(request, school, language, options, knowledge):
                 output.put(({"display": pronote_answers.render(result, language)}, None))
             else:
                 output.put(({"display": "Commande inconnue. AIDE pour les commandes."}, None))
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - Forward every worker failure to the UART owner.
             output.put((None, error))
 
     worker = threading.Thread(target=read, daemon=True)
@@ -691,7 +703,7 @@ def session_prompt(system_prompt, language):
 def validate_boot(text):
     """Reject controls/bad formats, then adapt text for a scrolling display."""
     if not isinstance(text, str):
-        raise ValueError("Startup response is not text")
+        raise ValueError("Startup response is not text")  # noqa: TRY004 - Keep the validator's ValueError contract.
     text = text.replace("\r\n", "\n")
     if any(c != "\n" and not c.isprintable() for c in text):
         raise ValueError("Startup contains non-printable characters")
@@ -702,7 +714,7 @@ def validate_boot(text):
     if "```" in text or any(line.lstrip().startswith(("#", "* ", "- ")) for line in lines):
         raise ValueError("Startup contains Markdown")
     if re.search(r"\b(press|push|appuyez|pressez|tapez)\b[^\n]*"
-                 r"\b(ENVOI|SUITE|RETOUR|SOMMAIRE|GUIDE|ANNULATION|CORRECTION|REPETITION)\b", text, re.I):
+                 r"\b(ENVOI|SUITE|RETOUR|SOMMAIRE|GUIDE|ANNULATION|CORRECTION|REPETITION)\b", text, re.IGNORECASE):
         raise ValueError("Startup contains function-key instructions")
     rows = []
     for line in lines:
@@ -733,7 +745,7 @@ def prepare_boot(language):
         rows = validate_boot(text)
         log.info("Generated fictional startup: %s lines", len(rows))
         return rows + ["", fallback[-1]]
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - Generated startup is optional; retain the static fallback.
         log.warning("Startup generation failed (%s: %s); using static sequence",
                     type(e).__name__, e)
         return fallback
@@ -808,13 +820,11 @@ def read_question(t: Term, allow_empty=False, calculator_mode=False, navigation_
                 return None, 'sommaire'
             if code == K_GUIDE:
                 return None, 'guide'
-            if code == K_ENVOI:
-                if buf or allow_empty:
-                    return "".join(buf), 'envoi'
-            if code in (K_CORR, K_RETOUR):
-                if buf:
-                    buf.pop()
-                    t.w(bytes([BS, 0x20, BS]))   # backspace destructif
+            if code == K_ENVOI and (buf or allow_empty):
+                return "".join(buf), 'envoi'
+            if code in (K_CORR, K_RETOUR) and buf:
+                buf.pop()
+                t.w(bytes([BS, 0x20, BS]))   # backspace destructif
             continue
         # caractère
         c = code
@@ -903,7 +913,7 @@ def execute_print(t, document, language):
         printing_session.print_with_progress(
             document, lambda line: t.line(safe_display(line))
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - Optional printer failures must not end the terminal session.
         log.warning("Printing failed: %s", exc)
         return ("ECHEC REPROGRAPHIE: " if language == "fr" else "PRINT FAILURE: ") + str(exc)
     return "DOCUMENT MATERIALISE" if language == "fr" else "DOCUMENT PRINTED"

@@ -2,8 +2,10 @@
 import argparse
 import asyncio
 from pathlib import Path
-from printing import PrintDocument, ImageBlock, TextBlock, render_document
+
+from printing import ImageBlock, PrintDocument, TextBlock, render_document
 from printing.mxw01 import MXW01
+
 
 def main():
     p = argparse.ArgumentParser()

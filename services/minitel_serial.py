@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """Service UART Minitel - gère la communication série avec le Minitel Telic MB1."""
 
-import serial
-import time
 import logging
-import sys
-from pathlib import Path
 
 # Minitel : 1200 baud, 7 bits, parité paire, 1 stop bit (norme Videotex)
 # Détection automatique : FTDI (ttyUSB0) prioritaire sur GPIO UART (ttyAMA0)
 import os as _os
+import sys
+import time
+
+import serial
+
+
 def _detect_port() -> str:
     for p in ["/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyAMA0", "/dev/serial0"]:
         if _os.path.exists(p):
@@ -60,7 +62,7 @@ class MinitelSerial:
             raise RuntimeError("Port série non ouvert")
         encoded = text.encode("ascii", errors="replace")
         self.ser.write(encoded)
-        log.debug(f"Envoyé : {repr(text)}")
+        log.debug(f"Envoyé : {text!r}")
 
     def send_bytes(self, data: bytes):
         if not self.ser or not self.ser.is_open:
@@ -74,7 +76,7 @@ class MinitelSerial:
         raw = self.ser.read(1)
         if raw:
             char = raw.decode("ascii", errors="replace")
-            log.debug(f"Reçu : {repr(char)} (0x{raw[0]:02x})")
+            log.debug(f"Reçu : {char!r} (0x{raw[0]:02x})")
             return char
         return None
 
@@ -99,7 +101,7 @@ class MinitelSerial:
             elif 0x20 <= code <= 0x7E:
                 buf.append(char)
                 if echo:
-                    self.send_bytes(raw := char.encode("ascii"))
+                    self.send_bytes(char.encode("ascii"))
         return "".join(buf)
 
     # --- Séquences Videotex utilitaires ---
@@ -131,10 +133,10 @@ def loopback_test():
     received = ser.read(len(test_bytes))
     ser.close()
     if received == test_bytes:
-        log.info(f"LOOPBACK OK : {repr(received)}")
+        log.info(f"LOOPBACK OK : {received!r}")
         return True
     else:
-        log.error(f"LOOPBACK FAIL - envoyé: {repr(test_bytes)}, reçu: {repr(received)}")
+        log.error(f"LOOPBACK FAIL - envoyé: {test_bytes!r}, reçu: {received!r}")
         return False
 
 

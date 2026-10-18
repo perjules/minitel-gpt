@@ -9,14 +9,13 @@ Comportement :
   4. En cas de succès WiFi : coupe le hotspot, relance les services
 """
 
-import os
-import sys
-import time
-import subprocess
-import threading
 import logging
-from pathlib import Path
-from flask import Flask, render_template_string, request, jsonify, redirect
+import subprocess
+import sys
+import threading
+import time
+
+from flask import Flask, jsonify, render_template_string, request
 
 AP_SSID = "MinitelGPT-Setup"
 AP_PASSWORD = "minitelgpt"  # WPA2, min 8 chars
@@ -49,7 +48,8 @@ CAPTIVE_PROBES = (
 
 @app.before_request
 def captive_redirect():
-    from flask import request, redirect as _redir
+    from flask import redirect as _redir
+    from flask import request
     host = request.host.split(":")[0]
     path = request.path
     # Si on est en hotspot et que la requête ne vise pas déjà notre IP,
@@ -58,8 +58,8 @@ def captive_redirect():
         try:
             if hotspot_active():
                 return _redir(f"http://{AP_IP}/", code=302)
-        except Exception:
-            pass
+        except (OSError, subprocess.SubprocessError) as error:
+            log.debug("Hotspot status unavailable (%s)", type(error).__name__)
     if path in CAPTIVE_PROBES:
         return _redir(f"http://{AP_IP}/", code=302)
 
@@ -78,8 +78,8 @@ def is_connected() -> str | None:
         for line in out.splitlines():
             if "inet " in line:
                 return line.strip().split()[1].split("/")[0]
-    except Exception:
-        pass
+    except (OSError, subprocess.SubprocessError, IndexError) as error:
+        log.debug("WiFi address unavailable (%s)", type(error).__name__)
     return None
 
 
@@ -405,7 +405,7 @@ def monitor_loop():
                 try:
                     create_hotspot()
                     log.info(f"Hotspot actif - portail http://{AP_IP}")
-                except Exception as e:
+                except (OSError, subprocess.SubprocessError, RuntimeError) as e:
                     log.error(f"Échec création hotspot : {e}")
         time.sleep(CHECK_INTERVAL)
 

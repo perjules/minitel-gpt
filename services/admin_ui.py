@@ -3,31 +3,48 @@
 Interface d'administration MINITEL GPT - http://<ip>:8080  (mot de passe 13100)
 Navigation par onglets : Tableau de bord · Personnalités · Paramètres.
 """
+import hmac
 import json
+import logging
 import os
 import re
 import secrets
-import hmac
 import subprocess
 import threading
 import time
 import unicodedata
 from collections import OrderedDict
-from pathlib import Path
 from functools import wraps
-from flask import (Flask, render_template_string, request, redirect,
-                   url_for, session, jsonify, send_from_directory)
+from pathlib import Path
+
+from flask import (
+    Flask,
+    jsonify,
+    redirect,
+    render_template_string,
+    request,
+    send_from_directory,
+    session,
+    url_for,
+)
 from werkzeug.utils import secure_filename
 
 try:
-    from . import mistral_answers, pronote, pronote_answers, gmail_mail, memory_session, calculator
+    from . import (
+        calculator,
+        gmail_mail,
+        memory_session,
+        mistral_answers,
+        pronote,
+        pronote_answers,
+    )
 except ImportError:
+    import calculator
+    import gmail_mail
+    import memory_session
     import mistral_answers
     import pronote
     import pronote_answers
-    import gmail_mail
-    import memory_session
-    import calculator
 
 PROJ_DIR = Path(__file__).parent.parent
 ASSETS_DIR = PROJ_DIR / "assets"
@@ -37,6 +54,7 @@ KNOWLEDGE_DIR = PROJ_DIR / "config" / "knowledge"
 ENV_FILE = PROJ_DIR / ".env"
 LOGS_DIR = PROJ_DIR / "logs"
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "mistral")
+log = logging.getLogger(__name__)
 def admin_session_secret():
     configured = os.getenv("FLASK_SECRET", "")
     if configured and configured != "minitel-secret-1985":
@@ -99,7 +117,7 @@ def render_title_art(segments):
     l'aperçu admin). Retourne (lignes, tronqué)."""
     try:
         from pyfiglet import Figlet
-    except Exception as e:
+    except ImportError as e:
         raise RuntimeError(f"pyfiglet indisponible sur ce serveur ({e})")
     lines = []
     for seg in segments[:TITLE_ART_MAX_WORDS]:
@@ -198,7 +216,8 @@ def load_knowledge_blob(key):
     for f in sorted(folder.glob("*.txt")):
         try:
             txt = f.read_text(encoding="utf-8", errors="ignore").strip()
-        except Exception:
+        except OSError as error:
+            log.warning("Knowledge file unreadable (%s)", type(error).__name__)
             continue
         if not txt:
             continue
@@ -261,9 +280,7 @@ def is_real_key(k):
     k = (k or "").strip()
     if len(k) < 10:
         return False
-    if set(k) <= {"."}:
-        return False
-    return True
+    return not set(k) <= {"."}
 
 def mask_key(k):
     if not is_real_key(k):
@@ -313,18 +330,18 @@ def require_login(f):
 # ── Services ─────────────────────────────────────────────────────────────
 def restart_terminal():
     r = subprocess.run(["sudo", "systemctl", "restart", "minitel-chatgpt"],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, check=False)
     return r.returncode == 0
 
 def svc_status(name):
     return subprocess.run(["systemctl", "is-active", name],
-                          capture_output=True, text=True).stdout.strip()
+                          capture_output=True, text=True, check=False).stdout.strip()
 
 def ip_address():
     try:
-        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True).stdout
+        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True, check=False).stdout
         return out.split()[0] if out.split() else "?"
-    except Exception:
+    except OSError:
         return "?"
 
 def log_tail(name, n=40):
@@ -333,8 +350,8 @@ def log_tail(name, n=40):
         return "(pas de log)"
     try:
         return subprocess.run(["tail", f"-{n}", str(f)],
-                              capture_output=True, text=True).stdout
-    except Exception as e:
+                              capture_output=True, text=True, check=False).stdout
+    except OSError as e:
         return str(e)
 
 # ── Mise à jour de l'application (git) ────────────────────────────────────
@@ -344,9 +361,9 @@ def git(*args, timeout=60):
     """Exécute git dans le dossier projet. Retourne (rc, stdout, stderr)."""
     try:
         r = subprocess.run(["git", "-C", str(PROJ_DIR), *args],
-                           capture_output=True, text=True, timeout=timeout)
+                           capture_output=True, text=True, timeout=timeout, check=False)
         return r.returncode, r.stdout.strip(), r.stderr.strip()
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         return 1, "", str(e)
 
 def git_ready():
@@ -356,7 +373,7 @@ def git_ready():
 def current_version():
     if not git_ready():
         return "(non versionné)"
-    rc, out, _ = git("log", "-1", "--format=%h · %cd · %s",
+    _, out, _ = git("log", "-1", "--format=%h · %cd · %s",
                      "--date=format:%d/%m/%Y %H:%M")
     return out or "(inconnue)"
 
@@ -376,7 +393,7 @@ def restart_all():
     """Redémarre le terminal, puis l'admin de façon détachée (pour que la
     réponse HTTP parte avant que ce process ne soit tué)."""
     subprocess.run(["sudo", "systemctl", "restart", "minitel-chatgpt"],
-                   capture_output=True, text=True)
+                   capture_output=True, text=True, check=False)
     subprocess.Popen(["bash", "-c", "sleep 2; sudo systemctl restart admin-ui"],
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      start_new_session=True)
@@ -1086,7 +1103,7 @@ def preview_title_route():
     try:
         lines, truncated = render_title_art(segments)
         return jsonify(ok=True, lines=lines, truncated=truncated)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - Keep font failures in the JSON error response.
         return jsonify(ok=False, error=str(e))
 
 @app.route("/new-preset", methods=["POST"])
@@ -1133,7 +1150,7 @@ def gen_prompt_route():
         return jsonify(ok=False, error="Description vide")
     try:
         return jsonify(ok=True, prompt=generate_prompt(desc))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - Keep provider failures in the JSON error response.
         return jsonify(ok=False, error=str(e))
 
 @app.route("/test-preset", methods=["POST"])
@@ -1192,7 +1209,7 @@ def test_preset_route():
             if result.get("scene"):
                 response["scene"] = list(calculator.frames([to_minitel_ascii(s) for s in result["scene"]]))
         return jsonify(response)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - Isolate failures of the optional admin test integrations.
         return jsonify(ok=False, error=str(e))
 
 @app.route("/save-llm", methods=["POST"])

@@ -4,9 +4,11 @@ Filet de sécurité pour le test du hotspot.
 Après 6 min, si aucun réseau client n'est connecté, restaure Verrieres
 proprement (stoppe le wifi-manager le temps de la manœuvre).
 """
-import time, sys
+import sys
+import time
+
 sys.path.insert(0, "/home/minitel/minitel-gpt/services")
-from wifi_manager import client_connected, run, AP_CON_NAME
+from wifi_manager import AP_CON_NAME, client_connected, run
 
 LOG = "/home/minitel/minitel-gpt/logs/safety.log"
 def log(m):

@@ -52,7 +52,7 @@ DRAFT_RULES = (
 )
 CONTEXT_LIMIT = 12000
 DRAFT_LIMIT = 12000
-LITERAL_EDIT = re.compile(r"^\s*(ajouter|remplacer|a|r)\s*(\d+|tout)?\s*:", re.I)
+LITERAL_EDIT = re.compile(r"^\s*(ajouter|remplacer|a|r)\s*(\d+|tout)?\s*:", re.IGNORECASE)
 
 
 def literal_command(question):
@@ -651,8 +651,7 @@ class MailSession:
             raise GmailError("no_pending_draft")
         action, target = match[1].casefold(), (match[2] or "").casefold()
         text = question[match.end():]
-        if text.startswith(" "):
-            text = text[1:]
+        text = text.removeprefix(" ")
         body = previous["body"].removesuffix("\n\n" + SIGNATURE)
         spans = body_paragraphs(body)
         adding = action in {"a", "ajouter"}

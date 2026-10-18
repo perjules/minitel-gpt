@@ -8,11 +8,11 @@ from unittest.mock import Mock, patch
 from test_terminal_startup import FakeSerial, fn, screen_text
 
 from services import admin_ui as admin
+from services import memory_session
 from services import minitel_chatgpt as chat
 from services import mistral_answers as engine
 from services import pronote as pn
 from services import pronote_answers as pa
-from services import memory_session
 
 
 def final(text="Maths : exercice 2 pour demain."):

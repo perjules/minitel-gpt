@@ -6,10 +6,18 @@ Simulation 'lieu inconnu' avec filet de sécurité.
 3. Attend jusqu'à 5 min qu'une config réseau réussisse via le portail.
 4. Fallback : si rien, restaure Verrieres (config en dur) pour ne pas perdre le Pi.
 """
-import sys, time, subprocess
+import subprocess
+import sys
+import time
+
 sys.path.insert(0, "/home/minitel/minitel-gpt/services")
-from wifi_manager import (create_hotspot, stop_hotspot,
-                          set_clients_autoconnect, run, AP_CON_NAME)
+from wifi_manager import (
+    AP_CON_NAME,
+    create_hotspot,
+    run,
+    set_clients_autoconnect,
+    stop_hotspot,
+)
 
 LOG = "/home/minitel/minitel-gpt/logs/sim_wifi.log"
 FALLBACK_NET = "Verrieres"
@@ -48,7 +56,7 @@ try:
         log(f"=== SUCCES : connecte a '{success}' via le portail ===")
     else:
         log("=== TIMEOUT : aucune config recue ===")
-except Exception as e:
+except (OSError, subprocess.SubprocessError, RuntimeError) as e:
     log(f"ERREUR: {e}")
 finally:
     if not client_connected():

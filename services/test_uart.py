@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Test UART autonome - loopback et diagnostic complet."""
 
-import serial
-import time
 import sys
+import time
+
+import serial
 
 PORT = "/dev/ttyAMA0"
 BAUD = 1200
@@ -15,7 +16,7 @@ def check_port():
         exists = os.path.exists(port)
         try:
             target = os.readlink(port) if os.path.islink(port) else port
-        except Exception:
+        except OSError:
             target = port
         print(f"  {port}: {'OK' if exists else 'manquant'} -> {target}")
 
@@ -33,7 +34,7 @@ def loopback_test(port: str, baud: int):
             stopbits=serial.STOPBITS_ONE,
             timeout=2.0
         )
-    except Exception as e:
+    except (OSError, ValueError) as e:
         print(f"  ERREUR ouverture port : {e}")
         return False
 
@@ -44,10 +45,10 @@ def loopback_test(port: str, baud: int):
     ser.close()
 
     if received == test:
-        print(f"  SUCCES : recu={repr(received)}")
+        print(f"  SUCCES : recu={received!r}")
         return True
     else:
-        print(f"  ECHEC  : envoye={repr(test)}, recu={repr(received)}")
+        print(f"  ECHEC  : envoye={test!r}, recu={received!r}")
         return False
 
 
@@ -62,7 +63,7 @@ def minitel_ping(port: str, baud: int):
             stopbits=serial.STOPBITS_ONE,
             timeout=3.0
         )
-    except Exception as e:
+    except (OSError, ValueError) as e:
         print(f"  ERREUR : {e}")
         return
 
@@ -74,7 +75,7 @@ def minitel_ping(port: str, baud: int):
 
     received = ser.read(64)
     if received:
-        print(f"  Recu depuis Minitel : {repr(received)}")
+        print(f"  Recu depuis Minitel : {received!r}")
     else:
         print("  Rien recu du Minitel (normal si pas de saisie clavier)")
 

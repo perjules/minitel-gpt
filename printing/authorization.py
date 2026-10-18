@@ -1,6 +1,7 @@
 """Explicit authorization boundary for physical printing."""
 from dataclasses import dataclass, field
 from secrets import token_urlsafe
+
 from .document import PrintDocument
 
 

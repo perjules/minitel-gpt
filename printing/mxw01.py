@@ -127,7 +127,7 @@ class MXW01:
                     await client.write_gatt_char(CONTROL, command(0xAD, b"\\x00", checksum=False), response=False)
                     try:
                         await await_response(0xAA, max(15, image.height / 20))
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         raise TimeoutError(
                             "Printer did not acknowledge completion; paper may have printed"
                         ) from None

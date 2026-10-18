@@ -11,8 +11,8 @@ from test_terminal_startup import fn
 
 from services import admin_ui as admin
 from services import gmail_mail as mail
-from services import minitel_chatgpt as terminal
 from services import memory_session
+from services import minitel_chatgpt as terminal
 
 
 class RecipientAddressRoutingTests(unittest.TestCase):

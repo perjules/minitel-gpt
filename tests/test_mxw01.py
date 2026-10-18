@@ -1,5 +1,6 @@
 """Offline MXW01 protocol regression tests."""
 import unittest
+
 from printing.mxw01 import command, crc8, pack_image, response_packet
 
 
