@@ -375,60 +375,44 @@ class SessionPromptTests(unittest.TestCase):
                 with self.subTest(filename=filename, failure=failure), patch.object(Path, "read_text", read):
                     self.assert_suspended(person)
 
-    def test_weariness_flag_controls_final_block_for_each_kind_of_persona(self):
-        block = (rose.CONFIG / "rose_weariness_prompt.txt").read_text(encoding="utf-8")
+    def test_weariness_draft_is_never_loaded_or_injected_even_with_old_flag(self):
+        original_read = Path.read_text
+
+        def read(path, *args, **kwargs):
+            if path.name == "rose_weariness_prompt.txt":
+                raise AssertionError("Draft weariness must never be loaded")
+            return original_read(path, *args, **kwargs)
+
         for flag in (None, "0", "1"):
             for name, test in (("Jean-Marc", False), ("Bertrand", False), ("E1S1", True)):
-                with self.subTest(flag=flag, name=name), patch.dict(os.environ):
+                with self.subTest(flag=flag, name=name), patch.dict(os.environ), \
+                        patch.object(Path, "read_text", read):
                     os.environ.pop("ROSE_WEARINESS", None)
                     if flag is not None:
                         os.environ["ROSE_WEARINESS"] = flag
                     prompt = self.capture_prompt(rose.Session(name, test=test))
-                    self.assertEqual(block in prompt, flag == "1")
-                    if flag == "1":
-                        self.assertTrue(prompt.endswith(block))
-                        self.assertLess(prompt.index("Nom affiché"), prompt.index(block))
-                        if name == "Bertrand":
-                            self.assertLess(prompt.index("Préférence (asexual)"), prompt.index(block))
+                    self.assertNotIn("Module d'usure", prompt)
 
-    def test_prompt_blocks_are_frozen_at_entry_and_cleared_on_close(self):
+    def test_tempo_is_frozen_at_entry_and_cleared_on_close(self):
         person = copy.deepcopy(rose.catalogue()["personas"][0])
         data = {"personas": [person], "safewords": ["navet"]}
-        with patch.dict(os.environ, {"ROSE_WEARINESS": "1"}), \
-                patch.object(rose, "catalogue", return_value=data):
+        with patch.object(rose, "catalogue", return_value=data):
             session = rose.Session(person["name"])
         person["tempo"] = 99
         original_read = Path.read_text
 
         def read(path, *args, **kwargs):
-            if path.name in ("rose_tempo_prompt.txt", "rose_tempo_romantic_prompt.txt", "rose_weariness_prompt.txt"):
-                raise AssertionError("Session blocks must not be reloaded")
+            if path.name in ("rose_tempo_prompt.txt", "rose_tempo_romantic_prompt.txt"):
+                raise AssertionError("Session tempo must not be reloaded")
             return original_read(path, *args, **kwargs)
 
-        with patch.dict(os.environ, {"ROSE_WEARINESS": "0"}), patch.object(Path, "read_text", read):
+        with patch.object(Path, "read_text", read):
             first = self.capture_prompt(session)
             self.assertEqual(first, self.capture_prompt(session, "Bonjour"))
         self.assertEqual(session.profile["tempo"], 4)
         self.assertIn("4 premières réponses", first)
-        self.assertIn("Module d'usure", first)
         session.close("retour", billing=False)
         self.assertEqual(session.tempo_prompt, "")
-        self.assertEqual(session.weariness_prompt, "")
-
-    def test_unreadable_weariness_suspends_only_when_enabled(self):
-        original_read = Path.read_text
-        person = copy.deepcopy(rose.catalogue()["personas"][0])
-        for failure in (FileNotFoundError, PermissionError):
-            def read(path, *args, failure=failure, **kwargs):
-                if path.name == "rose_weariness_prompt.txt":
-                    raise failure("fixture")
-                return original_read(path, *args, **kwargs)
-
-            with self.subTest(failure=failure), patch.object(Path, "read_text", read):
-                with patch.dict(os.environ, {"ROSE_WEARINESS": "1"}):
-                    self.assert_suspended(person)
-                with patch.dict(os.environ, {"ROSE_WEARINESS": "0"}):
-                    self.capture_prompt(rose.Session(person["name"]))
 
 
 class ProviderTests(unittest.TestCase):

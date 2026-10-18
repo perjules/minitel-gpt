@@ -351,7 +351,7 @@ def log_tail(name, n=40):
     try:
         return subprocess.run(["tail", f"-{n}", str(f)],
                               capture_output=True, text=True, check=False).stdout
-    except OSError as e:
+    except (OSError, UnicodeError) as e:
         return str(e)
 
 # ── Mise à jour de l'application (git) ────────────────────────────────────
@@ -363,7 +363,7 @@ def git(*args, timeout=60):
         r = subprocess.run(["git", "-C", str(PROJ_DIR), *args],
                            capture_output=True, text=True, timeout=timeout, check=False)
         return r.returncode, r.stdout.strip(), r.stderr.strip()
-    except (OSError, subprocess.SubprocessError) as e:
+    except (OSError, subprocess.SubprocessError, UnicodeError) as e:
         return 1, "", str(e)
 
 def git_ready():
