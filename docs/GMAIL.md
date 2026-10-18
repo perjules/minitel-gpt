@@ -100,13 +100,16 @@ for an offline Pi with baseline `6687d04`; it contains no credentials.
 Start from a clean `develop` checkout; if the fast-forward fails, inspect the
 concurrent commits and integrate them normally. Do not reset/discard local work.
 The admin's existing update button follows `main`; do not use it for this prototype.
-The install script checks the **actual Pi's OS, Python >=3.10, running systemd and
+The install script checks the **actual Pi's OS, Python >=3.11, running systemd and
 systemd-creds >=250** before proceeding. Raspberry Pi OS Bookworm's Python 3.11 /
 systemd 252 meets the version requirements; an older image may need an OS upgrade.
-It also requires Debian's `python3-cryptography >=38`, avoiding a Rust build on
-ARMv6. The Google libraries use the existing shared `.venv` so PRONOTE remains installed.
-Unsupported encrypted credentials stop setup; **there is no plaintext fallback**.
-The first install prepares dependencies/helper only and does not restart services.
+All Python dependencies, including cryptography, live in the shared root-owned
+uv runtime; no Debian Python packages are inherited. Cryptography must have a
+compatible wheel; installation fails before switching services if none exists.
+Gmail's dependency extra preserves existing PRONOTE/printer extras. See
+[RUNTIME.md](RUNTIME.md) for setup and rollback. Unsupported encrypted credentials
+stop setup; **there is no plaintext fallback**. Installing the extra can restart
+running services, but it does not activate Gmail or change enrollment.
 
 In all commands below, replace `PI` with the Pi's hostname or IP address.
 Upload the Desktop client JSON over SSH (not through chat or the admin console).
@@ -191,7 +194,7 @@ It cannot send:
 sudo systemd-run --wait --pipe --collect --uid=minitel \
   --property=LoadCredentialEncrypted=gmail:/etc/credstore.encrypted/minitel-gmail \
   --property=PrivateMounts=yes --working-directory=/home/minitel/minitel-gpt \
-  /home/minitel/minitel-gpt/.venv/bin/python scripts/gmail_probe.py --renew
+  /opt/minitel-gpt/venv/bin/python scripts/gmail_probe.py --renew
 ```
 
 Successful output includes JSON like this (counts vary with your inbox), followed
@@ -517,9 +520,9 @@ account if disconnecting permanently; removing local ciphertext alone does not
 revoke Google's authorization. Never commit OAuth configuration, credentials or
 host keys. Default auth locations are all outside Git.
 
-Offline verification (use the existing shared venv with optional requirements):
+Offline verification (use a development checkout; see [TESTING.md](TESTING.md)):
 
 ```sh
-.venv/bin/python -m pytest -v
+uv run --locked --all-extras pytest -v
 bash -n scripts/install_gmail.sh
 ```

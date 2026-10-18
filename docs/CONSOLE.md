@@ -8,7 +8,7 @@ Depuis Bash sur le Pi, par SSH ou Raspberry Pi Connect :
 
 ```bash
 cd /home/minitel/minitel-gpt
-python3 scripts/terminal_console.py
+.venv/bin/python scripts/terminal_console.py
 ```
 
 Utiliser le Python qui possède les dépendances de l'installation. Si Gmail a

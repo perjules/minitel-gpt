@@ -355,7 +355,18 @@ def log_tail(name, n=40):
         return str(e)
 
 # ── Mise à jour de l'application (git) ────────────────────────────────────
-LAST_VERSION_FILE = PROJ_DIR / ".last_version"
+RUNTIME_STATE = Path("/var/lib/minitel-gpt/runtime.json")
+DEPLOYMENT_STATUS = Path("/var/lib/minitel-gpt/deployment.json")
+
+
+def runtime_branch():
+    try:
+        branch = json.loads(RUNTIME_STATE.read_text())["branch"]
+        if isinstance(branch, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", branch):
+            return branch
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return "main"
 
 def git(*args, timeout=60):
     """Exécute git dans le dossier projet. Retourne (rc, stdout, stderr)."""
@@ -378,53 +389,36 @@ def current_version():
     return out or "(inconnue)"
 
 def check_update():
-    """git fetch puis compare HEAD à origin/main. Retourne un dict."""
+    """Compare with the explicitly installed branch; deployment is handled separately."""
     if not git_ready():
         return {"ok": False, "msg": "Le code n'est pas un dépôt git sur le Pi."}
-    rc, _, err = git("fetch", "origin", "main")
+    branch = runtime_branch()
+    rc, _, err = git("fetch", "origin", branch)
     if rc != 0:
         return {"ok": False, "msg": "Échec de la vérification (Internet ?) : " + err}
-    rc, behind, _ = git("rev-list", "--count", "HEAD..origin/main")
+    rc, behind, _ = git("rev-list", "--count", f"HEAD..origin/{branch}")
     n = int(behind) if behind.isdigit() else 0
-    _, log, _ = git("log", "--format=%h  %s", "HEAD..origin/main")
+    _, log, _ = git("log", "--format=%h  %s", f"HEAD..origin/{branch}")
     return {"ok": True, "behind": n, "log": log}
 
-def restart_all():
-    """Redémarre le terminal, puis l'admin de façon détachée (pour que la
-    réponse HTTP parte avant que ce process ne soit tué)."""
-    subprocess.run(["sudo", "systemctl", "restart", "minitel-chatgpt"],
-                   capture_output=True, text=True, check=False)
-    subprocess.Popen(["bash", "-c", "sleep 2; sudo systemctl restart admin-ui"],
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     start_new_session=True)
-
 def do_update():
-    """Met à jour le code depuis origin/main puis redémarre les services."""
-    if not git_ready():
-        return False, "Le code n'est pas un dépôt git sur le Pi."
-    rc, prev, _ = git("rev-parse", "HEAD")
-    rc, _, err = git("fetch", "origin", "main")
-    if rc != 0:
-        return False, "Échec fetch : " + err
-    rc, out, err = git("reset", "--hard", "origin/main")
-    if rc != 0:
-        return False, "Échec reset : " + (err or out)
-    if prev:
-        LAST_VERSION_FILE.write_text(prev)
-    ensure_prompts()
-    restart_all()
-    return True, out
+    return queue_deployment("update")
 
 def do_rollback():
-    if not git_ready() or not LAST_VERSION_FILE.exists():
-        return False, "Aucune version précédente enregistrée."
-    prev = LAST_VERSION_FILE.read_text().strip()
-    rc, out, err = git("reset", "--hard", prev)
-    if rc != 0:
-        return False, "Échec : " + (err or out)
-    ensure_prompts()
-    restart_all()
-    return True, out
+    return queue_deployment("rollback")
+
+
+def queue_deployment(operation):
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "/usr/local/sbin/minitel-runtime", operation],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return False, "Gestionnaire uv indisponible ; relancer sudo bash install.sh."
+    if result.returncode:
+        return False, "Opération refusée ; consulter le journal minitel-deploy."
+    return True, "Opération planifiée ; suivre /deployment-status ou journalctl -u minitel-deploy."
 
 # ── Génération de prompt par IA ──────────────────────────────────────────
 def generate_prompt(description):
@@ -1337,8 +1331,7 @@ def check_update_route():
 def update_route():
     ok, msg = do_update()
     session.pop("update_log", None)
-    session["flash"] = ("Mise à jour appliquée - les services redémarrent (recharge la page dans ~10 s)."
-                        if ok else "Échec de la mise à jour : " + msg)
+    session["flash"] = msg if ok else "Échec de la mise à jour : " + msg
     session["flash_ok"] = ok
     return redirect(url_for("index"))
 
@@ -1346,10 +1339,18 @@ def update_route():
 @require_login
 def rollback_route():
     ok, msg = do_rollback()
-    session["flash"] = ("Version précédente restaurée - redémarrage en cours."
-                        if ok else "Échec : " + msg)
+    session["flash"] = msg if ok else "Échec : " + msg
     session["flash_ok"] = ok
     return redirect(url_for("index"))
+
+
+@app.route("/deployment-status")
+@require_login
+def deployment_status():
+    try:
+        return jsonify(json.loads(DEPLOYMENT_STATUS.read_text()))
+    except (OSError, ValueError):
+        return jsonify({"phase": "not_installed"})
 
 
 PRONOTE_HTML = """<!doctype html><html lang="fr"><meta charset="utf-8">

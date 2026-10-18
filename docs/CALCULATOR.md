@@ -129,5 +129,5 @@ sur le Pi ni de validation physique revendiqué. Le Minitel reste emballé; la v
 physique est en attente. Les mêmes prérequis/tests optionnels Gmail et PRONOTE restent :
 
 ```sh
-.venv/bin/python -m pytest -v
+uv run --locked --all-extras pytest -v
 ```

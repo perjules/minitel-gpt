@@ -113,6 +113,9 @@ s'affiche** pendant la frappe : c'est une sécurité.
 
 ### 3. Installer MINITEL GPT
 
+> Ce fork utilise un environnement uv partagé : voir [installation et migration](docs/RUNTIME.md).
+> Pour développer et tester : [guide de test](docs/TESTING.md).
+
 Une fois connecté au Pi, mettre à jour le système et installer **git** (qui sert
 ensuite à garder le Pi sur la dernière version) :
 
@@ -125,7 +128,7 @@ Télécharger le projet :
 
 ```bash
 cd /home/minitel
-git clone https://github.com/jherard-fr/minitel-gpt.git
+git clone https://github.com/perjules/minitel-gpt.git
 cd minitel-gpt
 ```
 
@@ -146,8 +149,7 @@ sudo systemctl restart minitel-chatgpt admin-ui wifi-manager
 clé API depuis l'admin (étape 4).
 
 Le script `install.sh` se charge de **tout** : paquets système, dépendance Python
-`pyfiglet` **et ses polices** (`figlet`, `toilet-fonts` : sur Raspberry Pi OS
-Trixie, `python3-pyfiglet` est livré sans aucune police), désactivation du
+`pyfiglet` **et ses polices** via le runtime uv partagé, désactivation du
 `dnsmasq` système (conflit hotspot), **redirection DNS du portail captif**
 (`config/dnsmasq-shared-captive.conf` copié dans
 `/etc/NetworkManager/dnsmasq-shared.d/`, sans quoi le téléphone n'ouvre pas le
@@ -156,8 +158,8 @@ portail tout seul), groupe `dialout` (accès au port série FTDI), création de
 (l'admin redémarre les services), et activation des 3 services systemd.
 
 > Le script tolère l'absence de réseau (`apt-get update` en échec non bloquant) :
-> il peut tourner hors ligne si les paquets ont été pré-installés, par exemple
-> au premier démarrage d'une carte préparée à l'avance.
+> une installation uv hors ligne nécessite également le binaire uv et un cache
+> complet des dépendances. Le démarrage des services ne télécharge rien.
 
 > Le dossier est un **clone git**, ce qui permet la mise à jour en un clic depuis
 > l'admin (onglet **Paramètres**). Ne pas remplacer les fichiers à la main.
@@ -264,7 +266,7 @@ un terminal Bash/SSH, sans ouvrir le port série : démarrage, historique, routa
 des fonctionnalités et pagination restent identiques. Depuis le dépôt :
 
 ```bash
-python3 scripts/terminal_console.py
+.venv/bin/python scripts/terminal_console.py
 ```
 
 Utiliser `.venv/bin/python` à la place de `python3` si les dépendances de

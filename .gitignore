@@ -14,3 +14,5 @@ config/pronote/
 .ruff_cache/
 config/admin-session.key
 config/rose-password.txt
+
+.venv.before-uv/

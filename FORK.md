@@ -194,7 +194,7 @@ and service restart independently of the locally stored chat personality.
 - Preserve useful answers, uncertainty, technical details and honest real status.
 - Explore narrowly scoped useful tools, such as search or printing, independently
   of the character's imaginary capabilities.
-- Keep Python dependencies and resource use modest, adopt an isolated `uv`
+- Keep Python dependencies and resource use modest, maintain a shared, isolated `uv`
   environment, and use Ruff plus proportionate integration/regression checks.
 
 These further steps are plans, not implemented features. Fictional hacking and telemetry never
@@ -207,6 +207,9 @@ Development takes place on `develop`. Stable changes reach `main` after physical
 Minitel validation. Valuable upstream fixes and improvements will be considered
 as the fork evolves.
 
+The shared runtime is documented in [docs/RUNTIME.md](docs/RUNTIME.md).
+For upstream merges, follow [docs/UPSTREAM_SYNC.md](docs/UPSTREAM_SYNC.md).
+
 ## Automated regression checks
 
 Pytest is the canonical test runner. See [the testing guide](docs/TESTING.md)
@@ -215,7 +218,7 @@ selection. Existing unittest-style tests remain compatible to minimize upstream
 merge churn. From a prepared environment:
 
 ```bash
-python3 -m pytest
+uv run --locked --all-extras pytest
 ```
 
 The checks run the conversation loop with a simulated UART and mocked provider

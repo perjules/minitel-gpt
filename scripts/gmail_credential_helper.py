@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/opt/minitel-gpt/venv/bin/python -I
 """Root-owned fixed-purpose helper. No arguments, arbitrary paths or token logs."""
 
 import fcntl
@@ -7,8 +7,8 @@ import os
 import sys
 from pathlib import Path
 
-# The installer copies the module here as root, never importing a writable checkout.
-sys.path.insert(0, "/usr/local/lib/minitel-gmail")
+# This file and gmail_auth.py are copied into the same root-owned release.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gmail_auth import GmailError, decrypt_info, encrypt_info
 
 

@@ -9,7 +9,7 @@ from scripts import terminal_console as console
 
 
 class GmailLauncherTests(unittest.TestCase):
-    def test_launch_uses_checkout_venv_and_delivers_credentials_without_recursion(self):
+    def test_launch_uses_shared_venv_and_delivers_credentials_without_recursion(self):
         with (
             patch.object(console, "__file__", "/tmp/checkout with spaces/scripts/terminal_console.py"),
             patch.object(Path, "is_file", return_value=True),
@@ -29,12 +29,21 @@ class GmailLauncherTests(unittest.TestCase):
         self.assertIn("--setenv=TERM=xterm-256color", command)
         self.assertIn("--setenv=MINITEL_MEMORY_DIR=/tmp/test memory", command)
         self.assertEqual(command[-2:], [
-            "/tmp/checkout with spaces/.venv/bin/python",
+            "/opt/minitel-gpt/venv/bin/python",
             "/tmp/checkout with spaces/scripts/terminal_console.py",
         ])
         self.assertNotIn("--gmail", command)
         self.assertNotIn("must-not-be-forwarded", " ".join(command))
         self.assertEqual(run.call_args.kwargs, {})
+
+    def test_development_console_falls_back_to_checkout_environment(self):
+        with (
+            patch.object(console, "__file__", "/tmp/checkout/scripts/terminal_console.py"),
+            patch.object(Path, "is_file", lambda path: str(path).startswith("/tmp/checkout/.venv")),
+            patch.object(console.subprocess, "call", return_value=0) as run,
+        ):
+            assert console.launch_gmail_console() == 0
+        assert run.call_args.args[0][-2] == "/tmp/checkout/.venv/bin/python"
 
     def test_missing_launcher_returns_actionable_error(self):
         with (

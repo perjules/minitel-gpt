@@ -17,10 +17,10 @@ cd /home/minitel/minitel-gpt
 sudo bash scripts/install_pronote.sh
 ```
 
-This optional script installs the adapter in `.venv`, keeps access to the
-existing system Python dependencies, and points `admin-ui` and
-`minitel-chatgpt` at that interpreter through systemd drop-ins. Both services
-restart. The normal installer and other installations remain unchanged.
+This optional script adds the pinned adapter to the shared root-owned uv runtime,
+preserving Gmail/printer dependencies. Running services restart after the new
+environment is prepared. All three services use the same interpreter. See
+[RUNTIME.md](RUNTIME.md) for migration, environment ownership and rollback.
 PRONOTE is disabled until you enable it in its admin page.
 
 “Dépendance installée : oui” means the tested SDK version is installed.
@@ -393,9 +393,9 @@ The baseline at `5e22118` passes 244 tests with the runtime and optional Gmail,
 PRONOTE and printing dependencies installed. Run the full offline suite and lint:
 
 ```bash
-.venv/bin/python -m pytest -v
-.venv/bin/ruff check services/pronote_records.py services/pronote_mode.py tests/test_pronote_expansion.py tests/test_pronote_terminal_mode.py
-.venv/bin/ruff check --select F services/pronote.py services/pronote_answers.py services/minitel_chatgpt.py scripts/pronote_setup.py
+uv run --locked --all-extras pytest -v
+uv run --locked --all-extras ruff check services/pronote_records.py services/pronote_mode.py tests/test_pronote_expansion.py tests/test_pronote_terminal_mode.py
+uv run --locked --all-extras ruff check --select F services/pronote.py services/pronote_answers.py services/minitel_chatgpt.py scripts/pronote_setup.py
 ```
 
 The expanded suite passes **284 tests**. Expansion tests use synthetic data and pinned real SDK objects for averages,

@@ -157,5 +157,5 @@ Les tests physiques restent en attente. Commande de régression, dans le venv é
 des dépendances optionnelles existantes :
 
 ```sh
-.venv/bin/python -m pytest -v
+uv run --locked --all-extras pytest -v
 ```

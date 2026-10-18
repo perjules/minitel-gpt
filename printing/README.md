@@ -9,10 +9,13 @@ From the project root:
 
 ```bash
 git pull --ff-only origin develop
-bash scripts/install_printer.sh
+sudo bash scripts/install_printer.sh
 ```
 
-The installer adds only `bleak` and `pillow` to the project virtual environment.\nText rendering also requires a Unicode TrueType font, normally provided by\n`fonts-dejavu-core` on Raspberry Pi OS (`sudo apt install fonts-dejavu-core` if absent).\nAccented French text and common punctuation are rendered as glyphs, not stripped.
+The installer adds the printer extra (`bleak` and `Pillow`) to the shared uv
+runtime, preserving Gmail and PRONOTE. It also installs BlueZ, DejaVu fonts and
+native image build prerequisites through apt. Accented French text and common
+punctuation are rendered as glyphs, not stripped. See [runtime setup](../docs/RUNTIME.md).
 It does not modify Bluetooth controller settings or enable printing at startup.
 
 ## Preview (no Bluetooth needed)
@@ -51,8 +54,8 @@ sudo btmgmt power on
 ## Offline tests
 
 ```bash
-.venv/bin/python -m pytest tests/test_printing.py -v
-.venv/bin/python -m pytest tests/test_mxw01.py -v
+uv run --locked --all-extras pytest tests/test_printing.py -v
+uv run --locked --all-extras pytest tests/test_mxw01.py -v
 ```
 
 ## Limitations and safety
@@ -88,7 +91,7 @@ Bluetooth status and actual completion remain authoritative. The terminal may
 be busy until the print attempt completes. The extension does not modify
 Bluetooth controller settings; BLE-only setup may still be required on the Pi.
 
-Run `.venv/bin/python -m pytest tests/test_printing_session.py -v`
+Run `uv run --locked --all-extras pytest tests/test_printing_session.py -v`
 and validate `IMPRIMER` in the terminal console before testing the physical
 Minitel. Hardware testing has shown partial printing and prolonged BLE writes on longer documents. The single-connection multi-section protocol remains to be validated on the physical printer.
 

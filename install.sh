@@ -3,7 +3,12 @@
 # Prérequis : avoir cloné le dépôt dans /home/minitel/minitel-gpt
 #   cd /home/minitel && git clone https://github.com/jherard-fr/minitel-gpt.git
 # Usage : sudo bash install.sh
-set -e
+set -euo pipefail
+
+if [[ "$EUID" -ne 0 ]]; then
+  echo "Run with sudo on the Raspberry Pi." >&2
+  exit 1
+fi
 
 PROJ_DIR="/home/minitel/minitel-gpt"
 SERVICE_DIR="/etc/systemd/system"
@@ -17,23 +22,17 @@ echo "[1/7] Paquets système..."
 apt-get update -q || echo "      (pas de réseau : index apt non mis à jour)"
 apt-get install -y \
   git \
-  python3-serial python3-requests python3-flask python3-dotenv python3-pip \
+  python3 python3-venv curl ca-certificates \
   dnsmasq-base iw minicom \
   figlet toilet-fonts
 #   git         : mise à jour de l'app depuis l'admin web (git fetch/reset)
-#   python3-*   : pyserial (port Minitel), requests (Mistral), flask + dotenv (admin)
-#   python3-pip : repli pour pyfiglet (absent par défaut sur Pi OS Lite)
+#   python3     : installed interpreter; uv manages all application libraries
 #   dnsmasq-base + iw : hotspot WiFi de provisioning
 #   minicom     : utilitaire de debug série (optionnel)
 #   figlet + toilet-fonts : polices du titre ASCII. Sur Trixie, python3-pyfiglet
 #               est livré SANS police (simples Recommends) -> aperçu en erreur.
 
-# ── Dépendances Python (pyfiglet : titre ASCII de l'accueil) ────────────────
-echo "[2/7] Paquets Python..."
-# De préférence via apt (pas de --break-system-packages) ; sinon pip en repli.
-if ! apt-get install -y python3-pyfiglet 2>/dev/null; then
-  python3 -m pip install pyfiglet --break-system-packages
-fi
+# Python dependencies are installed together by install_runtime.sh below.
 
 # ── Désactiver le dnsmasq système (conflit port 53 avec le hotspot) ─────────
 echo "[3/7] Nettoyage dnsmasq système..."
@@ -48,7 +47,7 @@ cp "$PROJ_DIR/config/dnsmasq-shared-captive.conf" /etc/NetworkManager/dnsmasq-sh
 echo "[4/7] Permissions et répertoires..."
 usermod -a -G dialout minitel                 # accès à /dev/ttyUSB0 (FTDI)
 mkdir -p "$PROJ_DIR/logs" "$PROJ_DIR/config/knowledge"
-chown -R minitel:minitel "$PROJ_DIR"
+chown -R --no-dereference minitel:minitel "$PROJ_DIR"
 
 # ── Personnalités : prompts.json est local (gitignoré) ──────────────────────
 echo "[5/7] Initialisation des personnalités..."
@@ -77,10 +76,7 @@ visudo -c -f /etc/sudoers.d/minitel-gpt        # autorise systemctl restart des 
 
 # ── Services systemd ────────────────────────────────────────────────────────
 echo "[7/7] Services systemd..."
-cp "$PROJ_DIR/config/minitel-chatgpt.service" "$SERVICE_DIR/"
-cp "$PROJ_DIR/config/wifi-manager.service"    "$SERVICE_DIR/"
-cp "$PROJ_DIR/config/admin-ui.service"        "$SERVICE_DIR/"
-systemctl daemon-reload
+bash "$PROJ_DIR/scripts/install_runtime.sh" "$@"
 systemctl enable minitel-chatgpt.service wifi-manager.service admin-ui.service
 
 echo ""

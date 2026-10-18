@@ -326,9 +326,9 @@ modèle existant `MISTRAL_MODEL` (défaut `mistral-small-latest`), température 
 180 tokens, une seule tentative, timeout 30 s maximum. Aucun test physique.
 
 ```bash
-.venv/bin/python -m pytest -q
-.venv/bin/ruff check services/rose.py services/rose_terminal.py scripts/rose_console.py tests/test_rose.py tests/test_rose_assets.py
-.venv/bin/ruff check --select F services/minitel_chatgpt.py services/console_terminal.py
+uv run --locked --all-extras pytest -q
+uv run --locked --all-extras ruff check services/rose.py services/rose_terminal.py scripts/rose_console.py tests/test_rose.py tests/test_rose_assets.py
+uv run --locked --all-extras ruff check --select F services/minitel_chatgpt.py services/console_terminal.py
 ```
 
 Avec la configuration autorisée du propriétaire, essayer les deux vanilla et

@@ -10,33 +10,13 @@ if [[ "${1:-}" != '' && "${1:-}" != '--activate' ]] || [[ "$#" -gt 1 ]]; then
   echo 'Usage: sudo bash scripts/install_gmail.sh [--activate]' >&2
   exit 1
 fi
-python3 - "$GMAIL_PROJECT" <<'PY'
+bash "$GMAIL_PROJECT/scripts/install_runtime.sh" --extra gmail
+/opt/minitel-gpt/venv/bin/python -I - <<'PY'
 import sys
-sys.path.insert(0, sys.argv[1])
-from services.gmail_auth import GmailError, systemd_preflight
-if sys.version_info < (3, 10):
-    sys.exit('Gmail requires Python >=3.10. Upgrade the Pi OS first; no plaintext fallback.')
-try:
-    print(systemd_preflight())
-except GmailError:
-    sys.exit('Running systemd/systemd-creds >=250 required. Upgrade OS first; no plaintext fallback.')
+sys.path.insert(0, "/opt/minitel-gpt/current/root")
+from gmail_auth import systemd_preflight
+print(systemd_preflight())
 PY
-apt-get update
-apt-get install -y python3-venv python3-cryptography
-# Debian's ARM package avoids a Rust build on the Pi Zero; Google requires >=38.
-python3 - <<'PY'
-import cryptography
-if int(cryptography.__version__.split('.')[0]) < 38:
-    raise SystemExit('Upgrade OS: python3-cryptography >=38 required.')
-PY
-if [[ ! -x "$GMAIL_PROJECT/.venv/bin/python" ]]; then
-  python3 -m venv --system-site-packages "$GMAIL_PROJECT/.venv"
-fi
-"$GMAIL_PROJECT/.venv/bin/python" -m pip install -r "$GMAIL_PROJECT/requirements-gmail.txt"
-chown -R minitel:minitel "$GMAIL_PROJECT/.venv"
-install -d -m 0755 /usr/local/lib/minitel-gmail /usr/local/libexec
-install -o root -g root -m 0644 "$GMAIL_PROJECT/services/gmail_auth.py" /usr/local/lib/minitel-gmail/gmail_auth.py
-install -o root -g root -m 0755 "$GMAIL_PROJECT/scripts/gmail_credential_helper.py" /usr/local/libexec/minitel-gmail-credential
 install -d -o root -g root -m 0700 /etc/minitel-gmail /etc/credstore.encrypted
 # Restrict sudo to this root-owned, zero-argument helper; token values travel via pipes.
 printf '%s\n' 'minitel ALL=(root) NOPASSWD: /usr/local/libexec/minitel-gmail-credential ""' > /etc/sudoers.d/minitel-gmail
@@ -53,10 +33,10 @@ if [[ ! -f /etc/credstore.encrypted/minitel-gmail ]]; then
   exit 1
 fi
 # Verify ciphertext silently before enabling; no token printing.
-python3 - "$GMAIL_PROJECT" <<'PY'
+/opt/minitel-gpt/venv/bin/python -I - "$GMAIL_PROJECT" <<'PY'
 import sys
-sys.path.insert(0, sys.argv[1])
-from services.gmail_auth import decrypt_info
+sys.path.insert(0, "/opt/minitel-gpt/current/root")
+from gmail_auth import decrypt_info
 decrypt_info()
 PY
 for GMAIL_SERVICE in minitel-chatgpt admin-ui; do
@@ -68,8 +48,6 @@ After=systemd-tmpfiles-setup.service
 Environment=GMAIL_ENABLED=1
 LoadCredentialEncrypted=gmail:/etc/credstore.encrypted/minitel-gmail
 PrivateMounts=yes
-ExecStart=
-ExecStart=$GMAIL_PROJECT/.venv/bin/python $GMAIL_PROJECT/services/${GMAIL_SERVICE//-/_}.py
 EOF
 done
 systemctl daemon-reload

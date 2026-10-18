@@ -13,7 +13,9 @@ from pathlib import Path
 def launch_gmail_console():
     """Deliver existing encrypted credentials to an unprivileged console."""
     checkout = Path(__file__).resolve().parents[1]
-    python = checkout / ".venv/bin/python"
+    python = Path("/opt/minitel-gpt/venv/bin/python")
+    if not python.is_file():
+        python = checkout / ".venv/bin/python"
     if not python.is_file():
         python = Path(sys.executable)
     command = [
