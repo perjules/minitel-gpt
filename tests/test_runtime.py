@@ -163,7 +163,7 @@ def test_one_service_crashing_after_start_does_not_commit_the_release(manager):
 
 
 def test_repeated_install_preserves_previous_pair_without_rebuilding(manager, monkeypatch):
-    before, active = release(manager, "old"), release(manager, "active", ["gmail"])
+    before, active = release(manager, "old"), release(manager, "active", ["gmail", "printer"])
     old = {"active": active, "previous": before, "branch": "develop"}
     runtime.atomic_json(manager.state / "runtime.json", old)
     manager.activate(active)
@@ -173,6 +173,8 @@ def test_repeated_install_preserves_previous_pair_without_rebuilding(manager, mo
     manager.install([], None)
     assert manager.read() == old
     prepare.assert_not_called()
+    assert any(call.args[0] == ["apt-get", "install", "-y", "bluez", "fonts-dejavu-core", "libjpeg-dev", "zlib1g-dev"]
+               for call in manager.command.call_args_list)
 
 
 @pytest.mark.parametrize("cause", ["python_upgrade", "broken_import"])

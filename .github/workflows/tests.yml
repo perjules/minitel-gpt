@@ -43,4 +43,7 @@ jobs:
       - name: Lint Python
         run: uv run --locked --all-extras ruff check .
       - name: Check installer syntax
-        run: bash -n install.sh scripts/install_*.sh
+        run: |
+          for installer in install.sh scripts/install_*.sh; do
+            bash -n "$installer"
+          done

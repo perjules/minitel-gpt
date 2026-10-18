@@ -293,6 +293,9 @@ PrivateMounts=yes
             raise RuntimeError("Switch the checkout to the selected branch, or pass its current branch with --branch")
         commit = self.git("rev-parse", "HEAD")
         extras = self.selected_extras(requested, old)
+        # Legacy detection and explicit --extra must provision the same native prerequisites.
+        if "printer" in extras:
+            self.command(["apt-get", "install", "-y", "bluez", "fonts-dejavu-core", "libjpeg-dev", "zlib1g-dev"])
         active = old.get("active", {})
         reusable = active.get("commit") == commit and active["extras"] == extras and active.get("python") == self.python_version()
         if reusable:

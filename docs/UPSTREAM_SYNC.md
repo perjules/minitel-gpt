@@ -95,7 +95,9 @@ uv sync --locked --all-extras
 uv run --locked --all-extras pytest
 uv run --locked --all-extras ruff check .
 uv run --locked --all-extras python scripts/export_requirements.py --check
-bash -n install.sh scripts/install_*.sh
+for installer in install.sh scripts/install_*.sh; do
+    bash -n "$installer" || exit 1
+done
 git diff --check
 ```
 

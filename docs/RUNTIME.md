@@ -85,7 +85,9 @@ boundaries. To synchronize after a manual clean source update, rerun `install.sh
 ## ARM and offline setup
 
 The installer supplies C compiler/Python/libffi headers because some 32-bit ARM
-packages have no PyPI wheels. Printer setup adds JPEG/zlib headers and DejaVu fonts.
+packages have no PyPI wheels. Whenever the selected extras include the printer,
+the common runtime installer adds BlueZ, JPEG/zlib headers and DejaVu fonts. This
+also covers automatically detected printer installations during migration.
 Build concurrency is limited to one. Cryptography is wheel-only to avoid an
 unexpected Rust build on a small Pi; an unavailable wheel fails preparation while
 the active environment remains untouched. There is no fallback to apt Python
