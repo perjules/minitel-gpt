@@ -18,7 +18,7 @@ class PromptAssetTests(unittest.TestCase):
         self.assertIn("Ne déduis ni genre ni orientation du participant", prompt)
         self.assertIn("Respecte les refus et les changements de sujet", prompt)
         self.assertIn("Incarne simplement la personne décrite", prompt)
-        self.assertIn("Réponds honnêtement aux questions directes", prompt)
+        self.assertIn("Réponds honnêtement aux questions directes", " ".join(prompt.split()))
         self.assertIn("Ne prétends pas voir le participant", prompt)
         self.assertIn("Les mineurs", prompt)
         self.assertIn("humiliation dégradante", prompt)
@@ -38,6 +38,17 @@ class PromptAssetTests(unittest.TestCase):
                     value = module.get(field)
                     self.assertIsInstance(value, str)
                     self.assertTrue(value.strip())
+
+    def test_tempo_and_weariness_templates_keep_their_structural_lines(self):
+        tempo_heading = "Consigne de tempo — insérée par l'orchestrateur après la voix du profil ;"
+        for filename in ("rose_tempo_prompt.txt", "rose_tempo_romantic_prompt.txt"):
+            with self.subTest(filename=filename):
+                prompt = (rose.CONFIG / filename).read_text(encoding="utf-8")
+                self.assertEqual(prompt.splitlines()[0], tempo_heading)
+                self.assertIn("{tempo}", prompt)
+        weariness = (rose.CONFIG / "rose_weariness_prompt.txt").read_text(encoding="utf-8")
+        self.assertEqual(weariness.splitlines()[0],
+                         "Module d'usure — charge optionnelle, réservée à l'orchestrateur.")
 
 
 if __name__ == "__main__":

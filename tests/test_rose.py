@@ -288,6 +288,149 @@ class HostTests(unittest.TestCase):
         self.assertEqual(sum(int(f)*100 + int(c) for f, c in amounts), normal.total)
 
 
+class SessionPromptTests(unittest.TestCase):
+    def capture_prompt(self, session, text=None):
+        model = Mock(return_value=rose.Reply("Bonsoir."))
+        job = session.start(model, text)
+        job.thread.join(1)
+        self.assertFalse(job.thread.is_alive())
+        session.receive(job.output.get_nowait(), text)
+        model.assert_called_once()
+        return model.call_args.args[0]
+
+    def assert_suspended(self, person):
+        data = {"personas": [person], "safewords": ["navet"]}
+        with patch.object(rose, "catalogue", return_value=data), \
+                patch.object(terminal, "gate", return_value=(True, "submit")), \
+                patch.object(rose, "bill") as prepare_bill, \
+                patch.object(terminal, "show_bill") as show_bill:
+            model = Mock()
+            term = KeyTerm([])
+            self.assertEqual(terminal.run(term, person["name"], model), ("retour", None))
+            model.assert_not_called()
+            model.classify_name.assert_not_called()
+            prepare_bill.assert_not_called()
+            show_bill.assert_not_called()
+            self.assertIn("Mise en relation suspendue", str(term.rows))
+
+    def test_tempo_selects_template_substitutes_every_placeholder_and_follows_voice(self):
+        for name, filename, other in (
+                ("Jean-Marc", "rose_tempo_prompt.txt", "Variante romantique"),
+                ("Bertrand", "rose_tempo_romantic_prompt.txt", "attentes feintes")):
+            with self.subTest(name=name), patch.dict(os.environ, {"ROSE_WEARINESS": "0"}):
+                session = rose.Session(name)
+                template = (rose.CONFIG / filename).read_text(encoding="utf-8")
+                block = template.replace("{tempo}", str(session.profile["tempo"]))
+                prompt = self.capture_prompt(session)
+                self.assertIn(block, prompt)
+                self.assertNotIn("{tempo}", prompt)
+                self.assertNotIn(other, prompt)
+                self.assertLess(prompt.index(session.profile["voice"]), prompt.index(block))
+                self.assertLess(prompt.index(block), prompt.index("Nom affiché"))
+
+    def test_zero_missing_and_test_grid_tempos_do_not_read_or_inject_templates(self):
+        original_read = Path.read_text
+
+        def read(path, *args, **kwargs):
+            if path.name in ("rose_tempo_prompt.txt", "rose_tempo_romantic_prompt.txt"):
+                raise AssertionError("Zero tempo must not read a template")
+            return original_read(path, *args, **kwargs)
+
+        for missing in (False, True):
+            person = copy.deepcopy(rose.catalogue()["personas"][0])
+            person["tempo"] = 0
+            if missing:
+                del person["tempo"]
+            data = {"personas": [person], "safewords": ["navet"]}
+            with self.subTest(missing=missing), patch.object(rose, "catalogue", return_value=data), \
+                    patch.object(Path, "read_text", read):
+                self.assertNotIn("Consigne de tempo", self.capture_prompt(rose.Session(person["name"])))
+        people = rose.catalogue(test=True)["personas"]
+        self.assertEqual(len(people), 25)
+        for person in people:
+            with self.subTest(name=person["name"]), patch.object(Path, "read_text", read):
+                self.assertEqual(person["tempo"], 0)
+                self.assertNotIn("Consigne de tempo",
+                                 self.capture_prompt(rose.Session(person["name"], test=True)))
+
+    def test_invalid_tempo_suspends_without_generation_or_billing(self):
+        for invalid in ("3", -1, 3.0, True, None):
+            person = copy.deepcopy(rose.catalogue()["personas"][0])
+            person["tempo"] = invalid
+            with self.subTest(tempo=invalid):
+                self.assert_suspended(person)
+
+    def test_missing_or_unreadable_selected_tempo_template_suspends(self):
+        original_read = Path.read_text
+        for asexual, filename in ((False, "rose_tempo_prompt.txt"),
+                                  (True, "rose_tempo_romantic_prompt.txt")):
+            person = copy.deepcopy(rose.catalogue()["personas"][0])
+            person["asexual"] = asexual
+            for failure in (FileNotFoundError, PermissionError):
+                def read(path, *args, filename=filename, failure=failure, **kwargs):
+                    if path.name == filename:
+                        raise failure("fixture")
+                    return original_read(path, *args, **kwargs)
+
+                with self.subTest(filename=filename, failure=failure), patch.object(Path, "read_text", read):
+                    self.assert_suspended(person)
+
+    def test_weariness_flag_controls_final_block_for_each_kind_of_persona(self):
+        block = (rose.CONFIG / "rose_weariness_prompt.txt").read_text(encoding="utf-8")
+        for flag in (None, "0", "1"):
+            for name, test in (("Jean-Marc", False), ("Bertrand", False), ("E1S1", True)):
+                with self.subTest(flag=flag, name=name), patch.dict(os.environ):
+                    os.environ.pop("ROSE_WEARINESS", None)
+                    if flag is not None:
+                        os.environ["ROSE_WEARINESS"] = flag
+                    prompt = self.capture_prompt(rose.Session(name, test=test))
+                    self.assertEqual(block in prompt, flag == "1")
+                    if flag == "1":
+                        self.assertTrue(prompt.endswith(block))
+                        self.assertLess(prompt.index("Nom affiché"), prompt.index(block))
+                        if name == "Bertrand":
+                            self.assertLess(prompt.index("Préférence (asexual)"), prompt.index(block))
+
+    def test_prompt_blocks_are_frozen_at_entry_and_cleared_on_close(self):
+        person = copy.deepcopy(rose.catalogue()["personas"][0])
+        data = {"personas": [person], "safewords": ["navet"]}
+        with patch.dict(os.environ, {"ROSE_WEARINESS": "1"}), \
+                patch.object(rose, "catalogue", return_value=data):
+            session = rose.Session(person["name"])
+        person["tempo"] = 99
+        original_read = Path.read_text
+
+        def read(path, *args, **kwargs):
+            if path.name in ("rose_tempo_prompt.txt", "rose_tempo_romantic_prompt.txt", "rose_weariness_prompt.txt"):
+                raise AssertionError("Session blocks must not be reloaded")
+            return original_read(path, *args, **kwargs)
+
+        with patch.dict(os.environ, {"ROSE_WEARINESS": "0"}), patch.object(Path, "read_text", read):
+            first = self.capture_prompt(session)
+            self.assertEqual(first, self.capture_prompt(session, "Bonjour"))
+        self.assertEqual(session.profile["tempo"], 4)
+        self.assertIn("4 premières réponses", first)
+        self.assertIn("Module d'usure", first)
+        session.close("retour", billing=False)
+        self.assertEqual(session.tempo_prompt, "")
+        self.assertEqual(session.weariness_prompt, "")
+
+    def test_unreadable_weariness_suspends_only_when_enabled(self):
+        original_read = Path.read_text
+        person = copy.deepcopy(rose.catalogue()["personas"][0])
+        for failure in (FileNotFoundError, PermissionError):
+            def read(path, *args, failure=failure, **kwargs):
+                if path.name == "rose_weariness_prompt.txt":
+                    raise failure("fixture")
+                return original_read(path, *args, **kwargs)
+
+            with self.subTest(failure=failure), patch.object(Path, "read_text", read):
+                with patch.dict(os.environ, {"ROSE_WEARINESS": "1"}):
+                    self.assert_suspended(person)
+                with patch.dict(os.environ, {"ROSE_WEARINESS": "0"}):
+                    self.capture_prompt(rose.Session(person["name"]))
+
+
 class ProviderTests(unittest.TestCase):
     def test_name_classifier_is_a_small_isolated_strict_label_request(self):
         for name, raw, expected in [("Robert", "M", "M"), ("Alice", "f", "F"),
@@ -647,14 +790,15 @@ class IntegrationTests(unittest.TestCase):
             self.assertFalse(rose.test_entry(text))
         normal = rose.Session("Jacqueline")
         self.assertEqual(normal.profile["id"], "jacqueline")
-        self.assertEqual(rose.Session("Test B", test=True).profile["id"], "test-b")
+        people = rose.catalogue(test=True)["personas"]
+        self.assertEqual(rose.Session("E1S2", test=True).profile["id"], "test-e1s2")
         unknown = rose.Session("Jacqueline", test=True)
-        self.assertIn(unknown.profile["id"], {"test-a", "test-b"})
+        self.assertIn(unknown.profile["id"], {p["id"] for p in people})
         self.assertEqual(unknown.alias, "Jacqueline")
 
-    def test_test_roster_uses_stub_payload_and_same_gate_without_bill(self):
+    def test_test_roster_uses_grid_payload_and_same_gate_without_bill(self):
         term = KeyTerm(typed("fixture") + typed("F") + [("fn", chat.K_SUITE)]
-                       + typed("Test B") + typed("Bonjour") + typed("RETOUR"))
+                       + typed("E1S2") + typed("Bonjour") + typed("RETOUR"))
         prompts = []
 
         def model(prompt, history):
@@ -664,15 +808,18 @@ class IntegrationTests(unittest.TestCase):
         adapter = Mock(ready=lambda: True, side_effect=model)
         with patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}), patch.object(terminal, "wait", side_effect=completed), patch.object(terminal, "show_bill", return_value="done") as billing:
             terminal.run(term, "", adapter, test=True)
-        self.assertIn("Catalogue 1/1", str(term.rows))
-        self.assertNotIn("Catalogue 2/", str(term.rows))
+        people = [p for p in rose.catalogue(test=True)["personas"] if p["gender"] == "femme"]
+        pages = (len(people) + 1) // 2
+        self.assertIn(f"Catalogue 1/{pages}", str(term.rows))
+        self.assertIn(f"Catalogue 2/{pages}", str(term.rows))
         self.assertEqual(len(prompts), 2)
-        self.assertTrue(all("Profil provisoire B" in prompt for prompt in prompts))
+        voice = rose.Session("E1S2", test=True).profile["voice"]
+        self.assertTrue(all(voice in prompt for prompt in prompts))
         self.assertTrue(all("Français uniquement" in prompt for prompt in prompts))
         adapter.classify_name.assert_not_called()
         billing.assert_not_called()
         with patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}), patch.object(terminal, "show_bill") as billing:
-            terminal.run(KeyTerm(typed("wrong")), "Test A", adapter, test=True)
+            terminal.run(KeyTerm(typed("wrong")), "E1S1", adapter, test=True)
         self.assertEqual(len(prompts), 2)
         billing.assert_not_called()
 
@@ -700,7 +847,7 @@ class IntegrationTests(unittest.TestCase):
                   patch.object(terminal, "wait", side_effect=completed),
                   patch.object(rose, "bill") as prepare_bill,
                   patch.object(terminal, "show_bill") as show_bill):
-                action, pending = terminal.run(term, "Test A", model, test=True)
+                action, pending = terminal.run(term, "E1S1", model, test=True)
             self.assertEqual(action, expected)
             self.assertIsNone(pending)
             prepare_bill.assert_not_called()
