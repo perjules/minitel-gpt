@@ -5,14 +5,18 @@ clavier ni écran. Il utilise le même `rose.Session`, le même modèle Mistral,
 les mêmes voix, modules, tempo, limites et historique borné. Il ne charge pas
 le module d'usure, toujours désactivé. Aucun actif de personnalité n'est modifié.
 
-Créer un fichier UTF-8, par exemple `essai.json` :
+Le dossier `rose_scripts/`, à la racine du dépôt, contient un exemple UTF-8
+prêt à lancer : `rose_scripts/example.json`. Il utilise le profil neutre de
+test `E1S1` et vérifie notamment le souvenir du prénom dans la même session.
+Copier ce fichier pour préparer d'autres essais :
 
 ```json
 {
-  "persona": "Jean-Marc",
+  "persona": "E1S1",
   "prompts": [
-    "Bonsoir.",
-    "Parlez-moi de votre soirée."
+    "Bonsoir. Je m'appelle Camille.",
+    "J'aime les vieux films et les soirées tranquilles. Et vous ?",
+    "Vous vous souvenez de mon prénom ?"
   ]
 }
 ```
@@ -20,10 +24,10 @@ Créer un fichier UTF-8, par exemple `essai.json` :
 Depuis le dépôt, après activation de `.venv` :
 
 ```bash
-python scripts/rose_console.py --script essai.json
-python scripts/rose_console.py -s essai.json -i
-python scripts/rose_console.py -s essai.json --mock
-python scripts/rose_console.py -s essai.json --log logs/rose/mon-essai.jsonl
+python scripts/rose_console.py --script rose_scripts/example.json
+python scripts/rose_console.py -s rose_scripts/example.json -i
+python scripts/rose_console.py -s rose_scripts/example.json --mock
+python scripts/rose_console.py -s rose_scripts/example.json --log logs/rose/mon-essai.jsonl
 ```
 
 ## Exécution
