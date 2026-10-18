@@ -30,6 +30,10 @@ checkout. The helper retains its fixed command and encrypted credential flow.
 uv is maintenance tooling, not part of boot. The initial bootstrap uses OS Python
 with stdlib only to create the first environment; the installed deployment and
 credential helpers subsequently use the same environment as the services.
+The bootstrap/CI version is pinned to uv 0.13.0. Project commands also accept the
+previously tested 0.12.23 series; 0.13 is supported rather than rejected by a
+0.12-only upper bound. Use the installer on the Pi, not bare `uv sync`, so the
+shared runtime path and installed extras are selected correctly.
 
 ## Fresh install or migration on the Pi
 
