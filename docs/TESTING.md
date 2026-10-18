@@ -7,28 +7,30 @@ behavior. CI runs on Python 3.11 and 3.12.
 
 ## Development environment
 
-On a development machine, create an environment and install the complete test
-dependencies, including the pinned Gmail and PRONOTE SDKs:
+Install the uv version recorded in `config/uv-version`, then from a development
+checkout run:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements-dev.txt
-.venv/bin/python -m pytest
-.venv/bin/python -m ruff check .
+uv sync --locked --all-extras
+uv run --locked --all-extras pytest
+uv run --locked --all-extras ruff check .
+uv run --locked --all-extras python scripts/export_requirements.py --check
 ```
 
-If a prepared environment already contains the runtime and optional test
-dependencies, only pytest needs adding:
-
-```bash
-.venv/bin/python -m pip install 'pytest>=9,<10'
-.venv/bin/python -m pytest
-```
+This creates a local `.venv` and includes the development group plus every optional
+SDK needed by the full offline suite. `pyproject.toml` defines dependencies and
+`uv.lock` fixes the resolution. The requirements files are generated compatibility
+exports; edit the manifest, run `uv lock`, then regenerate the exports with
+`uv run --locked --all-extras python scripts/export_requirements.py`.
 
 Node.js is needed for the calculator's browser-code regression test. Without it,
 that test explicitly skips; CI installs Node 22 so it runs there. No npm packages
-are required. The development manifest is not a Pi provisioning script; the
-existing application and optional-feature installers still manage production.
+are required. CI also checks installer shell syntax and export freshness.
+
+On the deployed Pi, `.venv` is a compatibility link to the root-owned production
+environment, which excludes development tools. Use a separate development checkout
+for pytest; do not run `uv sync` against the Pi's linked `.venv`. See
+[RUNTIME.md](RUNTIME.md) for installation, synchronization and rollback.
 
 ## Selecting tests
 
