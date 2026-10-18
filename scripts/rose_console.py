@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Personal rose playtest, using the same gate, host loop and Term renderer."""
+"""Personal rose console and opt-in scripted playtests."""
 import argparse
 import curses
 import getpass
+import io
 import os
+import secrets
 import sys
+from contextlib import redirect_stderr, redirect_stdout
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -24,16 +28,84 @@ def set_password(path):
     return 0
 
 
+def run_script(args):
+    from dotenv import load_dotenv
+
+    from services import rose, rose_script
+
+    try:
+        data = rose_script.load(args.script, test_only=args.test)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        print(f"Script invalide : {error}", file=sys.stderr)
+        return 2
+    root = Path(__file__).resolve().parents[1]
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    path = args.log or root / "logs" / "rose-scripts" / f"{Path(args.script).stem}-{stamp}-{secrets.token_hex(3)}.jsonl"
+    transcript = None
+    result = 2
+    try:
+        transcript = rose_script.Transcript(path)
+        load_dotenv(root / ".env")
+        model = rose.MockModel() if args.mock else rose.MistralModel(
+            os.getenv("MISTRAL_KEY", ""), os.getenv("MISTRAL_MODEL", "mistral-small-latest"),
+            observer=transcript.provider_response)
+        if not args.interactive:
+            result = rose_script.play(data, model, transcript)
+        else:
+            # Loading the ordinary renderer must not add startup theatre to this mode.
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                from services import minitel_chatgpt as chat
+            from services.console_terminal import ConsoleSerial
+
+            def session(window):
+                curses.raw()
+                curses.curs_set(1)
+                term = chat.Term(ConsoleSerial(window))
+                term.s.hint = "Entree ENVOI | ^G GUIDE | ^R RETOUR | ^P SOMMAIRE | ^Q fermer"
+                term.w(chat.SCROLL_ON)
+                try:
+                    return rose_script.play(data, model, transcript, term=term)
+                finally:
+                    term.w(chat.SCROLL_OFF)
+
+            result = curses.wrapper(session)
+    except (OSError, ValueError, KeyError, TypeError, curses.error) as error:
+        if transcript and not transcript.failed:
+            try:
+                transcript.write("run_error", error_type=type(error).__name__)
+            except OSError:
+                print("Journal indisponible.", file=sys.stderr)
+        print(f"Exécution script impossible ({type(error).__name__}).", file=sys.stderr)
+        result = 2
+    finally:
+        if transcript:
+            try:
+                transcript.close()
+            except OSError:
+                print("Fermeture du journal impossible.", file=sys.stderr)
+                result = 2
+    return result
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Atelier privé 3615 rose, sans conservation des conversations.")
+    parser = argparse.ArgumentParser(description="Atelier privé 3615 rose ; journal complet uniquement avec --script.")
     parser.add_argument("--mock", action="store_true", help="dialogue écrit localement, aucun appel API")
     parser.add_argument("--test", action="store_true", help="utiliser le catalogue de personnalités de test")
     parser.add_argument("--name", default="", help="personnage ou alias ; catalogue si absent")
     parser.add_argument("--set-password", action="store_true", help="choisir la valeur locale privée sans écho")
+    parser.add_argument("--script", "-s", type=Path, help="messages JSON ; journal complet, sans porte ni facture")
+    parser.add_argument("--interactive", "-i", action="store_true", help="afficher le script puis poursuivre la même session")
+    parser.add_argument("--log", type=Path, help="nouveau journal JSONL (défaut : logs/rose-scripts/)")
     args = parser.parse_args()
-    if not sys.stdin.isatty() or not sys.stdout.isatty():
+    if args.script and (args.name or args.set_password):
+        parser.error("--script utilise sa persona JSON et ne peut pas configurer le mot de passe.")
+    if not args.script and (args.interactive or args.log):
+        parser.error("--interactive et --log nécessitent --script.")
+    if (not args.script or args.interactive) and (not sys.stdin.isatty() or not sys.stdout.isatty()):
         parser.exit(2, "Terminal interactif requis (ssh -t si nécessaire).\n")
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    if args.script:
+        return run_script(args)
     from services import rose
     if args.set_password:
         return set_password(rose.PASSWORD_FILE)

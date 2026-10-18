@@ -1,6 +1,7 @@
 """3615 rose: transient host state, editable cast, integer billing, text-only model.
 
-No tools, general assistant context, file-backed conversation or payload logging.
+Ordinary sessions have no tools, general assistant context or automatic logging.
+The separate script runner can explicitly request diagnostic observation.
 Workers only receive snapshots; the UART owner alone accepts results.
 """
 import copy
@@ -152,8 +153,9 @@ class Reply:
 
 class MistralModel:
     """Same configured Mistral key/model, separate bounded chat-completion call."""
-    def __init__(self, key, model, timeout=30):
+    def __init__(self, key, model, timeout=30, observer=None):
         self.key, self.model, self.timeout = key, model, timeout
+        self.observer = observer  # Explicit script diagnostics only; ordinary calls have no observer.
 
     def ready(self):
         return bool(self.key and self.key != "...")
@@ -183,8 +185,12 @@ class MistralModel:
             )
             try:
                 data = response.json()
-            except ValueError:
+            except ValueError as error:
+                if self.observer is not None:
+                    self.observer(response.status_code, None, error_type=type(error).__name__)
                 return Reply(status="error")
+            if self.observer is not None:
+                self.observer(response.status_code, data)
             if moderation_rejected(response.status_code, data):
                 return Reply(status="moderation")
             if response.status_code != 200:
@@ -196,7 +202,11 @@ class MistralModel:
             # Strip terminal controls, cap output before it reaches the renderer.
             text = "".join(c for c in text if c == "\n" or c.isprintable()).strip()
             return Reply(text[:700]) if text else Reply(status="error")
-        except (requests.RequestException, KeyError, IndexError, TypeError):
+        except requests.RequestException as error:
+            if self.observer is not None:
+                self.observer(None, None, error_type=type(error).__name__)
+            return Reply(status="error")
+        except (KeyError, IndexError, TypeError):
             return Reply(status="error")
 
 
