@@ -30,11 +30,12 @@ def load(path, test_only=False):
 
 class Transcript:
     """One flushed JSON object per event; no auth headers or provider error bodies."""
-    def __init__(self, path):
+    def __init__(self, path, overwrite=False):
         path = Path(path)
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | (os.O_TRUNC if overwrite else os.O_EXCL), 0o600)
         self.stream = os.fdopen(descriptor, "w", encoding="utf-8")
+        os.fchmod(self.stream.fileno(), 0o600)
         self.lock = threading.Lock()
         self.turn = None
         self.closed = False

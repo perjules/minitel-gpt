@@ -40,11 +40,11 @@ def run_script(args):
         return 2
     root = Path(__file__).resolve().parents[1]
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    path = args.log or root / "logs" / "rose-scripts" / f"{Path(args.script).stem}-{stamp}-{secrets.token_hex(3)}.jsonl"
+    path = args.log or root / "logs" / "rose" / f"{Path(args.script).stem}-{stamp}-{secrets.token_hex(3)}.jsonl"
     transcript = None
     result = 2
     try:
-        transcript = rose_script.Transcript(path)
+        transcript = rose_script.Transcript(path, overwrite=args.log is not None)
         load_dotenv(root / ".env")
         model = rose.MockModel() if args.mock else rose.MistralModel(
             os.getenv("MISTRAL_KEY", ""), os.getenv("MISTRAL_MODEL", "mistral-small-latest"),
@@ -95,7 +95,7 @@ def main():
     parser.add_argument("--set-password", action="store_true", help="choisir la valeur locale privée sans écho")
     parser.add_argument("--script", "-s", type=Path, help="messages JSON ; journal complet, sans porte ni facture")
     parser.add_argument("--interactive", "-i", action="store_true", help="afficher le script puis poursuivre la même session")
-    parser.add_argument("--log", type=Path, help="nouveau journal JSONL (défaut : logs/rose-scripts/)")
+    parser.add_argument("--log", type=Path, help="journal JSONL, écrasé si existant (défaut : logs/rose/)")
     args = parser.parse_args()
     if args.script and (args.name or args.set_password):
         parser.error("--script utilise sa persona JSON et ne peut pas configurer le mot de passe.")

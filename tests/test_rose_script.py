@@ -5,12 +5,14 @@ import subprocess
 import sys
 import threading
 import unittest
+from argparse import Namespace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from test_rose import KeyTerm, completed, typed, violation
 
+from scripts import rose_console
 from services import rose, rose_script, rose_terminal
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -258,7 +260,18 @@ class ScriptTests(unittest.TestCase):
         self.assertNotIn("NEVER", path.read_text())
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
-    def test_cli_is_silent_without_a_tty_and_never_overwrites_a_log(self):
+    def test_default_logs_are_separate_files_under_logs_rose(self):
+        script = self.script({"persona": "E1S1", "prompts": ["Bonjour"]})
+        args = Namespace(script=script, test=False, log=None, mock=True, interactive=False)
+        with patch.object(rose_console, "__file__", str(self.folder / "scripts/rose_console.py")):
+            self.assertEqual(rose_console.run_script(args), 0)
+            first, = (self.folder / "logs/rose").glob("*.jsonl")
+            content = first.read_text()
+            self.assertEqual(rose_console.run_script(args), 0)
+        self.assertEqual(len(list((self.folder / "logs/rose").glob("*.jsonl"))), 2)
+        self.assertEqual(first.read_text(), content)
+
+    def test_cli_is_silent_without_a_tty_and_overwrites_an_explicit_log(self):
         path = self.script({"persona": "E1S1", "prompts": ["Bonjour", "Suite"]})
         log = self.folder / "cli.jsonl"
         command = [sys.executable, str(ROOT / "scripts/rose_console.py"), "-s", str(path), "--mock", "--log", str(log)]
@@ -266,9 +279,14 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
         content = log.read_text()
         self.assertEqual(sum(json.loads(line)["event"] == "assistant" for line in content.splitlines()), 3)
+        log.write_text("Previous transcript\n" * 10000)
+        log.chmod(0o644)
         result = subprocess.run(command, capture_output=True, text=True, check=False, cwd=self.folder)
-        self.assertEqual(result.returncode, 2)
-        self.assertEqual(log.read_text(), content)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+        events = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual(sum(event["event"] == "assistant" for event in events), 3)
+        self.assertEqual(events[-1]["event"], "session_end")
+        self.assertEqual(log.stat().st_mode & 0o777, 0o600)
 
     def test_cli_rejects_incompatible_options_and_interactive_without_a_tty(self):
         script = self.script({"persona": "E1S1", "prompts": []})

@@ -23,7 +23,7 @@ Depuis le dépôt, après activation de `.venv` :
 python scripts/rose_console.py --script essai.json
 python scripts/rose_console.py -s essai.json -i
 python scripts/rose_console.py -s essai.json --mock
-python scripts/rose_console.py -s essai.json --log logs/rose-scripts/mon-essai.jsonl
+python scripts/rose_console.py -s essai.json --log logs/rose/mon-essai.jsonl
 ```
 
 ## Exécution
@@ -68,11 +68,13 @@ Le mode script constitue une **exception volontaire** au défaut transitoire
 des sessions ordinaires. Il conserve du texte potentiellement intime sur disque.
 Le propriétaire choisit la conservation et la suppression de ces fichiers.
 
-Sans `--log`, un fichier unique est créé dans `logs/rose-scripts/`, avec le
+Sans `--log`, un fichier unique est créé dans `logs/rose/`, avec le
 nom du script, l'heure UTC et un suffixe aléatoire. Le chemin n'est pas affiché
 en mode silencieux ; utiliser `--log` pour choisir un nom connu.
-Le fichier est créé exclusivement, avec permissions `0600` ; un fichier
-existant n'est jamais écrasé. Le répertoire `logs/` est ignoré par Git.
+Les noms automatiques sont créés exclusivement pour préserver les essais précédents.
+Avec `--log`, le chemin fourni est utilisé tel quel et un fichier existant est
+écrasé silencieusement. Dans les deux cas, les permissions sont `0600`.
+Le répertoire `logs/` est ignoré par Git.
 Un chemin choisi ailleurs avec `--log` doit être exclu des publications par
 le propriétaire. Un échec d'écriture interrompt l'essai ; aucune nouvelle
 requête ne doit partir sans journalisation possible.
