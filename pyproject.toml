@@ -1,0 +1,8 @@
+[tool.pytest.ini_options]
+# pytest 9 preserves the existing unittest.TestCase.subTest behavior.
+minversion = "9.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+# Keep the existing namespace-package and cross-test helper imports working.
+pythonpath = ["."]
+addopts = "-ra --strict-config --strict-markers"

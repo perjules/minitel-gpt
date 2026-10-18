@@ -393,7 +393,7 @@ The baseline at `5e22118` passes 244 tests with the runtime and optional Gmail,
 PRONOTE and printing dependencies installed. Run the full offline suite and lint:
 
 ```bash
-.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m pytest -v
 .venv/bin/ruff check services/pronote_records.py services/pronote_mode.py tests/test_pronote_expansion.py tests/test_pronote_terminal_mode.py
 .venv/bin/ruff check --select F services/pronote.py services/pronote_answers.py services/minitel_chatgpt.py scripts/pronote_setup.py
 ```

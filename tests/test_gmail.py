@@ -531,9 +531,12 @@ class AuthTests(unittest.TestCase):
             def refreshed(credentials, request):
                 credentials.token = "new-access"
                 credentials._refresh_token = "replacement-refresh"
-                from datetime import datetime, timedelta
+                from datetime import UTC, datetime, timedelta
 
-                credentials.expiry = datetime.now() + timedelta(hours=1)
+                # google-auth compares expiry against naive UTC, not local time.
+                credentials.expiry = (
+                    datetime.now(UTC) + timedelta(hours=1)
+                ).replace(tzinfo=None)
 
             with patch.object(Credentials, "refresh", refreshed):
                 self.assertEqual(source.token(time.monotonic() + 10), "new-access")

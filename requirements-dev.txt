@@ -1,0 +1,14 @@
+# Complete offline test environment; production still uses its existing installers.
+# Keep the deliberate optional-feature pins in their original manifests.
+-r requirements-gmail.txt
+-r requirements-pronote.txt
+requests
+Flask
+python-dotenv
+pyserial
+pyfiglet
+Pillow
+bleak
+# Native unittest subTest support starts in pytest 9.
+pytest>=9,<10
+ruff

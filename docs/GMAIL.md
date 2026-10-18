@@ -520,6 +520,6 @@ host keys. Default auth locations are all outside Git.
 Offline verification (use the existing shared venv with optional requirements):
 
 ```sh
-.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m pytest -v
 bash -n scripts/install_gmail.sh
 ```

@@ -207,13 +207,15 @@ Development takes place on `develop`. Stable changes reach `main` after physical
 Minitel validation. Valuable upstream fixes and improvements will be considered
 as the fork evolves.
 
-## Startup regression checks
+## Automated regression checks
 
-Using an environment with the existing runtime dependencies (`requests`,
-`python-dotenv`, `pyserial`; `pyfiglet` is optional):
+Pytest is the canonical test runner. See [the testing guide](docs/TESTING.md)
+for a complete development environment, optional test dependencies and test
+selection. Existing unittest-style tests remain compatible to minimize upstream
+merge churn. From a prepared environment:
 
 ```bash
-python3 -m unittest discover -s tests -v
+python3 -m pytest
 ```
 
 The checks run the conversation loop with a simulated UART and mocked provider

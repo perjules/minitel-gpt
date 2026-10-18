@@ -10,5 +10,7 @@ config/prompts.before-workshop.json
 .last_version
 config/pronote/
 .venv/
+.pytest_cache/
+.ruff_cache/
 config/admin-session.key
 config/rose-password.txt

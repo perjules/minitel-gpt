@@ -51,8 +51,8 @@ sudo btmgmt power on
 ## Offline tests
 
 ```bash
-.venv/bin/python -m unittest discover -s tests -p 'test_printing.py' -v
-.venv/bin/python -m unittest discover -s tests -p 'test_mxw01.py' -v
+.venv/bin/python -m pytest tests/test_printing.py -v
+.venv/bin/python -m pytest tests/test_mxw01.py -v
 ```
 
 ## Limitations and safety
@@ -88,7 +88,7 @@ Bluetooth status and actual completion remain authoritative. The terminal may
 be busy until the print attempt completes. The extension does not modify
 Bluetooth controller settings; BLE-only setup may still be required on the Pi.
 
-Run `.venv/bin/python -m unittest discover -s tests -p 'test_printing_session.py' -v`
+Run `.venv/bin/python -m pytest tests/test_printing_session.py -v`
 and validate `IMPRIMER` in the terminal console before testing the physical
 Minitel. Hardware testing has shown partial printing and prolonged BLE writes on longer documents. The single-connection multi-section protocol remains to be validated on the physical printer.
 
