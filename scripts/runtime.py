@@ -46,6 +46,18 @@ def atomic_json(path, value):
     temporary.replace(path)
 
 
+def atomic_file(path, content, mode):
+    """Replace protected configuration atomically, retaining read-only modes."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
+    try:
+        temporary.write_bytes(content)
+        temporary.chmod(mode)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def point(link, target):
     temporary = link.with_name(link.name + ".tmp")
     temporary.unlink(missing_ok=True)
@@ -189,12 +201,11 @@ class Runtime:
             if script == "journal_reader.py" and not (self.root / "current/root" / script).exists():
                 path.unlink(missing_ok=True)  # Compatibility with retained pre-journal releases.
                 continue
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(
+            content = (
                 "#!/bin/sh\nexec /opt/minitel-gpt/venv/bin/python -I "
                 f"/opt/minitel-gpt/current/root/{script} \"$@\"\n"
             )
-            path.chmod(0o755)
+            atomic_file(path, content.encode(), 0o755)
 
     def units(self):
         for name, relative in SYSTEM_FILES.items():
@@ -205,9 +216,8 @@ class Runtime:
                 continue
             if name == "minitel-gpt-journal-sudoers":
                 self.command(["visudo", "-c", "-f", source])
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, destination)
-            destination.chmod(0o440 if name.endswith("sudoers") else 0o644)
+            atomic_file(destination, source.read_bytes(),
+                        0o440 if name.endswith("sudoers") else 0o644)
         for service in SERVICES:
             destination = self.system_path(f"/etc/systemd/system/{service}.service")
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -288,8 +298,7 @@ PrivateMounts=yes
                 if original is None:
                     path.unlink(missing_ok=True)
                 else:
-                    path.write_bytes(original[0])
-                    path.chmod(original[1])
+                    atomic_file(path, original[0], original[1])
             legacy = self.project / ".venv"
             if legacy.is_symlink():
                 legacy.unlink()
@@ -415,7 +424,9 @@ PrivateMounts=yes
             raise RuntimeError("Runtime pointer and state differ; refusing housekeeping")
         for path in releases.iterdir():
             if (path not in keep and re.fullmatch(r"[0-9a-f]{32}", path.name)
-                    and not path.is_symlink() and path.is_dir()):
+                    and not path.is_symlink() and path.is_dir()
+                    and (path / "project/pyproject.toml").is_file()
+                    and (path / "project/uv.lock").is_file()):
                 shutil.rmtree(path)
         cache = self.state / "uv-cache"
         if cache.is_symlink():

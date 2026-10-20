@@ -3,7 +3,6 @@ import json
 import subprocess
 import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from services import admin_ui as admin
@@ -20,15 +19,13 @@ class AdminAnswerTests(unittest.TestCase):
                 self.assertFalse(run.call_args.kwargs["check"])
 
     def test_log_read_failures_return_an_error_including_decoding_errors(self):
-        with TemporaryDirectory() as directory:
-            logs = Path(directory)
-            (logs / "review.log").touch()
-            for error in (FileNotFoundError("fixture"),
-                          UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")):
-                with self.subTest(error=type(error).__name__), patch.object(admin, "LOGS_DIR", logs), \
-                        patch.object(admin.subprocess, "run", side_effect=error) as run:
-                    self.assertEqual(admin.log_tail("review"), str(error))
-                    self.assertFalse(run.call_args.kwargs["check"])
+        for error in (FileNotFoundError("fixture"),
+                      UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")):
+            with self.subTest(error=type(error).__name__), \
+                    patch.object(admin.subprocess, "run", side_effect=error) as run:
+                self.assertIn("indisponible", admin.log_tail("chatgpt"))
+                self.assertFalse(run.call_args.kwargs["check"])
+                self.assertEqual(run.call_args.kwargs["timeout"], 7)
 
     def test_preview_shared_adapter_neutral_context_and_full_unicode_url(self):
         data = json.loads((Path(__file__).parent / "fixtures" / "conversations_searched.json").read_text())

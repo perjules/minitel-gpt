@@ -31,6 +31,9 @@ def release(manager, name, extras=()):
     (path / "venv/bin").mkdir(parents=True)
     (path / "venv/bin/python").touch()
     (path / "root").mkdir()
+    (path / "project").mkdir()
+    (path / "project/pyproject.toml").write_text("test release metadata")
+    (path / "project/uv.lock").write_text("test release lock")
     for service in runtime.SERVICES:
         (path / f"root/{service}.service").write_text(f"[Service]\n# {name}\n")
     source = Path(__file__).resolve().parents[1]

@@ -13,6 +13,10 @@ class EndOfInput(Exception):
     pass
 
 
+class ReadTimeout(Exception):
+    """A simulated idle read, distinct from an OS transport failure."""
+
+
 class FakeSerial:
     def __init__(self, keys):
         self.keys = deque(keys)
@@ -25,7 +29,7 @@ class FakeSerial:
         key = self.keys.popleft()
         # None represents a read_key timeout, patched at the input boundary.
         if key is None:
-            raise TimeoutError
+            raise ReadTimeout
         self.consumed.append(key)
         return bytes([key])
 
@@ -129,7 +133,7 @@ class StartupTests(unittest.TestCase):
         def read_key(term, timeout):
             try:
                 return real_read_key(term, timeout)
-            except TimeoutError:
+            except ReadTimeout:
                 return 'timeout', None
 
         response = Mock()

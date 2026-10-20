@@ -198,7 +198,10 @@ def flush(term):
     for method in ("reset_output_buffer", "reset_input_buffer"):
         operation = getattr(term.s, method, None)
         if callable(operation):
-            term.io(operation)
+            try:
+                operation()
+            except OSError as error:
+                raise api().terminal_link.Unavailable(type(error).__name__) from None
 
 
 def show_bill(term, receipt, row_delay=0.32):
