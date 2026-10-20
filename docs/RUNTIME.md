@@ -269,3 +269,27 @@ permissions, storage warnings, timer execution and a retained-pair rollback.
 Verify that existing log files and user archives remain unchanged. Hosted CI
 simulates failures and validates configuration; it cannot establish physical
 Minitel/USB behavior or the Pi's effective journal permissions and storage use.
+
+## Wi-Fi recovery and provisioning
+
+The root Wi-Fi service has a fixed working directory and command environment and
+never imports the user-writable application `.env`. NetworkManager calls have
+explicit process deadlines and operate on UUIDs; escaped names are decoded.
+
+After a sustained disconnect the setup hotspot remains available in five-minute
+windows, between bounded attempts to reconnect autoconnect-enabled saved client
+profiles. Saved profiles and their autoconnect preferences are never disabled or
+deleted. Provisioning tests a unique candidate and saves it for autoconnect only
+after association and an address are confirmed. A failed candidate removes only
+that candidate and restores the hotspot. Setup and monitoring share a lock.
+Profiles disabled by an older installation remain disabled: explicitly re-enable
+the intended profile with `sudo nmcli con modify uuid <UUID> connection.autoconnect yes`.
+
+The port-80 server permits configuration only when the connection actually arrives
+on 192.168.4.1 from the setup subnet while hotspot mode is active. Host headers do
+not grant access. Requests need a session-bound token and valid, bounded JSON;
+the normal home LAN exposes no network-changing operation. The hotspot is still
+open for deliberate local provisioning. Passwords retain spaces and never enter
+command logs. A stopped HTTP server causes the manager to fail and restart.
+Validate hotspot retry windows, wrong-password recovery and live provisioning on
+the Pi before promoting to main; offline tests mock every NetworkManager command.

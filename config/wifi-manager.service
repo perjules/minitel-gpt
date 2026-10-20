@@ -6,8 +6,7 @@ Wants=NetworkManager.service
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/home/minitel/minitel-gpt
-EnvironmentFile=-/home/minitel/minitel-gpt/.env
+WorkingDirectory=/
 ExecStart=/opt/minitel-gpt/venv/bin/python -I /opt/minitel-gpt/current/root/wifi_manager.py
 Restart=always
 RestartSec=10
