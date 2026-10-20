@@ -33,6 +33,10 @@ def release(manager, name, extras=()):
     (path / "root").mkdir()
     for service in runtime.SERVICES:
         (path / f"root/{service}.service").write_text(f"[Service]\n# {name}\n")
+    source = Path(__file__).resolve().parents[1]
+    for asset in runtime.SYSTEM_FILES:
+        (path / "root" / asset).write_bytes((source / "config" / asset).read_bytes())
+    (path / "root/journal_reader.py").write_bytes((source / "scripts/journal_reader.py").read_bytes())
     return {"release": str(path), "commit": name, "extras": list(extras), "python": ""}
 
 
@@ -276,3 +280,86 @@ def test_admin_branch_and_deployment_status_use_installed_state(tmp_path, monkey
     with client.session_transaction() as session:
         session["logged_in"] = True
     assert client.get("/deployment-status").json == {"phase": "not_installed"}
+
+
+def test_low_space_refuses_staging_before_creating_a_candidate(manager, monkeypatch):
+    monkeypatch.setattr(runtime.shutil, "disk_usage",
+                        lambda _: SimpleNamespace(free=runtime.MIN_STAGE_FREE - 1))
+    with pytest.raises(RuntimeError, match="1 GiB"):
+        manager.prepare(Path(__file__).resolve().parents[1], [], "new")
+    assert not (manager.root / "releases").exists()
+    manager.command.assert_not_called()
+
+
+def test_housekeeping_retains_both_pairs_and_never_touches_user_logs(manager):
+    before = release(manager, "1" * 32)
+    active = release(manager, "2" * 32)
+    stale = release(manager, "3" * 32)
+    unexpected = release(manager, "manual-backup")
+    manager.activate(active)
+    runtime.atomic_json(manager.state / "runtime.json",
+                        {"active": active, "previous": before})
+    logs = manager.project / "logs"
+    logs.mkdir()
+    (logs / "chatgpt.log").write_text("old evidence")
+    legacy = manager.project / ".venv.before-uv"
+    legacy.mkdir()
+    external = manager.project / "do-not-delete"
+    external.mkdir()
+    symlink = manager.root / "releases" / ("4" * 32)
+    symlink.symlink_to(external, target_is_directory=True)
+    (manager.state / "uv-cache").mkdir()
+    manager.housekeeping()
+    assert Path(active["release"]).is_dir() and Path(before["release"]).is_dir()
+    assert not Path(stale["release"]).exists()
+    assert Path(unexpected["release"]).exists() and external.exists()
+    assert symlink.is_symlink() and legacy.exists()
+    assert (logs / "chatgpt.log").read_text() == "old evidence"
+    assert manager.command.call_args.args[0] == [
+        manager.uv, "cache", "prune", "--cache-dir", manager.state / "uv-cache"]
+
+
+def test_housekeeping_refuses_inconsistent_state_without_deleting_releases(manager):
+    before = release(manager, "1" * 32)
+    active = release(manager, "2" * 32)
+    manager.activate(before)
+    runtime.atomic_json(manager.state / "runtime.json", {"active": active})
+    with pytest.raises(RuntimeError, match="pointer"):
+        manager.housekeeping()
+    assert Path(before["release"]).is_dir()
+    manager.command.assert_not_called()
+
+
+def test_failed_activation_restores_journal_policy_sudoers_and_helper(manager):
+    before, after = release(manager, "old"), release(manager, "new")
+    manager.activate(before)
+    paths = [manager.system_path(path) for path in runtime.SYSTEM_FILES.values()]
+    paths.append(manager.system_path("/usr/local/libexec/minitel-journal"))
+    for path in paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("original")
+        path.chmod(0o440)
+    fail_once(manager, lambda args: args[:2] == ["systemctl", "start"])
+    with pytest.raises(subprocess.CalledProcessError):
+        manager.switch(after, {"active": before}, branch="develop")
+    assert all(path.read_text() == "original" for path in paths)
+    assert all(path.stat().st_mode & 0o777 == 0o440 for path in paths)
+
+
+def test_rollback_to_pre_journal_release_removes_new_integration(manager):
+    old, new = release(manager, "old"), release(manager, "new")
+    manager.activate(new)
+    manager.wrappers()
+    manager.units()
+    for name in (*runtime.SYSTEM_FILES, "journal_reader.py"):
+        (Path(old["release"]) / "root" / name).unlink()
+    manager.switch(old, {"active": new}, branch="develop")
+    assert not manager.system_path("/usr/local/libexec/minitel-journal").exists()
+    assert all(not manager.system_path(path).exists() for path in runtime.SYSTEM_FILES.values())
+
+
+def test_maintenance_failure_does_not_turn_a_successful_deployment_into_failure(manager, monkeypatch):
+    runtime.atomic_json(manager.state / "deployment.json", {"phase": "ready"})
+    monkeypatch.setattr(manager, "housekeeping", Mock(side_effect=OSError("full")))
+    manager.maintain()
+    assert json.loads((manager.state / "deployment.json").read_text())["phase"] == "ready"

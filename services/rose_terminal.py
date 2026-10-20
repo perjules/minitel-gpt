@@ -162,6 +162,7 @@ def roster(term, gender, test=False):
 
 def wait(term, job, safeword, timeout):
     """Read exits during the request; discard all other typeahead on completion."""
+    term._pending = job.pending()
     chat = api()
     typed = []
     while time.monotonic() < job.started + timeout:
@@ -197,7 +198,7 @@ def flush(term):
     for method in ("reset_output_buffer", "reset_input_buffer"):
         operation = getattr(term.s, method, None)
         if callable(operation):
-            operation()
+            term.io(operation)
 
 
 def show_bill(term, receipt, row_delay=0.32):

@@ -37,6 +37,7 @@ try:
         mistral_answers,
         pronote,
         pronote_answers,
+        storage_health,
     )
 except ImportError:
     import calculator
@@ -45,6 +46,7 @@ except ImportError:
     import mistral_answers
     import pronote
     import pronote_answers
+    import storage_health
 
 PROJ_DIR = Path(__file__).parent.parent
 ASSETS_DIR = PROJ_DIR / "assets"
@@ -345,14 +347,18 @@ def ip_address():
         return "?"
 
 def log_tail(name, n=40):
-    f = LOGS_DIR / f"{name}.log"
-    if not f.exists():
-        return "(pas de log)"
+    if name not in {"chatgpt", "wifi", "admin"}:
+        return "(journal inconnu)"
     try:
-        return subprocess.run(["tail", f"-{n}", str(f)],
-                              capture_output=True, text=True, check=False).stdout
-    except (OSError, UnicodeError) as e:
-        return str(e)
+        result = subprocess.run(
+            ["sudo", "-n", "/usr/local/libexec/minitel-journal", name],
+            capture_output=True, text=True, check=False, timeout=7,
+        )
+        if result.returncode:
+            return "(journal indisponible ; vérifier l'installation)"
+        return "\n".join(result.stdout.splitlines()[-max(1, min(int(n), 200)):])
+    except (OSError, UnicodeError, ValueError, subprocess.SubprocessError):
+        return "(journal indisponible)"
 
 # ── Mise à jour de l'application (git) ────────────────────────────────────
 RUNTIME_STATE = Path("/var/lib/minitel-gpt/runtime.json")
@@ -832,6 +838,23 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
   <div class=block>
     <h2>Logs du terminal <a href=/ class=sub style=margin-left:8px>rafraîchir</a></h2>
     <pre>{{log_chatgpt}}</pre>
+  </div>
+  <div class=block>
+    <h2>Stockage</h2>
+    <p class=sub>Mesures en Mio. Les archives de conversation et anciens journaux restent conservés.</p>
+    <pre id=storage-status>Chargement…</pre>
+    <script>
+    fetch('/storage-status').then(r => r.json()).then(s => {
+      const mib = n => (n / 1048576).toFixed(1);
+      const size = x => mib(x.bytes) + (x.partial ? ' (mesure partielle)' : '');
+      document.getElementById('storage-status').textContent = s.error ? 'Stockage indisponible' :
+        (s.warning ? 'ATTENTION : espace libre faible\\n' : '') +
+        'Libre : ' + mib(s.free_bytes) + ' Mio\\n' +
+        'Anciens logs + Rose : ' + size(s.legacy_logs_and_rose) + ' Mio\\n' +
+        'Dont transcriptions Rose : ' + size(s.rose_transcripts) + ' Mio\\n' +
+        'Mémoire + conversations : ' + size(s.memory_and_conversations) + ' Mio';
+    }).catch(() => { document.getElementById('storage-status').textContent = 'Stockage indisponible'; });
+    </script>
   </div>
 </section>
 
@@ -1342,6 +1365,15 @@ def rollback_route():
     session["flash"] = msg if ok else "Échec : " + msg
     session["flash_ok"] = ok
     return redirect(url_for("index"))
+
+
+@app.route("/storage-status")
+@require_login
+def storage_status():
+    try:
+        return jsonify(storage_health.status(PROJ_DIR))
+    except OSError:
+        return jsonify(error="storage_unavailable"), 503
 
 
 @app.route("/deployment-status")

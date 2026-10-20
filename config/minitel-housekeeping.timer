@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly MinitelGPT runtime and cache housekeeping
+
+[Timer]
+OnCalendar=weekly
+RandomizedDelaySec=1h
+Persistent=true
+Unit=minitel-housekeeping.service
+
+[Install]
+WantedBy=timers.target

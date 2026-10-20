@@ -1,0 +1,2 @@
+# Read only the application's fixed journal selections; no arbitrary arguments.
+minitel ALL=(root) NOPASSWD: /usr/local/libexec/minitel-journal chatgpt, /usr/local/libexec/minitel-journal wifi, /usr/local/libexec/minitel-journal admin

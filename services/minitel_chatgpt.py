@@ -31,6 +31,7 @@ try:  # Support both systemd's direct script and package imports in tests.
         pronote,
         pronote_answers,
         pronote_mode,
+        terminal_link,
     )
 except ImportError:
     import calculator
@@ -41,6 +42,7 @@ except ImportError:
     import pronote
     import pronote_answers
     import pronote_mode
+    import terminal_link
 
 try:
     from . import rose, rose_terminal
@@ -211,21 +213,11 @@ def get_ip():
     except OSError:
         return None
 
-# Journalisation : toujours sur la sortie standard (capturée par systemd/journald).
-# Le fichier de log est un bonus : s'il n'est pas accessible (droits, FS plein…),
-# on continue sans lui plutôt que de tuer le terminal. Un simple souci de log ne
-# doit jamais empêcher l'affichage sur le Minitel.
-_handlers = [logging.StreamHandler(sys.stdout)]
-_LOG_FILE = Path(__file__).parent.parent / "logs" / "chatgpt.log"
-try:
-    _handlers.insert(0, logging.FileHandler(_LOG_FILE))
-except OSError as _e:  # PermissionError, FileNotFoundError…
-    print(f"[minitel-gpt] log fichier indisponible ({_e}), sortie standard seule",
-          file=sys.stderr)
+# One stream only: production systemd sends it to the bounded application journal.
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [minitel-gpt] %(levelname)s %(message)s",
-    handlers=_handlers,
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 log = logging.getLogger(__name__)
 
@@ -370,17 +362,37 @@ def build_title(title_art=None):
 # ── Serial helpers ───────────────────────────────────────────────────────
 class Term:
     def __init__(self, transport=None):
+        self.link_activity = lambda: None
         if transport is not None:
             self.s = transport
         else:
-            self.s = serial.Serial(PORT, BAUD, bytesize=7, parity="E",
-                                   stopbits=1, timeout=0.1)
+            self.s = self.io(serial.Serial, detect_port(), BAUD, bytesize=7,
+                             parity="E", stopbits=1, timeout=0.1, write_timeout=2)
             time.sleep(0.3)
+
+    def io(self, operation, *args, **kwargs):
+        try:
+            result = operation(*args, **kwargs)
+        except OSError as error:
+            # Class only: never expose arbitrary exception payloads in a loop.
+            raise terminal_link.Unavailable(type(error).__name__) from None
+        getattr(self, "link_activity", lambda: None)()
+        return result
+
+    def close(self):
+        close = getattr(self.s, "close", None)
+        if callable(close):
+            try:
+                close()
+            except OSError:
+                pass
 
     def w(self, data):
         if isinstance(data, str):
             data = to_ascii(data).encode("ascii", errors="replace")
-        self.s.write(data)
+        written = self.io(self.s.write, data)
+        if written is not None and written != len(data):
+            raise terminal_link.Unavailable("short_write")
 
     def clear(self):
         self.w(bytes([FF, RS]))
@@ -394,7 +406,9 @@ class Term:
         self.w(" " * ((COLS - len(text)) // 2)); self.w(text); self.w(bytes([CR, LF]))
 
     def read_byte(self):
-        b = self.s.read(1)
+        b = self.io(self.s.read, 1)
+        if not b:
+            time.sleep(0.01)  # Also yield if a driver returns empty immediately.
         return b[0] if b else None
 
     def read_key(self, timeout):
@@ -922,7 +936,20 @@ def execute_print(t, document, language):
 # ── Boucle principale ────────────────────────────────────────────────────
 def run(term=None):
     t = term if term is not None else Term()
-    destination = PORT if term is None else "console"
+    t._session_resources = ()
+    t._pending = None
+    try:
+        return run_session(t)
+    finally:
+        # Invalidate review tickets and close memory guards even on a UART error.
+        for cleanup in t._session_resources:
+            cleanup()
+        if term is None:
+            t.close()
+
+
+def run_session(t):
+    destination = getattr(t.s, "port", "console")
     log.info(f"Démarré sur {destination} (fournisseur {PROVIDER}, modèle {MODEL})")
     options = (mistral_answers.settings(os.environ) if PROVIDER == "mistral"
                else ("chat_completions", False, 60))
@@ -948,12 +975,14 @@ def run(term=None):
         knowledge = factual_knowledge()
         user_options = {"preserve_display": True} if keep_bill else {}
         memory, user_action = select_memory_user(t, title_lines=title_lines, title_msg=title_msg, **user_options)
+        t._session_resources = (memory.close,) if memory is not None else ()
         keep_bill = False
         if user_action == 'guide':
             show_guide(t)
         if user_action in ('guide', 'sommaire'):
             continue
         mail = gmail_mail.MailSession(username=memory.username) if gmail_mail.enabled() else None
+        t._session_resources = (mail.reset, memory.close) if mail is not None else (memory.close,)
         language = "fr" if memory.key == "shared" else memory.saved_language()
         action = user_action
         if language not in ("fr", "en"):
@@ -1032,6 +1061,7 @@ def run(term=None):
                     t.w(bytes([CR, LF]))
                     t.center("CONSULTATION PRONOTE")
                     pending = start_pronote(direct, school_mode.backend, language, options, knowledge)
+                    t._pending = pending
                     response, action = wait_answer(t, pending, options[2], allow_retour=True)
                     if action in ("sommaire", "guide"):
                         if action == "guide":
@@ -1155,6 +1185,7 @@ def run(term=None):
                 optional["memory"] = memory
                 optional["calc"] = calc
                 pending = start_answer(system_prompt, candidate, language, options, knowledge, **optional)
+                t._pending = pending
                 response, action = wait_answer(t, pending, options[2], allow_retour=calculator_request)
                 if action == 'guide':
                     show_guide(t, language)
@@ -1217,4 +1248,4 @@ def run(term=None):
             memory.close()
 
 if __name__ == "__main__":
-    run()
+    terminal_link.supervise(Term, run)

@@ -28,7 +28,6 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [wifi-manager] %(levelname)s %(message)s",
     handlers=[
-        logging.FileHandler("/home/minitel/minitel-gpt/logs/wifi.log"),
         logging.StreamHandler(sys.stdout),
     ],
 )

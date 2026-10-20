@@ -1,0 +1,14 @@
+[Unit]
+Description=MinitelGPT runtime and cache housekeeping
+ConditionPathExists=/var/lib/minitel-gpt/runtime.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/minitel-runtime housekeeping
+Nice=19
+IOSchedulingClass=idle
+StandardOutput=journal
+StandardError=journal
+LogNamespace=minitel-gpt
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=100

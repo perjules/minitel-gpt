@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import pwd
+import re
 import shutil
 import subprocess
 import sys
@@ -25,7 +26,16 @@ ROOT_FILES = {
     "wifi_manager.py": "services/wifi_manager.py",
     "gmail_credential_helper.py": "scripts/gmail_credential_helper.py",
     "gmail_auth.py": "services/gmail_auth.py",
+    "journal_reader.py": "scripts/journal_reader.py",
 }
+SYSTEM_FILES = {
+    "journald-minitel-gpt.conf": "/etc/systemd/journald@minitel-gpt.conf.d/60-minitel-gpt.conf",
+    "minitel-gpt-journal-sudoers": "/etc/sudoers.d/minitel-gpt-journal",
+    "minitel-housekeeping.service": "/etc/systemd/system/minitel-housekeeping.service",
+    "minitel-housekeeping.timer": "/etc/systemd/system/minitel-housekeeping.timer",
+}
+MIN_STAGE_FREE = 1024 ** 3
+
 
 
 def atomic_json(path, value):
@@ -123,6 +133,7 @@ class Runtime:
 
     def prepare(self, source, extras, commit):
         """Create at the final path: virtual environments cannot safely be relocated."""
+        self.check_space()
         release = self.root / "releases" / uuid.uuid4().hex
         release.mkdir(parents=True, mode=0o755)
         try:
@@ -138,6 +149,8 @@ class Runtime:
                 compile((protected / name).read_bytes(), str(protected / name), "exec")
             for service in SERVICES:
                 shutil.copyfile(source / f"config/{service}.service", protected / f"{service}.service")
+            for name in SYSTEM_FILES:
+                shutil.copyfile(source / "config" / name, protected / name)
             environment = release / "venv"
             env = {
                 "PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/root",
@@ -170,8 +183,12 @@ class Runtime:
         paths = {
             self.system_path("/usr/local/sbin/minitel-runtime"): "runtime.py",
             self.system_path("/usr/local/libexec/minitel-gmail-credential"): "gmail_credential_helper.py",
+            self.system_path("/usr/local/libexec/minitel-journal"): "journal_reader.py",
         }
         for path, script in paths.items():
+            if script == "journal_reader.py" and not (self.root / "current/root" / script).exists():
+                path.unlink(missing_ok=True)  # Compatibility with retained pre-journal releases.
+                continue
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(
                 "#!/bin/sh\nexec /opt/minitel-gpt/venv/bin/python -I "
@@ -180,6 +197,17 @@ class Runtime:
             path.chmod(0o755)
 
     def units(self):
+        for name, relative in SYSTEM_FILES.items():
+            source = self.root / "current/root" / name
+            destination = self.system_path(relative)
+            if not source.exists():
+                destination.unlink(missing_ok=True)
+                continue
+            if name == "minitel-gpt-journal-sudoers":
+                self.command(["visudo", "-c", "-f", source])
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+            destination.chmod(0o440 if name.endswith("sudoers") else 0o644)
         for service in SERVICES:
             destination = self.system_path(f"/etc/systemd/system/{service}.service")
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -199,6 +227,7 @@ PrivateMounts=yes
             if (folder / "gmail.conf").exists():
                 (folder / "gmail.conf").write_text(gmail)
         self.command(["systemctl", "daemon-reload"])
+        self.command(["systemctl", "try-restart", "systemd-journald@minitel-gpt.service"])
 
     def compatibility_link(self):
         legacy = self.project / ".venv"
@@ -223,7 +252,10 @@ PrivateMounts=yes
         paths = [self.system_path(f"/etc/systemd/system/{service}.service") for service in SERVICES]
         paths += [self.system_path(f"/etc/systemd/system/{service}.service.d/{name}.conf")
                   for service in SERVICES[:2] for name in ("gmail", "pronote")]
-        paths += [self.system_path("/usr/local/sbin/minitel-runtime"), self.system_path("/usr/local/libexec/minitel-gmail-credential")]
+        paths += [self.system_path("/usr/local/sbin/minitel-runtime"),
+                  self.system_path("/usr/local/libexec/minitel-gmail-credential"),
+                  self.system_path("/usr/local/libexec/minitel-journal")]
+        paths += [self.system_path(relative) for relative in SYSTEM_FILES.values()]
         saved = {path: (path.read_bytes(), path.stat().st_mode & 0o777) if path.exists() else None for path in paths}
         previous_pointer = (self.root / "current").readlink() if (self.root / "current").is_symlink() else None
         previous_link = (self.project / ".venv").readlink() if (self.project / ".venv").is_symlink() else None
@@ -266,6 +298,7 @@ PrivateMounts=yes
                 elif (self.project / ".venv.before-uv").exists():
                     (self.project / ".venv.before-uv").rename(legacy)
             self.command(["systemctl", "daemon-reload"])
+            self.command(["systemctl", "try-restart", "systemd-journald@minitel-gpt.service"])
             if running:
                 self.command(["systemctl", "restart", *running])
             raise
@@ -274,6 +307,7 @@ PrivateMounts=yes
         """Read only required tracked files; never extract an untrusted archive as root."""
         files = ["pyproject.toml", "uv.lock", *ROOT_FILES.values()]
         files += [f"config/{service}.service" for service in SERVICES]
+        files += [f"config/{name}" for name in SYSTEM_FILES]
         for relative in files:
             result = self.command(
                 ["runuser", "-u", "minitel", "--", "git", "-C", self.project,
@@ -310,6 +344,7 @@ PrivateMounts=yes
             old["branch"] = branch
             atomic_json(self.state / "runtime.json", old)
             self.status("ready", commit=commit)
+            self.maintain()
             return
         with tempfile.TemporaryDirectory(prefix="minitel-install-") as directory:
             source = Path(directory)
@@ -317,6 +352,7 @@ PrivateMounts=yes
             candidate = self.prepare(source, extras, commit)
         self.switch(candidate, old, branch=branch)
         self.status("ready", commit=candidate["commit"])
+        self.maintain()
 
     def update(self):
         old = self.read()
@@ -333,6 +369,7 @@ PrivateMounts=yes
         self.git("merge-base", "--is-ancestor", "HEAD", target)
         if target == old["active"]["commit"]:
             self.status("ready", commit=target)
+            self.maintain()
             return
         with tempfile.TemporaryDirectory(prefix="minitel-update-") as directory:
             source = Path(directory)
@@ -341,6 +378,7 @@ PrivateMounts=yes
         self.status("activating", commit=target)
         self.switch(candidate, old, branch=branch, target=target)
         self.status("ready", commit=target)
+        self.maintain()
 
     def rollback(self):
         old = self.read()
@@ -351,6 +389,56 @@ PrivateMounts=yes
             raise RuntimeError("Commit or stash tracked changes before rolling back")
         self.switch(previous, old, branch=old["branch"], target=previous["commit"])
         self.status("ready", commit=previous["commit"])
+        self.maintain()
+
+    def check_space(self):
+        for folder in (self.root, self.state):
+            if shutil.disk_usage(folder).free < MIN_STAGE_FREE:
+                raise RuntimeError("At least 1 GiB free is required before staging; free space manually")
+
+    def housekeeping(self):
+        """Only disposable runtime/cache storage; never user files or legacy logs."""
+        state = self.read()
+        active = state.get("active")
+        if not active:
+            return
+        releases = self.root / "releases"
+        keep = set()
+        for entry in (active, state.get("previous")):
+            if entry:
+                path = Path(entry["release"])
+                if path.parent != releases or path.is_symlink() or not path.is_dir():
+                    raise RuntimeError("Invalid retained release; refusing housekeeping")
+                keep.add(path)
+        current = self.root / "current"
+        if not current.is_symlink() or current.resolve() != Path(active["release"]):
+            raise RuntimeError("Runtime pointer and state differ; refusing housekeeping")
+        for path in releases.iterdir():
+            if (path not in keep and re.fullmatch(r"[0-9a-f]{32}", path.name)
+                    and not path.is_symlink() and path.is_dir()):
+                shutil.rmtree(path)
+        cache = self.state / "uv-cache"
+        if cache.is_symlink():
+            raise RuntimeError("Unexpected cache symlink; refusing cache cleanup")
+        if cache.exists():
+            self.command([self.uv, "cache", "prune", "--cache-dir", cache],
+                         timeout=120, env={"PATH": "/usr/local/bin:/usr/bin:/bin",
+                                           "HOME": "/root", "UV_NO_CONFIG": "1",
+                                           "UV_PYTHON_DOWNLOADS": "never"})
+        print("Runtime housekeeping complete; active/previous releases and user data retained.")
+
+    def maintain(self):
+        """Post-commit maintenance failures must never undo a successful deployment."""
+        try:
+            timer = self.system_path("/etc/systemd/system/minitel-housekeeping.timer")
+            if timer.exists():
+                self.command(["systemctl", "enable", "--now", "minitel-housekeeping.timer"])
+            else:
+                self.command(["systemctl", "disable", "--now", "minitel-housekeeping.timer"])
+            self.housekeeping()
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError, KeyError, TypeError) as error:
+            print(f"Runtime maintenance deferred ({type(error).__name__}); inspect the application journal.",
+                  file=sys.stderr)
 
     def queue(self, operation):
         if not self.read().get("active"):
@@ -364,7 +452,7 @@ PrivateMounts=yes
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("install", "update", "rollback", "apply-update", "apply-rollback"))
+    parser.add_argument("operation", choices=("install", "update", "rollback", "apply-update", "apply-rollback", "housekeeping"))
     parser.add_argument("--extra", action="append", choices=sorted(EXTRAS), default=[])
     parser.add_argument("--branch")
     args = parser.parse_args()
@@ -383,6 +471,8 @@ def main():
                 manager.queue(args.operation)
             elif args.operation == "install":
                 manager.install(args.extra, args.branch)
+            elif args.operation == "housekeeping":
+                manager.housekeeping()
             else:
                 manager.status("preparing", operation=args.operation)
                 getattr(manager, args.operation.removeprefix("apply-"))()
@@ -391,7 +481,7 @@ def main():
         print("Another deployment is running.", file=sys.stderr)
         return 1
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError, SyntaxError, KeyError, TypeError) as error:
-        if initialized and args.operation not in {"update", "rollback"}:
+        if initialized and args.operation not in {"update", "rollback", "housekeeping"}:
             manager.status("failed", error_type=type(error).__name__)
         message = str(error) if isinstance(error, RuntimeError) else "Inspect journalctl -u minitel-deploy -u minitel-runtime-install."
         print(f"Deployment failed ({type(error).__name__}): {message}", file=sys.stderr)

@@ -10,8 +10,12 @@ EnvironmentFile=-/home/minitel/minitel-gpt/.env
 ExecStart=/opt/minitel-gpt/venv/bin/python /home/minitel/minitel-gpt/services/admin_ui.py
 Restart=on-failure
 RestartSec=5
-StandardOutput=append:/home/minitel/minitel-gpt/logs/admin.log
-StandardError=append:/home/minitel/minitel-gpt/logs/admin.log
+StandardOutput=journal
+StandardError=journal
+LogNamespace=minitel-gpt
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=100
+Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target

@@ -141,8 +141,91 @@ system-Python upgrade. Reapply installation after changing the system interprete
 These checks test imports and systemd running state, not application health or
 physical connectivity. Power failure during activation is not an automatically
 recovered transaction: inspect runtime state/pointer and reapply the intended
-installation before restarting services. Old releases are retained for recovery;
-remove obsolete releases manually only after checking active/previous references.
+installation before restarting services. Housekeeping retains the active and previous release pairs and removes older
+unreferenced generated releases. User archives and legacy log files are untouched.
+
+## Unattended terminal operation and bounded logs
+
+A missing adapter or failed serial read/write is an expected availability state.
+The GPT process stays alive, closes the old transport, redetects the port, and
+retries after 5, 10, 30, then 60 seconds (remaining at 60 seconds).
+Serial writes have a two-second timeout. The first failure is logged once;
+continued failures are summarized at most every five minutes. Recovery is logged
+only after 30 seconds of stable serial I/O, avoiding repeated open/fail messages.
+Unexpected application errors still retain their traceback and systemd restart.
+
+An idle read is not an error. The powered USB adapter may remain usable while the
+Minitel is off: the program cannot infer screen power from a successful port open.
+No speculative presence probes are sent. Switch the Minitel on and use SOMMAIRE
+to redraw if its power cycle was invisible to the adapter.
+
+Detected transport loss discards the interactive session, invalidates Gmail
+review tickets, and closes the memory session. Late worker responses cannot
+write to the UART or enter the new session. A new session waits until the old
+worker has finished; workers are not accumulated across repeated disconnections.
+An already-authorized external request that has reached its server cannot be
+recalled; recovery never retries sending mail or printing.
+
+The three services send stdout/stderr once to the `minitel-gpt` journal namespace.
+There are no application file handlers and no systemd append-to-file redirects.
+A namespace-specific configuration sets a 64 MiB persistent budget, 8 MiB files,
+seven-day maximum retention, 16 MiB runtime budget and 512 MiB free-space reserve.
+Size-based rotation can shorten history during heavy logging. Active files mean
+these are journal management limits, not an exact filesystem quota. Rate limits
+add a second line of defense; suppressed messages are counted by journald.
+Other programs can still fill the filesystem.
+
+```bash
+sudo journalctl --namespace=minitel-gpt -u minitel-chatgpt -f
+sudo journalctl --namespace=minitel-gpt -u wifi-manager -n 100 --no-pager
+sudo journalctl --namespace=minitel-gpt --disk-usage
+```
+
+The admin log viewer uses a root-owned isolated Python helper with three fixed,
+read-only selections. Its sudoers rule permits no arbitrary units or arguments.
+The dashboard also shows free space and sizes of legacy logs/Rose transcripts
+and persistent memory/conversations; scans are bounded and never follow links.
+Low-space warnings appear below 1 GiB free or 10% free. Partial measurements are
+labelled. Diagnostic journals rotate automatically; saved memory, conversations,
+Rose transcripts and old `logs/*.log` files are never automatically deleted.
+
+### First rollout and legacy logs
+
+This upgrade needs a **manual installer run**, because the old deployed runtime
+does not know about the new protected helper, journal policy and timer assets.
+After recovering the Pi and freeing sufficient space yourself, pull the intended
+installed branch and run `sudo bash install.sh` on that same branch. Feature
+installers use the common runtime helper and install the same policies.
+
+Existing log files are neither truncated, renamed nor removed. Their cleanup is
+the owner's responsibility. Free space is required for apt, Git and deployment;
+the installer is not a recovery mechanism for a completely full filesystem.
+Capture incident evidence before manually removing old logs.
+
+### Runtime/cache housekeeping
+
+After a successful deployment, and weekly via `minitel-housekeeping.timer`,
+maintenance retains the active and previous code/environment pairs, removes only
+unreferenced generated release directories, and runs uv's cache-prune command.
+It holds the deployment lock, validates state against the current pointer, never
+follows release-directory symlinks, and ignores unrelated/manual directories.
+Neither the legacy venv backup nor any user logs, memory or credentials are
+eligible. A failed maintenance pass does not roll back a successful deployment.
+The timer records failures in the application journal; a busy deployment causes
+that maintenance pass to defer until a subsequent deployment or scheduled run.
+
+```bash
+sudo /usr/local/sbin/minitel-runtime housekeeping
+systemctl list-timers minitel-housekeeping.timer
+sudo journalctl --namespace=minitel-gpt -u minitel-housekeeping --no-pager
+```
+
+Before building an environment the helper requires at least 1 GiB free on both
+runtime and cache filesystems. This is a staging guard, not a reservation or a
+guarantee about concurrent disk users. Journal settings, the reader and timer
+are installed with the protected release assets and restored on activation
+failure. Explicit rollback to a pre-journal release removes the added integration
+and disables the maintenance timer; that old code resumes its old logging policy.
 
 ## Developer workflow
 
@@ -178,3 +261,11 @@ that interpreter. Verify title fonts, serial display, Wi-Fi reconnection/hotspot
 printer preview/BLE, and reboot without package networking. Exercise a deliberate
 failed preparation, a normal update and retained-pair rollback. Keep these results
 separate from pytest's simulated deployment evidence.
+
+For terminal/logging acceptance, leave the Minitel powered off overnight, then
+test adapter removal/reinsertion (including port renumbering), welcome-screen
+recovery, quiet retry summaries and bounded journal growth. Check admin log
+permissions, storage warnings, timer execution and a retained-pair rollback.
+Verify that existing log files and user archives remain unchanged. Hosted CI
+simulates failures and validates configuration; it cannot establish physical
+Minitel/USB behavior or the Pi's effective journal permissions and storage use.
