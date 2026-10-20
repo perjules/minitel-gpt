@@ -76,9 +76,13 @@ class Session:
         self.approval = None
 
 
-def print_with_progress(document, report):
+def print_with_progress(document, report, *, track=None, timeout=180):
     """Run BLE in worker; only calling terminal loop writes to screen."""
     from printing.mxw01 import MXW01
+    try:
+        from .terminal_link import WorkerExpired
+    except ImportError:
+        from terminal_link import WorkerExpired
 
     finished = threading.Event()
     errors = []
@@ -87,13 +91,16 @@ def print_with_progress(document, report):
         try:
             pages = render_document_pages(document)
             address = os.environ.get("MXW01_ADDRESS", "48:0F:57:1E:0E:EB")
-            asyncio.run(MXW01(address).print_images(pages))
+            asyncio.run(asyncio.wait_for(MXW01(address).print_images(pages), timeout=timeout))
         except Exception as exc:  # noqa: BLE001 - Forward every worker failure to the caller for reporting.
             errors.append(exc)
         finally:
             finished.set()
 
+    started = time.monotonic()
     thread = threading.Thread(target=worker, daemon=True)
+    if track is not None:
+        track((thread, None, started))
     thread.start()
     stages = (
         "REQUISITION DU SERVICE REPROGRAPHIE",
@@ -103,8 +110,9 @@ def print_with_progress(document, report):
         "CONTROLE DES ARCHIVES CENTRALES",
     )
     index = 0
-    started = time.monotonic()
     while not finished.wait(0.5):
+        if time.monotonic() - started >= timeout + 5:
+            raise WorkerExpired("Printer worker exceeded its lifetime; check paper before retrying")
         if index < len(stages) and index * 3 <= (time.monotonic() - started):
             report(stages[index])
             index += 1

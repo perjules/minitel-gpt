@@ -58,6 +58,8 @@ CAPTIVE_PROBES = (
 def captive_redirect():
     from flask import redirect as _redir
     from flask import request
+    if request.path == "/healthz":
+        return None
     host = request.host.split(":")[0]
     path = request.path
     # Si on est en hotspot et que la requête ne vise pas déjà notre IP,
@@ -366,6 +368,11 @@ def connect():
         NETWORK_LOCK.release()
         return jsonify(success=False, error="Setup unavailable"), 503
     return jsonify(success=True, queued=True, ssid=ssid), 202
+
+
+@app.route("/healthz")
+def health():
+    return jsonify(ok=True)
 
 
 @app.route("/status")

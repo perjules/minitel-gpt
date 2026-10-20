@@ -293,3 +293,30 @@ open for deliberate local provisioning. Passwords retain spaces and never enter
 command logs. A stopped HTTP server causes the manager to fail and restart.
 Validate hotspot retry windows, wrong-password recovery and live provisioning on
 the Pi before promoting to main; offline tests mock every NetworkManager command.
+
+## Operation deadlines and resource budgets
+
+Background requests have a six-minute maximum lifetime. Terminal input polling
+and reconnection supervision detect expired workers. Since Python cannot safely
+cancel arbitrary SDK threads, the production terminal then exits immediately
+with failure so systemd starts a fresh process; this bypasses potentially blocked
+SDK shutdown hooks. No submitted email, print job or user request is replayed.
+An already delivered external operation remains irreversible. Printing also has
+a three-minute job budget and tracks its worker across a serial disconnect.
+
+Terminal questions are capped at 2000 characters. Overflow discards the entire
+line on ENVOI and requests fresh input; it never submits a truncated command.
+Admin HTTP bodies are limited to 2 MiB and knowledge uploads to 256 KiB per file.
+All files in an upload are checked before any existing file is replaced. Legacy
+knowledge reads consume at most 64 KiB per file before the existing prompt budget.
+
+Runtime subprocesses have a 60-second default deadline; Git fetch gets two
+minutes, uv environment preparation twenty minutes, and optional apt provisioning
+ten minutes. Timeouts kill the command's process group, including Git transport
+children. NetworkManager and admin service/status calls have shorter deadlines.
+
+A deployment now requires five seconds with stable service process identities,
+within a twenty-second readiness window. Admin and Wi-Fi must also answer their
+local `/healthz` endpoints. The terminal may be waiting for an unplugged adapter.
+Legacy rollback releases without health routes receive process stability checks
+only. Readiness failure triggers the existing restoration transaction.

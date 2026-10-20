@@ -84,7 +84,7 @@ def test_successful_recovery_requires_stable_io_and_closes_old_transport(caplog)
 def test_recovery_waits_for_discarded_worker_before_starting_another_session():
     worker = Mock()
     worker.is_alive.side_effect = [True, True, False]
-    old = SimpleNamespace(close=Mock(), _pending=(worker, Mock(), 0))
+    old = SimpleNamespace(close=Mock(), _pending=(worker, Mock(), __import__("time").monotonic()))
     new = SimpleNamespace(close=Mock())
     opened = iter([old, new])
     waits = []

@@ -1,5 +1,6 @@
 """Serial availability supervision; an idle or switched-off terminal is normal."""
 import logging
+import os
 import time
 
 log = logging.getLogger(__name__)
@@ -7,6 +8,29 @@ log = logging.getLogger(__name__)
 
 class Unavailable(Exception):
     """Only transport operations may raise this; unrelated bugs still fail loudly."""
+
+
+MAX_WORKER_AGE = 360
+
+
+class WorkerExpired(RuntimeError):
+    """A non-cancellable worker exceeded its lifetime; never replay its operation."""
+
+
+def check_worker(pending, *, clock=time.monotonic):
+    if (pending is not None and clock() - pending[2] > MAX_WORKER_AGE
+            and pending[0].is_alive()):
+        raise WorkerExpired("Background operation exceeded its lifetime")
+
+
+def serve(open_terminal, session, *, exit_process=os._exit):
+    try:
+        supervise(open_terminal, session)
+    except WorkerExpired:
+        # Python cannot safely stop a thread. A bounded process restart also
+        # avoids interpreter shutdown hanging on SDK executor cleanup hooks.
+        log.error("Background operation expired; restarting without replay")
+        exit_process(1)
 
 
 def supervise(open_terminal, session, *, sleep=time.sleep, clock=time.monotonic):
@@ -20,7 +44,8 @@ def supervise(open_terminal, session, *, sleep=time.sleep, clock=time.monotonic)
     while True:
         # A discarded HTTP response has no UART access. Do not accumulate workers
         # or overlap tool operations with a newly created interactive session.
-        if retired is not None and retired.is_alive():
+        check_worker(retired, clock=clock)
+        if retired is not None and retired[0].is_alive():
             sleep(1)
             continue
         retired = None
@@ -55,7 +80,7 @@ def supervise(open_terminal, session, *, sleep=time.sleep, clock=time.monotonic)
             if terminal is not None:
                 pending = getattr(terminal, "_pending", None)
                 if pending is not None:
-                    retired = pending[0]
+                    retired = pending
                 terminal.close()
         sleep(delays[delay_index])
         delay_index = min(delay_index + 1, len(delays) - 1)

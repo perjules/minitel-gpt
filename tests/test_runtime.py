@@ -23,6 +23,7 @@ def manager(tmp_path, monkeypatch):
     monkeypatch.setattr(instance, "git", Mock(return_value="old-commit"))
     monkeypatch.setattr(instance, "running", lambda: ["minitel-chatgpt", "admin-ui"])
     monkeypatch.setattr(runtime.pwd, "getpwnam", lambda _: SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid()))
+    monkeypatch.setattr(instance, "wait_ready", Mock())
     return instance
 
 
@@ -366,3 +367,15 @@ def test_maintenance_failure_does_not_turn_a_successful_deployment_into_failure(
     monkeypatch.setattr(manager, "housekeeping", Mock(side_effect=OSError("full")))
     manager.maintain()
     assert json.loads((manager.state / "deployment.json").read_text())["phase"] == "ready"
+
+
+def test_readiness_failure_rolls_back_before_committing_new_state(manager):
+    before, after = release(manager, "old"), release(manager, "new")
+    manager.activate(before)
+    state = {"active": before, "branch": "develop", "previous": None}
+    runtime.atomic_json(manager.state / "runtime.json", state)
+    manager.wait_ready.side_effect = RuntimeError("Service restarted during readiness checks")
+    with pytest.raises(RuntimeError, match="restarted"):
+        manager.switch(after, state, branch="develop", target="new")
+    assert manager.read() == state
+    assert (manager.root / "current").resolve() == Path(before["release"])

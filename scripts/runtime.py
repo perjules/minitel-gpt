@@ -7,6 +7,7 @@ import os
 import pwd
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,8 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import ProxyHandler, build_opener
 
 PROJECT = Path("/home/minitel/minitel-gpt")
 RUNTIME = Path("/opt/minitel-gpt")
@@ -88,13 +91,31 @@ class Runtime:
                 raise RuntimeError("The installed uv executable and its parents must be root-owned")
 
     def command(self, args, **kwargs):
-        return subprocess.run([str(arg) for arg in args], check=True, **kwargs)
+        # Kill the whole command group on timeout, including Git transports that
+        # otherwise keep captured pipes open after their parent is terminated.
+        args = [str(arg) for arg in args]
+        timeout = kwargs.pop("timeout", 60)
+        if kwargs.pop("capture_output", False):
+            kwargs.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        with subprocess.Popen(args, start_new_session=True, **kwargs) as process:
+            try:
+                output, errors = process.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                output, errors = process.communicate(timeout=5)
+                raise subprocess.TimeoutExpired(args, timeout, output=output, stderr=errors) from None
+            if process.returncode:
+                raise subprocess.CalledProcessError(process.returncode, args, output, errors)
+            return subprocess.CompletedProcess(args, process.returncode, output, errors)
 
     def git(self, *args):
         # Keep Git credentials/config and checkout ownership with the original user.
         return self.command(
             ["runuser", "-u", "minitel", "--", "git", "-C", self.project, *args],
-            capture_output=True, text=True,
+            capture_output=True, text=True, timeout=120 if args[0] == "fetch" else 30,
         ).stdout.strip()
 
     def read(self):
@@ -180,9 +201,9 @@ class Runtime:
                        "--no-sources", "--no-build-package", "cryptography", "--python", "/usr/bin/python3"]
             for extra in extras:
                 command.extend(["--extra", extra])
-            self.command(command, env=env)
+            self.command(command, env=env, timeout=1200)
             self.probe(environment, extras)
-            return {"release": str(release), "commit": commit, "extras": extras, "python": python_version}
+            return {"release": str(release), "commit": commit, "extras": extras, "python": python_version, "healthcheck": 1}
         except Exception:
             shutil.rmtree(release)
             raise
@@ -253,8 +274,52 @@ PrivateMounts=yes
 
     def running(self):
         return [service for service in SERVICES if subprocess.run(
-            ["systemctl", "is-active", "--quiet", service], check=False,
+            ["systemctl", "is-active", "--quiet", service], check=False, timeout=5,
         ).returncode == 0]
+
+    def http_ready(self, service):
+        port = {"admin-ui": 8080, "wifi-manager": 80}.get(service)
+        if port is None:
+            return True  # An unplugged serial terminal is a healthy waiting state.
+        try:
+            opener = build_opener(ProxyHandler({}))
+            with opener.open(f"http://127.0.0.1:{port}/healthz", timeout=1) as response:
+                return response.status == 200 and json.loads(response.read(1024)).get("ok") is True
+        except (OSError, URLError, ValueError, TypeError, AttributeError):
+            return False
+
+    def wait_ready(self, services, *, healthchecks=True, timeout=20, stable_for=5):
+        deadline = time.monotonic() + timeout
+        stable = None
+        identities = {}
+        while time.monotonic() < deadline:
+            healthy = True
+            for service in services:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError("Service readiness deadline exceeded")
+                self.command(["systemctl", "is-active", "--quiet", service], timeout=min(5, remaining))
+                details = self.command(
+                    ["systemctl", "show", "--property=MainPID", "--property=NRestarts", service],
+                    capture_output=True, text=True, timeout=min(5, remaining),
+                ).stdout.strip()
+                values = dict(line.split("=", 1) for line in details.splitlines() if "=" in line)
+                if not values.get("MainPID", "0").isdigit() or int(values.get("MainPID", "0")) == 0:
+                    raise RuntimeError("Service has no running main process")
+                if service in identities and identities[service] != details:
+                    raise RuntimeError("Service restarted during readiness checks")
+                identities[service] = details
+                if healthchecks and not self.http_ready(service):
+                    healthy = False
+            if healthy:
+                if stable is None:
+                    stable = time.monotonic()
+                elif time.monotonic() - stable >= stable_for:
+                    return
+            else:
+                stable = None
+            time.sleep(min(1, max(0, deadline - time.monotonic())))
+        raise RuntimeError("Service readiness deadline exceeded")
 
     def switch(self, candidate, old, *, branch, target=None):
         running = self.running()
@@ -283,6 +348,8 @@ PrivateMounts=yes
                 # With multiple units is-active succeeds if *any* is active.
                 for service in running:
                     self.command(["systemctl", "is-active", "--quiet", service])
+            if running:
+                self.wait_ready(running, healthchecks=bool(candidate.get("healthcheck")))
             atomic_json(self.state / "runtime.json", {
                 "version": 1, "branch": branch, "active": candidate, "previous": old.get("active"),
             })
@@ -338,7 +405,7 @@ PrivateMounts=yes
         extras = self.selected_extras(requested, old)
         # Legacy detection and explicit --extra must provision the same native prerequisites.
         if "printer" in extras:
-            self.command(["apt-get", "install", "-y", "bluez", "fonts-dejavu-core", "libjpeg-dev", "zlib1g-dev"])
+            self.command(["apt-get", "install", "-y", "bluez", "fonts-dejavu-core", "libjpeg-dev", "zlib1g-dev"], timeout=600)
         active = old.get("active", {})
         reusable = active.get("commit") == commit and active["extras"] == extras and active.get("python") == self.python_version()
         if reusable:

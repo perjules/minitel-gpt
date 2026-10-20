@@ -25,6 +25,7 @@ try:  # Support both systemd's direct script and package imports in tests.
     from . import (
         calculator,
         gmail_mail,
+        io_limits,
         memory_session,
         mistral_answers,
         printing_session,
@@ -36,6 +37,7 @@ try:  # Support both systemd's direct script and package imports in tests.
 except ImportError:
     import calculator
     import gmail_mail
+    import io_limits
     import memory_session
     import mistral_answers
     import printing_session
@@ -208,9 +210,9 @@ def call_llm(system_prompt, history):
 def get_ip():
     """IP locale (wlan0) pour l'affichage de l'accès admin."""
     try:
-        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True, check=False).stdout
+        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True, check=False, timeout=5).stdout
         return out.split()[0] if out.split() else None
-    except OSError:
+    except (OSError, subprocess.SubprocessError):
         return None
 
 # One stream only: production systemd sends it to the bounded application journal.
@@ -263,7 +265,7 @@ def load_knowledge(active_key):
     total = 0
     for f in sorted(folder.glob("*.txt")):
         try:
-            txt = f.read_text(encoding="utf-8", errors="ignore").strip()
+            txt = io_limits.read_knowledge(f)
         except OSError as error:
             log.warning("Knowledge file unreadable (%s)", type(error).__name__)
             continue
@@ -415,6 +417,7 @@ class Term:
         """Lit une touche. Retourne ('char', c) ou ('fn', code) ou ('timeout', None)."""
         end = time.time() + timeout
         while time.time() < end:
+            terminal_link.check_worker(getattr(self, "_pending", None))
             b = self.read_byte()
             if b is None:
                 continue
@@ -820,11 +823,19 @@ def read_question(t: Term, allow_empty=False, calculator_mode=False, navigation_
     t.w(FG_GREEN)
     t.w("> ")
     buf = []
+    overflow = False
     # Le Minitel fait l'écho local des frappes : on ne ré-écho PAS côté Pi.
     while True:
         kind, code = t.read_key(IDLE_TIMEOUT)
         if kind == 'timeout':
             return None, 'timeout'
+        submitted = kind == 'fn' and code == K_ENVOI or kind == 'char' and code in (CR, LF)
+        if overflow and submitted:
+            t.line("Saisie trop longue (2000 max). Recommencez.")
+            t.w("> ")
+            buf.clear()
+            overflow = False
+            continue
         if kind == 'fn':
             if navigation_mode and code in (K_SUITE, K_RETOUR):
                 return 'SUIVANT' if code == K_SUITE else 'PRECEDENT', 'envoi'
@@ -850,7 +861,10 @@ def read_question(t: Term, allow_empty=False, calculator_mode=False, navigation_
                 buf.pop()
                 t.w(bytes([BS, 0x20, BS]))
         elif 0x20 <= c <= 0x7E:
-            buf.append(chr(c))       # pas d'écho (le Minitel l'affiche)
+            if len(buf) < io_limits.MAX_QUESTION_CHARS and not overflow:
+                buf.append(chr(c))
+            else:
+                overflow = True
 
 
 def show_response(t: Term, text: str, language="fr", allow_retour=False):
@@ -925,8 +939,11 @@ def execute_print(t, document, language):
     t.line("")
     try:
         printing_session.print_with_progress(
-            document, lambda line: t.line(safe_display(line))
+            document, lambda line: t.line(safe_display(line)),
+            track=lambda pending: setattr(t, "_pending", pending),
         )
+    except (terminal_link.Unavailable, terminal_link.WorkerExpired):
+        raise
     except Exception as exc:  # noqa: BLE001 - Optional printer failures must not end the terminal session.
         log.warning("Printing failed: %s", exc)
         return ("ECHEC REPROGRAPHIE: " if language == "fr" else "PRINT FAILURE: ") + str(exc)
@@ -1248,4 +1265,4 @@ def run_session(t):
             memory.close()
 
 if __name__ == "__main__":
-    terminal_link.supervise(Term, run)
+    terminal_link.serve(Term, run)

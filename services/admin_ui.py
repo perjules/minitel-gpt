@@ -19,6 +19,7 @@ from pathlib import Path
 
 from flask import (
     Flask,
+    abort,
     jsonify,
     redirect,
     render_template_string,
@@ -33,6 +34,7 @@ try:
     from . import (
         calculator,
         gmail_mail,
+        io_limits,
         memory_session,
         mistral_answers,
         pronote,
@@ -42,6 +44,7 @@ try:
 except ImportError:
     import calculator
     import gmail_mail
+    import io_limits
     import memory_session
     import mistral_answers
     import pronote
@@ -155,6 +158,7 @@ def to_minitel_ascii(s: str) -> str:
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
+app.config["MAX_CONTENT_LENGTH"] = io_limits.MAX_REQUEST_BYTES
 
 @app.after_request
 def no_cache(response):
@@ -217,7 +221,7 @@ def load_knowledge_blob(key):
     parts, total = [], 0
     for f in sorted(folder.glob("*.txt")):
         try:
-            txt = f.read_text(encoding="utf-8", errors="ignore").strip()
+            txt = io_limits.read_knowledge(f)
         except OSError as error:
             log.warning("Knowledge file unreadable (%s)", type(error).__name__)
             continue
@@ -331,20 +335,30 @@ def require_login(f):
 
 # ── Services ─────────────────────────────────────────────────────────────
 def restart_terminal():
-    r = subprocess.run(["sudo", "systemctl", "restart", "minitel-chatgpt"],
-                       capture_output=True, text=True, check=False)
-    return r.returncode == 0
+    try:
+        r = subprocess.run(["sudo", "-n", "systemctl", "restart", "minitel-chatgpt"],
+                           capture_output=True, text=True, check=False, timeout=15)
+        return r.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
 
 def svc_status(name):
-    return subprocess.run(["systemctl", "is-active", name],
-                          capture_output=True, text=True, check=False).stdout.strip()
+    try:
+        return subprocess.run(["systemctl", "is-active", name], capture_output=True,
+                              text=True, check=False, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unavailable"
+
 
 def ip_address():
     try:
-        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True, check=False).stdout
+        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True,
+                             check=False, timeout=5).stdout
         return out.split()[0] if out.split() else "?"
-    except OSError:
+    except (OSError, subprocess.SubprocessError):
         return "?"
+
 
 def log_tail(name, n=40):
     if name not in {"chatgpt", "wifi", "admin"}:
@@ -1011,6 +1025,11 @@ document.querySelectorAll('.clearkey input[type=checkbox]').forEach(function(cb)
 def assets(filename):
     return send_from_directory(ASSETS_DIR, filename)
 
+@app.route("/healthz")
+def health():
+    return jsonify(ok=True)
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     error = None
@@ -1296,15 +1315,20 @@ def upload_knowledge():
     folder = KNOWLEDGE_DIR / key
     folder.mkdir(parents=True, exist_ok=True)
     files = request.files.getlist("files")
-    n = 0
+    uploads = []
     for f in files:
         if not f or not f.filename:
             continue
         name = secure_filename(f.filename)
         if not name.lower().endswith(".txt"):
             name += ".txt"
-        f.save(str(folder / name))
-        n += 1
+        content = f.stream.read(io_limits.KNOWLEDGE_FILE_BYTES + 1)
+        if len(content) > io_limits.KNOWLEDGE_FILE_BYTES:
+            abort(413, "Knowledge file exceeds 256 KiB")
+        uploads.append((name, content))
+    for name, content in uploads:
+        (folder / name).write_bytes(content)
+    n = len(uploads)
     if key == data["active"]:
         restart_terminal()
     session["flash"] = f"{n} fichier(s) ajouté(s) à « {data['presets'][key].get('label', key)} »." if n else "Aucun fichier .txt valide."
