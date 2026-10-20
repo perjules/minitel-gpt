@@ -1,6 +1,8 @@
 """Bounded operational logging without opening or deleting legacy log files."""
 import configparser
 import errno
+import re
+import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -108,3 +110,27 @@ def test_storage_endpoint_requires_login_and_handles_unavailable_storage(monkeyp
         session["logged_in"] = True
     monkeypatch.setattr(admin.storage_health, "status", Mock(side_effect=OSError("full")))
     assert client.get("/storage-status").status_code == 503
+
+
+@pytest.mark.skipif(shutil.which("systemd-analyze") is None, reason="systemd syntax tool unavailable")
+def test_systemd_accepts_units_and_timer_without_installing_them(tmp_path):
+    paths = []
+    for name in (*runtime.SERVICES, "minitel-housekeeping"):
+        path = tmp_path / f"{name}.service"
+        # Validate the real unit directives on the host; substitute only the Pi's
+        # executable and working directory. Never start or install a service.
+        text = (ROOT / f"config/{name}.service").read_text()
+        text = re.sub(r"(?m)^ExecStart=.*$", "ExecStart=/usr/bin/true", text)
+        text = re.sub(r"(?m)^WorkingDirectory=.*$", "WorkingDirectory=/tmp", text)
+        path.write_text(text)
+        paths.append(str(path))
+    timer = tmp_path / "minitel-housekeeping.timer"
+    timer.write_bytes((ROOT / "config/minitel-housekeeping.timer").read_bytes())
+    subprocess.run(["systemd-analyze", "verify", "--man=no", *paths, str(timer)],
+                   capture_output=True, text=True, check=True, timeout=20)
+
+
+@pytest.mark.skipif(shutil.which("visudo") is None, reason="sudoers syntax tool unavailable")
+def test_restricted_journal_sudo_rule_parses():
+    subprocess.run(["visudo", "-c", "-f", str(ROOT / "config/minitel-gpt-journal-sudoers")],
+                   capture_output=True, text=True, check=True, timeout=5)

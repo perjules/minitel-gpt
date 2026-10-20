@@ -448,7 +448,7 @@ PrivateMounts=yes
                 self.command(["systemctl", "disable", "--now", "minitel-housekeeping.timer"])
             self.housekeeping()
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError, KeyError, TypeError) as error:
-            print(f"Runtime maintenance deferred ({type(error).__name__}); inspect the application journal.",
+            print(f"Runtime maintenance deferred ({type(error).__name__}); inspect the installer/deployment journal.",
                   file=sys.stderr)
 
     def queue(self, operation):

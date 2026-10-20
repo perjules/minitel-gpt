@@ -27,7 +27,7 @@ def supervise(open_terminal, session, *, sleep=time.sleep, clock=time.monotonic)
         terminal = None
         opened = clock()
 
-        def activity():
+        def activity(opened=opened):
             nonlocal outage, attempts, delay_index
             # Opening the adapter, or one successful write, is not recovery.
             # Require sustained successful I/O to avoid flapping log floods.
