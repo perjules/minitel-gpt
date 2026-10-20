@@ -35,16 +35,20 @@ try:  # Support both systemd's direct script and package imports in tests.
         terminal_link,
     )
 except ImportError:
-    import calculator
-    import gmail_mail
-    import io_limits
-    import memory_session
-    import mistral_answers
-    import printing_session
-    import pronote
-    import pronote_answers
-    import pronote_mode
-    import terminal_link
+    # Direct systemd entry point: keep one identity for exception/session classes.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from services import (
+        calculator,
+        gmail_mail,
+        io_limits,
+        memory_session,
+        mistral_answers,
+        printing_session,
+        pronote,
+        pronote_answers,
+        pronote_mode,
+        terminal_link,
+    )
 
 try:
     from . import rose, rose_terminal

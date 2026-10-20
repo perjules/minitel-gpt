@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from web_client import csrf_client
+
 from services import admin_ui as admin
 from services import mistral_answers as engine
 
@@ -43,7 +45,7 @@ class AdminAnswerTests(unittest.TestCase):
 
     def test_route_retains_full_urls_without_ascii_rewrite(self):
         admin.app.config["TESTING"] = True
-        client = admin.app.test_client()
+        client = csrf_client(admin.app)
         with client.session_transaction() as session:
             session["logged_in"] = True
         # Match the existing authentication convention.

@@ -204,7 +204,7 @@ class AdminMailTests(unittest.TestCase):
         self.assertIsNone(self.mail.draft)
         self.assertEqual(self.mail.items, [])
         self.make_draft()
-        self.client.get("/logout")
+        self.client.post("/logout", data={"csrf": self.csrf})
         self.assertIsNone(self.mail.draft)
         self.assertFalse(admin.MAIL_SESSIONS)
 

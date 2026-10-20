@@ -4,6 +4,7 @@ Interface d'administration MINITEL GPT - http://<ip>:8080  (mot de passe 13100)
 Navigation par onglets : Tableau de bord · Personnalités · Paramètres.
 """
 import hmac
+import io
 import json
 import logging
 import os
@@ -17,6 +18,7 @@ from collections import OrderedDict
 from functools import wraps
 from pathlib import Path
 
+from dotenv import dotenv_values
 from flask import (
     Flask,
     abort,
@@ -33,6 +35,7 @@ from werkzeug.utils import secure_filename
 try:
     from . import (
         calculator,
+        config_store,
         gmail_mail,
         io_limits,
         memory_session,
@@ -43,6 +46,7 @@ try:
     )
 except ImportError:
     import calculator
+    import config_store
     import gmail_mail
     import io_limits
     import memory_session
@@ -65,14 +69,17 @@ def admin_session_secret():
     if configured and configured != "minitel-secret-1985":
         return configured
     secret_file = PROJ_DIR / "config" / "admin-session.key"
-    try:
-        descriptor = os.open(secret_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        return secret_file.read_text().strip()
-    with os.fdopen(descriptor, "w") as stream:
+    with config_store.locked(secret_file):
+        if secret_file.exists():
+            try:
+                value = config_store.read_bytes(secret_file).decode().strip()
+            except UnicodeError:
+                value = ""
+            if len(value) >= 32:
+                return value
         value = secrets.token_hex(32)
-        stream.write(value)
-    return value
+        config_store.atomic_write(secret_file, value.encode(), mode=0o600)
+        return value
 
 
 SECRET_KEY = admin_session_secret()
@@ -158,7 +165,52 @@ def to_minitel_ascii(s: str) -> str:
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
-app.config["MAX_CONTENT_LENGTH"] = io_limits.MAX_REQUEST_BYTES
+app.config.update(MAX_CONTENT_LENGTH=io_limits.MAX_REQUEST_BYTES,
+                  SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+
+def csrf_token():
+    session.setdefault("csrf_token", secrets.token_urlsafe(32))
+    return session["csrf_token"]
+
+
+@app.context_processor
+def security_context():
+    return {"csrf_token": csrf_token}
+
+
+@app.before_request
+def protect_requests():
+    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return
+    if request.content_length is not None and request.content_length > io_limits.MAX_REQUEST_BYTES:
+        abort(413)
+    if not session.get("logged_in") and request.endpoint != "login":
+        return  # The route's login decorator keeps its normal redirect.
+    token = request.headers.get("X-CSRF-Token") or request.form.get("csrf", "")
+    expected = session.get("csrf_token", "")
+    if not expected or not hmac.compare_digest(token.encode(errors="replace"), expected.encode()):
+        abort(403, "Invalid request token; reload the page")
+    if request.is_json and not isinstance(request.get_json(), dict):
+        abort(400, "JSON object required")
+
+
+@app.errorhandler(config_store.InvalidConfig)
+def invalid_configuration(error):
+    return jsonify(ok=False, error=str(error)), 400
+
+
+@app.errorhandler(config_store.StorageFailure)
+def configuration_unavailable(error):
+    return jsonify(ok=False, error="Enregistrement indisponible ou non confirmé. Rechargez avant de réessayer."), 503
+
+
+def prompt_transaction(function):
+    @wraps(function)
+    def transaction(*args, **kwargs):
+        with config_store.locked(PROMPTS_FILE):
+            return function(*args, **kwargs)
+    return transaction
+
 
 @app.after_request
 def no_cache(response):
@@ -175,20 +227,20 @@ def no_cache(response):
 
 # ── Helpers prompts ──────────────────────────────────────────────────────
 def ensure_prompts():
-    """prompts.json est local (gitignoré) : recréé depuis prompts.default.json
-    s'il est absent (1er lancement / après une mise à jour qui ne l'écrase pas)."""
-    if not PROMPTS_FILE.exists() and PROMPTS_DEFAULT.exists():
-        PROMPTS_FILE.write_text(PROMPTS_DEFAULT.read_text(encoding="utf-8"),
-                                encoding="utf-8")
+    with config_store.locked(PROMPTS_FILE):
+        if not PROMPTS_FILE.exists() and PROMPTS_DEFAULT.exists():
+            config_store.save_prompts(PROMPTS_FILE, config_store.read_prompts(PROMPTS_DEFAULT))
+
 
 def load_prompts():
-    ensure_prompts()
-    with open(PROMPTS_FILE) as f:
-        return json.load(f)
+    with config_store.locked(PROMPTS_FILE):
+        ensure_prompts()
+        return config_store.read_prompts(PROMPTS_FILE)
+
 
 def save_prompts(data):
-    with open(PROMPTS_FILE, "w") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    config_store.save_prompts(PROMPTS_FILE, data)
+
 
 def normalized_presets(data):
     out = {}
@@ -202,8 +254,29 @@ def normalized_presets(data):
     return out
 
 # ── Fichiers de connaissance par preset ──────────────────────────────────
+def knowledge_folder(key):
+    if (not isinstance(key, str) or not key or key in {".", ".."}
+            or any(c in key for c in "/\\\x00") or key not in load_prompts()["presets"]):
+        abort(400, "Unknown personality")
+    base = KNOWLEDGE_DIR.resolve()
+    folder = base / key
+    if folder.is_symlink() or folder.resolve().parent != base:
+        abort(400, "Invalid knowledge directory")
+    return folder
+
+
+def knowledge_target(folder, name):
+    if (not name or Path(name).name != name or "\\" in name or "\x00" in name
+            or not name.lower().endswith(".txt")):
+        abort(400, "Invalid knowledge filename")
+    target = folder / name
+    if target.is_symlink() or target.resolve().parent != folder.resolve():
+        abort(400, "Invalid knowledge path")
+    return target
+
+
 def list_knowledge(key):
-    folder = KNOWLEDGE_DIR / key
+    folder = knowledge_folder(key)
     if not folder.is_dir():
         return []
     return sorted(f.name for f in folder.glob("*.txt"))
@@ -215,7 +288,7 @@ KNOWLEDGE_MAX_CHARS = 12000   # même plafond que le terminal
 
 def load_knowledge_blob(key):
     """Concatène les .txt de connaissance d'un preset (comme le terminal)."""
-    folder = KNOWLEDGE_DIR / key
+    folder = knowledge_folder(key)
     if not folder.is_dir():
         return ""
     parts, total = [], 0
@@ -235,26 +308,21 @@ def load_knowledge_blob(key):
 
 # ── Helpers .env ─────────────────────────────────────────────────────────
 def read_env():
-    env = {}
-    if ENV_FILE.exists():
-        for line in ENV_FILE.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                env[k.strip()] = v.strip()
-    return env
+    with config_store.locked(ENV_FILE):
+        if not ENV_FILE.exists():
+            return {}
+        # Parse quoted values consistently, without interpolating other secrets.
+        try:
+            content = config_store.read_bytes(ENV_FILE).decode()
+        except UnicodeError:
+            raise config_store.InvalidConfig("Invalid environment encoding") from None
+        return {key: value for key, value in dotenv_values(
+            stream=io.StringIO(content), interpolate=False).items() if value is not None}
+
 
 def write_env_key(key, value):
-    lines = ENV_FILE.read_text().splitlines() if ENV_FILE.exists() else []
-    found = False
-    for i, line in enumerate(lines):
-        if line.strip().startswith(f"{key}="):
-            lines[i] = f"{key}={value}"
-            found = True
-            break
-    if not found:
-        lines.append(f"{key}={value}")
-    ENV_FILE.write_text("\n".join(lines) + "\n")
+    config_store.update_env(ENV_FILE, {key: value})
+
 
 def mistral_key():
     return read_env().get("MISTRAL_KEY", os.getenv("MISTRAL_KEY", ""))
@@ -572,7 +640,7 @@ input{width:100%;padding:12px;background:#1b1b1f;border:1px solid #4ecdc4;color:
 button{width:100%;margin-top:12px;padding:12px;background:#4ecdc4;color:#06201d;border:none;border-radius:6px;font-weight:bold;cursor:pointer;font-size:1em}
 button:hover{background:#3db5ab}.err{color:#ff5b5b;margin-top:10px}</style></head><body>
 <div class=box><div class=logo-badge><img src=/assets/logo-minitel-gpt.png alt="MINITEL GPT"></div>
-<form method=POST><input type=password name=password placeholder="••••••" autofocus>
+<form method=POST><input type=hidden name=csrf value="{{csrf_token()}}"><input type=password name=password placeholder="••••••" autofocus>
 <button>Entrer</button></form>{% if error %}<div class=err>{{error}}</div>{% endif %}</div></body></html>"""
 
 ADMIN_HTML = """<!DOCTYPE html><html lang=fr><head><meta charset=UTF-8>
@@ -635,7 +703,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 </style></head><body>
 <div class=topbar>
   <div class=brand><span class=logo-badge><img src=/assets/logo-minitel-gpt.png alt=""></span><b>Administration</b></div>
-  <a href=/logout class=logout>Déconnexion</a>
+  <form method=POST action=/logout><input type=hidden name=csrf value="{{csrf_token()}}"><button class=logout>Déconnexion</button></form>
 </div>
 
 {% if flash %}<div class="flash {{'fok' if flash_ok else 'ferr'}}">{{flash}}</div>{% endif %}
@@ -656,7 +724,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <div class=row><span class="dot {{'on' if st=='active' else 'off'}}"></span>{{s}}
       <span style="margin-left:auto;color:{{'#4ecdc4' if st=='active' else '#667'}}">{{st}}</span></div>
     {% endfor %}
-    <form method=POST action=/restart style=margin-top:10px>
+    <form method=POST action=/restart style=margin-top:10px><input type=hidden name=csrf value="{{csrf_token()}}">
       <button class="btn btn-s">↺ Redémarrer le terminal</button></form>
     <p class=sub>« inactive » sur wifi/boot = normal (services ponctuels).</p>
   </div>
@@ -669,7 +737,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
         <span class=name>{{p.label}}</span>
         {% if k==active_key %}<span class=tag>active</span>
         {% else %}
-        <form method=POST action=/apply-preset style=margin:0>
+        <form method=POST action=/apply-preset style=margin:0><input type=hidden name=csrf value="{{csrf_token()}}">
           <input type=hidden name=preset_key value="{{k}}">
           <button class="btn btn-s" style=margin:0;padding:6px 12px>Activer</button>
         </form>
@@ -693,7 +761,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       <button class="btn btn-s" type=button onclick=newPreset() style=margin:0>+ Nouveau</button>
     </div>
     <p class=sub id=activeInfo></p>
-    <form method=POST action=/save-prompt id=editForm>
+    <form method=POST action=/save-prompt id=editForm><input type=hidden name=csrf value="{{csrf_token()}}">
       <input type=hidden name=preset_key id=fkey>
       <label>Nom affiché</label>
       <input type=text name=label id=flabel>
@@ -732,7 +800,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <h2>📄 Fichiers de connaissance (.txt)</h2>
     <p class=sub>Contenus que cette personnalité utilisera pour répondre (injectés dans son contexte). Pour : <b id=kpresetname></b></p>
     <ul class=plist id=klist></ul>
-    <form method=POST action=/upload-knowledge enctype=multipart/form-data>
+    <form method=POST action=/upload-knowledge enctype=multipart/form-data><input type=hidden name=csrf value="{{csrf_token()}}">
       <input type=hidden name=preset_key id=kkey>
       <input type=file name=files accept=".txt" multiple>
       <button class="btn btn-p">Ajouter le(s) fichier(s)</button>
@@ -765,7 +833,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <p class=sub>Choisissez le moteur d'IA et son modèle. Le terminal et la génération
       de prompts utilisent le fournisseur sélectionné. La clé de chaque fournisseur
       est conservée indépendamment - vous pouvez basculer sans la ressaisir.</p>
-    <form method=POST action=/save-llm>
+    <form method=POST action=/save-llm><input type=hidden name=csrf value="{{csrf_token()}}">
       <label>Fournisseur utilisé</label>
       <select name=llm_provider>
         <option value=mistral {{'selected' if provider=='mistral'}}>Mistral</option>
@@ -832,19 +900,19 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
   <div class=block>
     <h2>🔄 Mise à jour de l'application</h2>
     <p class=sub>Version installée : <b>{{version}}</b></p>
-    <form method=POST action=/check-update style=margin:0>
+    <form method=POST action=/check-update style=margin:0><input type=hidden name=csrf value="{{csrf_token()}}">
       <button class="btn btn-s">Vérifier les mises à jour</button>
     </form>
     {% if update_log %}
     <hr>
     <p class=sub>Nouveautés disponibles :</p>
     <pre>{{update_log}}</pre>
-    <form method=POST action=/update onsubmit="return confirm('Mettre à jour le code et redémarrer les services ?')">
+    <form method=POST action=/update onsubmit="return confirm('Mettre à jour le code et redémarrer les services ?')"><input type=hidden name=csrf value="{{csrf_token()}}">
       <button class="btn btn-p">⬇ Mettre à jour maintenant</button>
     </form>
     {% endif %}
     <hr>
-    <form method=POST action=/rollback onsubmit="return confirm('Revenir à la version précédente ?')" style=margin:0>
+    <form method=POST action=/rollback onsubmit="return confirm('Revenir à la version précédente ?')" style=margin:0><input type=hidden name=csrf value="{{csrf_token()}}">
       <button class="btn btn-d">↶ Revenir à la version précédente</button>
     </form>
     <p class=sub style=margin-top:8px>La mise à jour récupère le code depuis GitHub. Tes personnalités, clés et fichiers de connaissance ne sont pas touchés.</p>
@@ -875,10 +943,12 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 </div></main>
 
 <script>
-const PRESETS = {{presets_json|safe}};
+const PRESETS = {{presets|tojson}};
+const CSRF_TOKEN = {{csrf_token()|tojson}};
+function addCsrf(form){const input=document.createElement("input");input.type="hidden";input.name="csrf";input.value=CSRF_TOKEN;form.appendChild(input);}
 const ACTIVE = {{active_key|tojson}};
-const KNOWLEDGE = {{knowledge_json|safe}};
-const TITLE_FONTS = {{title_fonts_json|safe}};
+const KNOWLEDGE = {{knowledge|tojson}};
+const TITLE_FONTS = {{title_fonts|tojson}};
 const TITLE_ART_MAX = {{title_art_max}};
 // Onglets
 document.querySelectorAll('nav.tabs button').forEach(b=>{
@@ -926,7 +996,7 @@ async function previewTitle(){
   if(!segments.length){alert('Ajoutez au moins un mot');return;}
   pre.style.display='block'; pre.textContent='...';
   try{
-    const r=await fetch('/preview-title',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({segments:segments})});
+    const r=await fetch('/preview-title',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},body:JSON.stringify({segments:segments})});
     const j=await r.json();
     pre.textContent = j.ok
       ? (j.lines.join('\\n') + (j.truncated ? '\\n\\n(!) Tronque : trop de lignes pour l ecran, reduisez le nombre ou la taille des mots.' : ''))
@@ -955,7 +1025,11 @@ function loadPreset(){
     const li=document.createElement('li');
     const span=document.createElement('span');span.className='name';span.textContent=fn;
     const f=document.createElement('form');f.method='POST';f.action='/delete-knowledge';f.style.margin='0';
-    f.innerHTML='<input type=hidden name=preset_key value="'+k+'"><input type=hidden name=filename value="'+fn+'"><button class="btn btn-d" style="margin:0;padding:6px 12px">Suppr.</button>';
+    for(const [name,value] of Object.entries({preset_key:k,filename:fn})){
+      const input=document.createElement('input');input.type='hidden';input.name=name;input.value=value;f.appendChild(input);
+    }
+    addCsrf(f);
+    const button=document.createElement('button');button.className='btn btn-d';button.textContent='Suppr.';f.appendChild(button);
     li.appendChild(span);li.appendChild(f);ul.appendChild(li);
   });
 }
@@ -964,13 +1038,13 @@ function newPreset(){
   const f=document.createElement('form');f.method='POST';f.action='/new-preset';
   const a=document.createElement('input');a.name='label';a.value=label;f.appendChild(a);
   const b=document.createElement('input');b.name='key';b.value=label.toLowerCase().replace(/[^a-z0-9]+/g,'_');f.appendChild(b);
-  document.body.appendChild(f);localStorage.setItem('mgptTab','perso');f.submit();
+  addCsrf(f);document.body.appendChild(f);localStorage.setItem('mgptTab','perso');f.submit();
 }
 async function genPrompt(){
   const d=document.getElementById('desc').value.trim();
   if(!d){alert('Décrivez le projet d abord');return;}
   spin.style.display='block';
-  try{const r=await fetch('/generate-prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({description:d})});
+  try{const r=await fetch('/generate-prompt',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},body:JSON.stringify({description:d})});
     const j=await r.json();
     if(j.ok){fsystem.value=j.prompt;fsystem.scrollIntoView({behavior:'smooth'});}else alert('Erreur: '+j.error);
   }catch(e){alert('Erreur: '+e);}
@@ -986,7 +1060,7 @@ async function testPreset(reset=false){
   const spin=document.getElementById('testSpin'), out=document.getElementById('testOut');
   spin.style.display='block'; out.style.display='none';
   try{
-    const r=await fetch('/test-preset',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await fetch('/test-preset',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},
       body:JSON.stringify({preset_key:key,message:msg,system:system,memory_user:document.getElementById('memoryUser').value,reset:reset})});
     const j=await r.json();
     if(sequence!==testSequence)return;
@@ -1034,13 +1108,16 @@ def health():
 def login():
     error = None
     if request.method == "POST":
-        if request.form.get("password") == ADMIN_PASSWORD:
+        if hmac.compare_digest(request.form.get("password", "").encode(errors="replace"), ADMIN_PASSWORD.encode()):
+            session.clear()
             session["logged_in"] = True
+            csrf_token()
             return redirect(url_for("index"))
         error = "Mot de passe incorrect"
     return render_template_string(LOGIN_HTML, error=error)
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
+@require_login
 def logout():
     discard_mail(session.get("gmail_session"))
     discard_memory(session.get("memory_session"))
@@ -1057,9 +1134,8 @@ def index():
                 "admin-ui": svc_status("admin-ui")}
     flash = session.pop("flash", None); flash_ok = session.pop("flash_ok", False)
     return render_template_string(
-        ADMIN_HTML, presets=presets, presets_json=json.dumps(presets),
-        knowledge_json=json.dumps(all_knowledge()),
-        title_fonts_json=json.dumps(TITLE_FONTS), title_art_max=TITLE_ART_MAX_WORDS,
+        ADMIN_HTML, presets=presets, knowledge=all_knowledge(),
+        title_fonts=TITLE_FONTS, title_art_max=TITLE_ART_MAX_WORDS,
         active_key=data["active"], services=services, ip=ip_address(),
         log_chatgpt=log_tail("chatgpt"),
         provider=llm_provider(),
@@ -1091,6 +1167,7 @@ def parse_title_art_form():
 
 @app.route("/save-prompt", methods=["POST"])
 @require_login
+@prompt_transaction
 def save_prompt():
     data = load_prompts()
     k = request.form.get("preset_key", "").strip() or data["active"]
@@ -1112,6 +1189,7 @@ def save_prompt():
 
 @app.route("/apply-preset", methods=["POST"])
 @require_login
+@prompt_transaction
 def apply_preset():
     data = load_prompts()
     k = request.form.get("preset_key", "")
@@ -1144,6 +1222,7 @@ def preview_title_route():
 
 @app.route("/new-preset", methods=["POST"])
 @require_login
+@prompt_transaction
 def new_preset():
     data = load_prompts()
     key = re.sub(r"[^a-z0-9_]", "_", request.form.get("key", "").strip().lower())
@@ -1163,6 +1242,7 @@ def new_preset():
 
 @app.route("/delete-preset", methods=["POST"])
 @require_login
+@prompt_transaction
 def delete_preset():
     data = load_prompts()
     k = request.form.get("preset_key", "")
@@ -1254,65 +1334,41 @@ def save_llm():
     provider = request.form.get("llm_provider", "mistral").strip().lower()
     if provider not in ("mistral", "claude", "linkup"):
         provider = "mistral"
-    write_env_key("LLM_PROVIDER", provider)
-
-    # Clés : "supprimer" a priorité sur une nouvelle valeur saisie (ne devrait
-    # normalement pas arriver ensemble, mais on ne veut jamais réenregistrer une
-    # clé que l'admin vient d'effacer). Sans case cochée et champ vide : on
-    # n'écrase pas la clé existante.
-    mk_clear = request.form.get("mistral_key_clear") == "on"
-    mk = request.form.get("mistral_key", "").strip()
-    if mk_clear:
-        write_env_key("MISTRAL_KEY", "")
-    elif mk:
-        write_env_key("MISTRAL_KEY", mk)
-
-    ak_clear = request.form.get("anthropic_key_clear") == "on"
-    ak = request.form.get("anthropic_key", "").strip()
-    if ak_clear:
-        write_env_key("ANTHROPIC_KEY", "")
-    elif ak:
-        write_env_key("ANTHROPIC_KEY", ak)
-
-    lk_clear = request.form.get("linkup_key_clear") == "on"
-    lk = request.form.get("linkup_key", "").strip()
-    if lk_clear:
-        write_env_key("LINKUP_KEY", "")
-    elif lk:
-        write_env_key("LINKUP_KEY", lk)
-
-    # Modèles / profondeur : on ne retient qu'un identifiant connu.
-    mm = request.form.get("mistral_model", "").strip()
-    if mm in MISTRAL_MODEL_IDS:
-        write_env_key("MISTRAL_MODEL", mm)
-    cm = request.form.get("claude_model", "").strip()
-    if cm in CLAUDE_MODEL_IDS:
-        write_env_key("CLAUDE_MODEL", cm)
-    ld = request.form.get("linkup_depth", "").strip()
-    if ld in LINKUP_DEPTH_IDS:
-        write_env_key("LINKUP_DEPTH", ld)
-
-    restart_terminal()
-    label = {"claude": "Claude", "linkup": "Linkup"}.get(provider, "Mistral")
-    key_present = is_real_key({"claude": anthropic_key, "linkup": linkup_key,
-                                "mistral": mistral_key}[provider]())
-    if not key_present:
-        session["flash"] = f"Configuration enregistrée (fournisseur : {label}), mais aucune clé API n'est définie pour ce fournisseur."
+    updates = {"LLM_PROVIDER": provider}
+    for field, key in (("mistral", "MISTRAL_KEY"), ("anthropic", "ANTHROPIC_KEY"), ("linkup", "LINKUP_KEY")):
+        value = request.form.get(field + "_key", "").strip()
+        if request.form.get(field + "_key_clear") == "on":
+            updates[key] = ""
+        elif value:
+            updates[key] = value
+    for field, key, allowed in (("mistral_model", "MISTRAL_MODEL", MISTRAL_MODEL_IDS),
+                                ("claude_model", "CLAUDE_MODEL", CLAUDE_MODEL_IDS),
+                                ("linkup_depth", "LINKUP_DEPTH", LINKUP_DEPTH_IDS)):
+        value = request.form.get(field, "").strip()
+        if value in allowed:
+            updates[key] = value
+    config_store.update_env(ENV_FILE, updates)
+    restarted = restart_terminal()
+    session["flash"] = ("Configuration enregistrée ; terminal redémarré." if restarted
+                        else "Configuration enregistrée ; redémarrage non confirmé, vérifiez le service.")
+    session["flash_ok"] = restarted
+    selected_key = {"claude": anthropic_key, "linkup": linkup_key, "mistral": mistral_key}[provider]()
+    if not is_real_key(selected_key):
+        session["flash"] += " Aucune clé API n'est définie pour ce fournisseur."
         session["flash_ok"] = False
-    else:
-        session["flash"] = f"Configuration enregistrée (fournisseur : {label}) et terminal redémarré."
-        session["flash_ok"] = True
     return redirect(url_for("index"))
+
 
 @app.route("/upload-knowledge", methods=["POST"])
 @require_login
+@prompt_transaction
 def upload_knowledge():
     key = request.form.get("preset_key", "").strip()
     data = load_prompts()
     if key not in data["presets"]:
         session["flash"] = "Personnalité inconnue."; session["flash_ok"] = False
         return redirect(url_for("index"))
-    folder = KNOWLEDGE_DIR / key
+    folder = knowledge_folder(key)
     folder.mkdir(parents=True, exist_ok=True)
     files = request.files.getlist("files")
     uploads = []
@@ -1327,7 +1383,7 @@ def upload_knowledge():
             abort(413, "Knowledge file exceeds 256 KiB")
         uploads.append((name, content))
     for name, content in uploads:
-        (folder / name).write_bytes(content)
+        config_store.atomic_write(knowledge_target(folder, name), content)
     n = len(uploads)
     if key == data["active"]:
         restart_terminal()
@@ -1337,10 +1393,11 @@ def upload_knowledge():
 
 @app.route("/delete-knowledge", methods=["POST"])
 @require_login
+@prompt_transaction
 def delete_knowledge():
     key = request.form.get("preset_key", "").strip()
-    fn = secure_filename(request.form.get("filename", "").strip())
-    target = KNOWLEDGE_DIR / key / fn
+    fn = request.form.get("filename", "")
+    target = knowledge_target(knowledge_folder(key), fn)
     if fn and target.is_file():
         target.unlink()
         if key == load_prompts()["active"]:
@@ -1451,7 +1508,7 @@ Aucun enfant n'est autorisé automatiquement. Les alias seuls sont envoyés à M
 @require_login
 def pronote_admin():
     # Explicit random nonce is required even with the legacy Flask secret.
-    session.setdefault("pronote_csrf", secrets.token_urlsafe(32))
+    session["pronote_csrf"] = csrf_token()
     local = pronote.backend()
     message, children = "", []
     try:
@@ -1616,7 +1673,7 @@ Les dates de la liste sont affichées en Europe/Paris.</p></html>"""
 @app.route("/gmail", methods=["GET", "POST"])
 @require_login
 def gmail_admin():
-    session.setdefault("gmail_csrf", secrets.token_urlsafe(32))
+    session["gmail_csrf"] = csrf_token()
     if request.method == "POST" and not hmac.compare_digest(
         request.form.get("csrf", "").encode(), session["gmail_csrf"].encode()
     ):

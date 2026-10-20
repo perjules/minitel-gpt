@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from web_client import csrf_client
 
 from scripts import runtime
 from services import admin_ui as admin
@@ -61,7 +62,7 @@ def test_oversized_upload_is_rejected_without_overwriting_old_knowledge(tmp_path
     folder = tmp_path / "test"
     folder.mkdir()
     (folder / "old.txt").write_text("original")
-    client = admin.app.test_client()
+    client = csrf_client(admin.app)
     with client.session_transaction() as session:
         session["logged_in"] = True
     response = client.post("/upload-knowledge", data={"preset_key": "test", "files": [
@@ -73,7 +74,7 @@ def test_oversized_upload_is_rejected_without_overwriting_old_knowledge(tmp_path
 
 
 def test_http_request_body_is_bounded_before_file_parsing():
-    client = admin.app.test_client()
+    client = csrf_client(admin.app)
     with client.session_transaction() as session:
         session["logged_in"] = True
     response = client.post("/preview-title", data=b"x" * (io_limits.MAX_REQUEST_BYTES + 1),
@@ -138,7 +139,7 @@ def test_health_endpoints_work_without_login_or_hotspot(monkeypatch):
     from services import wifi_manager as wifi
     query = Mock(side_effect=AssertionError("Health probe must not query NetworkManager"))
     monkeypatch.setattr(wifi, "hotspot_active", query)
-    assert admin.app.test_client().get("/healthz").json == {"ok": True}
+    assert csrf_client(admin.app).get("/healthz").json == {"ok": True}
     assert wifi.app.test_client().get("/healthz").json == {"ok": True}
 
 

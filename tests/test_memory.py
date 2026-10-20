@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from test_terminal_startup import EndOfInput, FakeSerial, fn, screen_text
+from web_client import csrf_client
 
 from services import admin_ui as admin
 from services import memory_session as sessions
@@ -339,7 +340,7 @@ class MemoryInterfaces(unittest.TestCase):
             admin.discard_memory(identifier)
 
     def test_admin_selection_save_switch_reset_and_context(self):
-        client = admin.app.test_client()
+        client = csrf_client(admin.app)
         with client.session_transaction() as cookie:
             cookie["logged_in"] = True
         request = {
@@ -385,7 +386,7 @@ class MemoryInterfaces(unittest.TestCase):
             )
             with client.session_transaction() as cookie:
                 self.assertNotIn("Réponses courtes", str(dict(cookie)))
-        client.get("/logout")
+        client.post("/logout")
         self.assertFalse(admin.MEMORY_SESSIONS)
 
     def test_real_uart_username_blank_and_invalid_name(self):

@@ -320,3 +320,33 @@ within a twenty-second readiness window. Admin and Wi-Fi must also answer their
 local `/healthz` endpoints. The terminal may be waiting for an unplugged adapter.
 Legacy rollback releases without health routes receive process stability checks
 only. Readiness failure triggers the existing restoration transaction.
+
+## Admin configuration and request integrity
+
+Every admin mutation, including login and logout, requires a session-bound CSRF
+token. Forms and JSON requests carry it automatically; scripts using the admin
+HTTP API must obtain a session and send the form token or `X-CSRF-Token` header.
+Logout is POST-only. Session cookies are HTTP-only with SameSite=Lax. Personality
+JSON embedded in the page is escaped before entering JavaScript.
+
+Personality edits and `.env` settings use bounded thread/process locks and atomic
+replacement: write a temporary file beside the destination, flush and fsync it,
+replace the destination, then fsync the directory. New files are private, existing
+personality file modes are preserved, and `.env` is restricted to mode 0600.
+All settings submitted together are validated and written in one transaction;
+comments and unrelated environment entries are retained. Values cannot inject
+new environment assignments. No plaintext backup copies are created.
+
+Invalid personality JSON/schema or malformed environment syntax is rejected
+without replacing the original. Restore a valid owner-managed copy before trying
+again. If storage fails after replacement, the response reports an unconfirmed
+save: reload and inspect the current state before retrying. Atomic replacement
+protects individual files, not a multi-file upload as a whole; a later disk error
+can leave earlier files saved. Existing legacy logs are never removed.
+
+Knowledge paths must belong to a configured personality and a direct `.txt` file
+inside its directory. Symlinked directories/files are rejected for admin edits;
+knowledge readers refuse links and non-regular files such as FIFOs. Configuration
+reads are capped at 2 MiB. Lock contention fails after a bounded wait instead of
+blocking indefinitely. The terminal's direct systemd entry point shares package
+exception identities with its adapters so these failures reach the supervisor.

@@ -16,3 +16,6 @@ config/admin-session.key
 config/rose-password.txt
 
 .venv.before-uv/
+
+.env.lock
+config/*.lock

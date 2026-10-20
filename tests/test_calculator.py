@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 
 from test_gmail import make_session
 from test_terminal_startup import EndOfInput, FakeSerial, fn, screen_text
+from web_client import csrf_client
 
 from services import admin_ui as admin
 from services import calculator as calc
@@ -464,7 +465,7 @@ class AdminAndUARTTests(unittest.TestCase):
         self.addCleanup(environment.stop)
         self.addCleanup(self.clear_admin)
         self.clear_admin()
-        self.client = admin.app.test_client()
+        self.client = csrf_client(admin.app)
         with self.client.session_transaction() as cookie:
             cookie["logged_in"] = True
 
