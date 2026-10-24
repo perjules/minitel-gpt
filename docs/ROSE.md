@@ -1,6 +1,14 @@
 # 3615 rose — prototype personnel
 
-État au 16 octobre 2026, soir : branche `minitel_rose` à `43f1093`, au-dessus
+État courant, 25 octobre 2026 : les dix personnages fixes (cinq hommes,
+cinq femmes) utilisent provisoirement les consignes E5S5 de la grille pour
+les essais personnels. Voix, descriptions et modules les différencient ;
+les tempos existants sont conservés. Bertrand et Mireille participent à ce
+cast d'évaluation avec `asexual: false`. Le module asexuel reste disponible
+et testé indépendamment. La grille M/F de 50 profils reste inchangée.
+Voir [le cast d'évaluation](ROSE_PREFERENCES.md#cast-fixe-e5s5--phase-dévaluation-25-octobre-2026).
+
+Historique initial au 16 octobre 2026, soir : branche `minitel_rose` à `43f1093`, au-dessus
 du WIP `70d33b1` (préférences de personnage séparées du prompt commun) et de
 l'édition du prompt commun par le propriétaire le même soir (commit du
 16 octobre, 23 h 28). Basé sur `origin/develop` à `8f6ceb7`. Aucune fusion ou
@@ -21,7 +29,8 @@ Le laboratoire de profils de rencontre est une autre expérience.
 Décisions conservées : mot de passe fixe local, français uniquement,
 session séparée et bornée, personnages humains sans connaissance du monde
 interne du Minitel (révision du 17 octobre : accrocs informatiques supprimés),
-un homme et une femme asexuels et chaleureux, sorties fiables,
+choix initial d'un homme et d'une femme asexuels et chaleureux (remplacé
+provisoirement pour le cast d'évaluation E5S5 du 25 octobre), sorties fiables,
 facture France Télécom en francs avec équivalent euro et taxe du cul,
 sortie immédiate avec amende fictive sur rejet de modération identifiable.
 

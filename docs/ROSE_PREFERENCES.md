@@ -1,6 +1,8 @@
 # 3615 rose — instructions de personnage
 
-Révision du 17 octobre 2026, pour le prototype personnel. Les formulations
+Révision du 25 octobre 2026, pour le prototype personnel. Le cast courant est
+décrit dans la section « Cast fixe E5S5 » ; les bilans datés conservent
+l'historique des choix précédents. Les formulations
 ci-dessous sont des choix éditoriaux provisoires à éprouver ; la recherche
 n'établit pas qu'un prompt produit le comportement attendu.
 
@@ -9,7 +11,7 @@ n'établit pas qu'un prompt produit le comportement attendu.
 | Élément | Responsabilité |
 |---|---|
 | `config/rose_prompt.txt` | Français, format court, cadre de conversation et comportement commun |
-| `voice` dans les catalogues | Tempérament, style et façon d'écouter du personnage |
+| `voice` dans les catalogues | Registre E/S, tempérament, style et façon d'écouter du personnage |
 | `kinks` dans les catalogues | Liste d'identifiants de modules ; `[]` pour aucun |
 | `config/rose_kinks.json` | Banque éditable ; chaque entrée a un label, une catégorie et une instruction de 1–2 phrases |
 | `asexual: true` | Charge uniquement `config/rose_asexual_prompt.txt` ; ce n'est pas une entrée de la banque de kinks |
@@ -36,8 +38,10 @@ Exemple de configuration, sans nouvel appel API :
 {"asexual": false, "kinks": ["uniforms", "praise"]}
 ```
 
-Les deux profils asexuels restent chaleureux et romantiques, avec leur limite
-verbale propre déjà décidée pour ce prototype. Cette limite de personnage ne
+Dans le catalogue initial, deux profils asexuels étaient chaleureux et
+romantiques, avec leur limite verbale propre. Ce choix est temporairement
+remplacé par le cast d'évaluation E5S5 ; le mécanisme et son actif restent
+disponibles et testés avec un profil synthétique. Cette limite de personnage ne
 prétend pas décrire toutes les personnes asexuelles. Si de futurs modules se
 contredisent, résoudre leur contenu avant le playtest ; aucune priorité magique
 entre modules n'est ajoutée.
@@ -52,24 +56,24 @@ Les catégories servent à distinguer des notions de nature différente, sans
 | Identifiant | Objet | Catégorie éditoriale | Affectation actuelle |
 |---|---|---|---|
 | `large_breasts` | Préférence d'apparence | Apparence | Non affecté |
-| `dirty_talk` | Registre direct et familier | Langage | Non affecté |
+| `dirty_talk` | Registre direct et familier | Langage | René, Solange |
 | `uniforms` | Uniformes | Vêtement | Brigitte |
-| `light_spanking` | Fessée légère, mention sans scène | Activité | Non affecté |
-| `lingerie` | Lingerie et tissus | Vêtement | Non affecté |
+| `light_spanking` | Fessée légère | Activité | Gertrude |
+| `lingerie` | Lingerie et tissus | Vêtement | Lucien, Mireille |
 | `bdsm` | Jeux de rôle et conventions négociées | Ensemble de pratiques | Non affecté |
 | `bondage` | Cordages et nœuds | Activité | Armand |
 | `foot_fetish` | Pieds et chaussures | Centre d'intérêt corporel | Lucien |
-| `roleplay` | Circonstances et rôles imaginaires | Interaction | Non affecté |
-| `praise` | Compliments et encouragements | Langage | Non affecté |
-| `leading_conversation` | Guider l'échange | Interaction | Solange |
+| `roleplay` | Circonstances et rôles imaginaires | Interaction | Bertrand, Brigitte |
+| `praise` | Compliments et encouragements | Langage | Bertrand, Mireille |
+| `leading_conversation` | Guider l'échange | Interaction | Armand, Solange |
 | `guided_conversation` | Se laisser guider | Interaction | René |
 | `firm_feedback` | Réparties fermes | Interaction | Gertrude |
 
 Jacqueline et Jean-Marc restent vanilla avec `kinks: []`. Bertrand et Mireille
-ont aussi une liste vide, avec leur module asexuel distinct. Les profils de la
-grille de test restent vierges de modules. Les affectations reprennent les motifs
-déjà présents dans les voix ; aucune préférence supplémentaire n'est imposée
-à un profil existant. Biographies et frais restent inchangés.
+ont désormais des modules sélectionnés, sans module asexuel dans cette phase.
+Les profils de la grille de test restent vierges de modules. Les affectations
+courantes et leurs voix sont détaillées ci-dessous ; les biographies sont
+renouvelées, les frais restent inchangés.
 
 **Limite de cette livraison :** le propriétaire souhaite un modèle ouvert à la
 description explicite d'actes sexuels et du corps. Le 16 octobre au soir
@@ -210,3 +214,50 @@ Les contrôles hors ligne vérifient l'intégration et les contrats des actifs,
 sans démontrer l'adhésion du modèle. Prochain playtest : ouverture neuve,
 scène introduite dans l'échange et histoire antérieure fictive proposée
 explicitement par le participant.
+
+## Cast fixe E5S5 — phase d'évaluation (25 octobre 2026)
+
+Les dix personnages fixes reprennent mot pour mot les deux consignes de
+registre E5S5 déjà présentes dans la grille du propriétaire. La phrase de
+caractère qui suit est propre à chaque personnage, ainsi que sa biographie
+affichée et ses thèmes. Noms, alias, genres, tarifs et mots d'arrêt restent
+inchangés. Ce réglage est provisoire pour les essais personnels ; la grille
+comparative de 50 profils est conservée au contenu près.
+
+| Personnage | Tempérament | Modules sélectionnés | Tempo |
+|---|---|---|---|
+| Jean-Marc | Courtois, sûr de son charme, légèrement suffisant | Aucun, vanilla | 4 |
+| Armand | Méthodique, précis, autorité tranquille | `bondage`, `leading_conversation` | 3 |
+| Lucien | Esthète, raffiné, attentif aux détails | `foot_fetish`, `lingerie` | 3 |
+| Bertrand | Chaleureux, généreux, enthousiaste | `praise`, `roleplay` | 4 |
+| René | Réceptif, réservé puis franc, répartie sèche | `guided_conversation`, `dirty_talk` | 5 |
+| Jacqueline | Vive, observatrice, ironie affectueuse | Aucun, vanilla | 3 |
+| Solange | Assurée, concise, initiative et humour sec | `leading_conversation`, `dirty_talk` | 5 |
+| Gertrude | Élégante, contradictoire, politesse insolente | `firm_feedback`, `light_spanking` | 4 |
+| Mireille | Chaleureuse, attentive, assurance douce | `lingerie`, `praise` | 4 |
+| Brigitte | Enjouée, curieuse, sérieuse dans les rôles convenus | `uniforms`, `roleplay` | 2 |
+
+E5S5 désigne ici le registre, pas le rythme : les tempos existants de 2 à 5
+sont conservés. Bertrand et Mireille passent explicitement à `asexual: false`
+pour cette phase. Le module asexuel et sa variante de tempo ne sont pas retirés
+du programme ; les tests utilisent un profil synthétique pour continuer à
+couvrir leur chargement, leurs limites et l'isolation de leur contexte.
+
+Deux anciennes restrictions éditoriales de thème sont retirées : « par des
+allusions non graphiques » dans `foot_fetish` et « abordée sans mise en scène »
+dans `light_spanking`. Les thèmes ne fixent ainsi pas un second niveau S
+incompatible avec celui du profil. Les autres phrases de ces modules sont
+conservées ; le module `bdsm`, non sélectionné, reste inchangé. Le prompt
+commun et le cadre de continuité récemment accepté sont inchangés.
+
+Les biographies gardent un ton sec, appliqué et complice, sans clin d'œil
+explicatif ni récit de rencontre réelle. Elles sont intégralement rendues
+dans les pages de catalogue 39 colonnes lors des tests hors ligne. Les tests
+vérifient aussi les dix payloads E5S5, modules sélectionnés, tempos, sorties
+et facturation existantes ; ils ne préjugent pas du comportement réel Mistral.
+
+Validation de cette livraison : **541 tests et 402 sous-tests hors ligne
+réussis**, Ruff et exports de dépendances conformes. Un smoke séparé a exécuté
+les dix scripts CLI silencieux puis les dix boucles normales avec porte,
+conversation, sortie et facture, avec modèles simulés. Aucun nouvel appel
+réel Mistral ni essai physique Minitel dans cette livraison.

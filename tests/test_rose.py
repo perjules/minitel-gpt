@@ -11,6 +11,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
+import pytest
 import test_terminal_startup as startup
 
 from services import minitel_chatgpt as chat
@@ -152,17 +153,15 @@ class HostTests(unittest.TestCase):
         with patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}):
             self.assertFalse(terminal.gate(KeyTerm(typed("wrong")))[0])
 
-    def test_cast_has_ten_profiles_with_stable_warm_asexual_overrides(self):
+    def test_cast_has_ten_e5s5_profiles_for_evaluation(self):
         people = rose.catalogue()["personas"]
         self.assertEqual(len(people), 10)
         for gender in ("homme", "femme"):
             self.assertEqual(sum(p["gender"] == gender for p in people), 5)
-            asexual = [p for p in people if p["gender"] == gender and p["asexual"]]
-            self.assertEqual(len(asexual), 1)
-            self.assertNotIn("asex", asexual[0]["bio"])
-            self.assertIn("chaleureu", asexual[0]["voice"].casefold())
-        for name in ("Jacqueline", "Jean-Marc"):
-            self.assertFalse(rose.Session(name).profile["asexual"])
+        reference = rose.Session("ME5S5", test=True).profile["voice"].split(". ", 2)[:2]
+        for person in people:
+            self.assertFalse(person["asexual"])
+            self.assertEqual(person["voice"].split(". ", 2)[:2], reference)
 
     def test_bounded_history_and_isolated_payload_french_and_no_tools(self):
         captured = []
@@ -171,7 +170,11 @@ class HostTests(unittest.TestCase):
             captured.append((prompt, copy.deepcopy(history)))
             return rose.Reply("Réponse." * 50)
 
-        session = rose.Session("Mireille")
+        # Asexual support stays covered independently of the temporary evaluation cast.
+        person = copy.deepcopy(rose.catalogue()["personas"][0])
+        person.update(asexual=True, kinks=[], voice="Chaleureuse, romantique et attentive.")
+        with patch.object(rose, "catalogue", return_value={"personas": [person], "safewords": ["navet"]}):
+            session = rose.Session(person["name"])
         for i in range(30):
             text = str(i) + " fictional turn " * 40
             job = session.start(model, text)
@@ -318,7 +321,12 @@ class SessionPromptTests(unittest.TestCase):
                 ("Jean-Marc", "rose_tempo_prompt.txt", "Variante romantique"),
                 ("Bertrand", "rose_tempo_romantic_prompt.txt", "attentes feintes")):
             with self.subTest(name=name), patch.dict(os.environ, {"ROSE_WEARINESS": "0"}):
-                session = rose.Session(name)
+                person = copy.deepcopy(next(p for p in rose.catalogue()["personas"] if p["name"] == name))
+                person["asexual"] = filename == "rose_tempo_romantic_prompt.txt"
+                if person["asexual"]:
+                    person.update(kinks=[], voice="Chaleureux, romantique et attentif.")
+                with patch.object(rose, "catalogue", return_value={"personas": [person], "safewords": ["navet"]}):
+                    session = rose.Session(name)
                 template = (rose.CONFIG / filename).read_text(encoding="utf-8")
                 block = template.replace("{tempo}", str(session.profile["tempo"]))
                 prompt = self.capture_prompt(session)
@@ -1018,6 +1026,23 @@ class IntegrationTests(unittest.TestCase):
                 self.assertEqual(set_password(path), 0)
             self.assertEqual(path.read_text(), " Fixture ")
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+
+@pytest.mark.parametrize("gender", ["homme", "femme"])
+def test_evaluation_biographies_fit_every_roster_page(gender):
+    people = [person for person in rose.catalogue()["personas"] if person["gender"] == gender]
+    pages = (len(people) + 1) // 2
+    for page in range(pages):
+        keys = [("fn", chat.K_SUITE)] * page + [("fn", chat.K_RETOUR)]
+        term = KeyTerm(keys)
+        assert terminal.roster(term, gender) == (None, "retour")
+        assert "[Réponse abrégée]" not in term.rows
+        assert f"Catalogue {page + 1}/{pages}" in term.rows
+        for person in people[page * 2:page * 2 + 2]:
+            assert chat.safe_display(person["name"]) in term.rows
+            for line in chat.wrap(chat.safe_display(person["bio"])):
+                assert line in term.rows
+                assert len(line) <= 39
 
 
 if __name__ == "__main__":
