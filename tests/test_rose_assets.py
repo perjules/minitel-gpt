@@ -21,7 +21,10 @@ class PromptAssetTests(unittest.TestCase):
         self.assertIn("Respecte les refus et les changements de sujet", prompt)
         self.assertIn("Incarne simplement la personne décrite", prompt)
         self.assertIn("Réponds honnêtement aux questions directes", " ".join(prompt.split()))
-        self.assertIn("Ne prétends pas voir le participant", prompt)
+        self.assertIn("Ne prétends pas voir réellement le participant", prompt)
+        self.assertIn("Votre histoire commune commence avec cet échange.", " ".join(prompt.split()))
+        self.assertIn("Les gestes, lieux et contacts racontés peuvent appartenir à une scène", prompt)
+        self.assertIn("le participant les a établis dans la fiction au cours de cet échange.", prompt)
         self.assertIn("Les mineurs", prompt)
         self.assertIn("humiliation dégradante", prompt)
 

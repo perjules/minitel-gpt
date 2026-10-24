@@ -187,3 +187,26 @@ simulés. Le modèle exact, les paramètres et l'interface de cet essai ne sont
 pas précisés. Ce retour n'établit pas le comportement des autres cellules,
 des autres modèles ou de toutes les conversations possibles. Aucun verbatim
 intime n'est ajouté à la documentation et aucune consigne n'est modifiée.
+
+## Continuité et scène imaginée (25 octobre 2026)
+
+Retour du propriétaire : certaines réponses inventent une attirance ou une
+connaissance antérieure à la conversation, par exemple « depuis ce matin ».
+La correction acceptée précise le cadre dans `config/rose_prompt.txt` :
+par défaut, l'histoire commune commence avec cet échange par messages.
+Le personnage ne fabrique pas de rencontre antérieure, de souvenir commun
+ou de durée d'attirance ; il peut reprendre une histoire fictive lorsque
+le participant l'a établie pendant l'échange.
+
+Les gestes, lieux et contacts imaginés restent possibles selon le registre
+du profil, y compris le jeu de rôle érotique ou sexuel des profils concernés.
+La scène peut se poursuivre naturellement, sans rappel systématique de son
+caractère fictif. Les limites de perception et de mémoire concernent les
+faits réels ; elles ne transforment pas la scène en observation du participant.
+Les consignes E/S, catalogues et module asexuel restent inchangés.
+
+La correction est éditoriale, sans filtre de phrases ni nouvel état Python.
+Les contrôles hors ligne vérifient l'intégration et les contrats des actifs,
+sans démontrer l'adhésion du modèle. Prochain playtest : ouverture neuve,
+scène introduite dans l'échange et histoire antérieure fictive proposée
+explicitement par le participant.
