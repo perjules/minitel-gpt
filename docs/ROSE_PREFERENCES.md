@@ -66,8 +66,8 @@ Les catégories servent à distinguer des notions de nature différente, sans
 | `firm_feedback` | Réparties fermes | Interaction | Gertrude |
 
 Jacqueline et Jean-Marc restent vanilla avec `kinks: []`. Bertrand et Mireille
-ont aussi une liste vide, avec leur module asexuel distinct. Les stubs Test A
-et Test B restent vierges de modules. Les affectations reprennent les motifs
+ont aussi une liste vide, avec leur module asexuel distinct. Les profils de la
+grille de test restent vierges de modules. Les affectations reprennent les motifs
 déjà présents dans les voix ; aucune préférence supplémentaire n'est imposée
 à un profil existant. Biographies et frais restent inchangés.
 
@@ -131,7 +131,7 @@ charge pas ; `services/rose.py` n'est pas modifié à ce stade.
 **Tempo.** Chaque profil des catalogues porte un champ entier `tempo` :
 le nombre de premières réponses de théâtre d'attente avant d'aller droit
 au but si l'interlocuteur pousse. `0` signifie l'escalade immédiate —
-le maximum au sens de la vitesse — et c'est la valeur des 25 profils de
+le maximum au sens de la vitesse — et c'est la valeur des 50 profils de
 test de `config/rose_test_personas.json` : la grille éprouve le registre,
 pas le rythme. Le catalogue principal échelonne de 2 (Brigitte) à 5
 (René, Solange). Le texte de consigne ne figure pas dans les voix :
@@ -152,3 +152,22 @@ de messages) ; aucune probabilité ni horloge n'est fixée à ce stade.
 Le champ `tempo` ajouté aux deux catalogues est une clé supplémentaire
 ignorée par l'orchestrateur actuel ; les tests n'ont pas été relancés
 depuis cet ajout. Relancer `pytest` avant tout test en direct.
+
+## Grille M/F (24 octobre 2026)
+
+La grille de test comporte désormais 50 profils : les 25 cellules E1–E5 ×
+S1–S5 existent chacune sous les noms `ME…S…` (homme) et `FE…S…` (femme),
+par exemple `ME3S4` et `FE3S4`. Les anciens noms sans préfixe sont retirés ;
+aucun alias implicite ne privilégie un genre. Le catalogue normal est inchangé.
+
+Les consignes E/S sont conservées mot pour mot dans les deux variantes.
+Seuls les accords des adjectifs, les pronoms et les noms de rôle de la phrase
+de caractère sont adaptés lorsque nécessaire. Le niveau explicite demandé,
+les biographies, frais, listes de modules et le tempo 0 restent identiques.
+Le champ `gender` déjà transmis au modèle porte le genre de la variante ;
+aucune nouvelle règle de contenu ni modification du prompt partagé n'est ajoutée.
+
+Le tempo est désormais chargé par l'orchestrateur pour les profils concernés ;
+la grille reste sans bloc de tempo. Le module d'usure demeure un actif brouillon
+entièrement désactivé. La validation de cette édition est hors ligne et simulée ;
+elle ne mesure ni l'accord effectif du modèle ni sa modération.

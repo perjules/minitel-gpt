@@ -346,7 +346,7 @@ class SessionPromptTests(unittest.TestCase):
                     patch.object(Path, "read_text", read):
                 self.assertNotIn("Consigne de tempo", self.capture_prompt(rose.Session(person["name"])))
         people = rose.catalogue(test=True)["personas"]
-        self.assertEqual(len(people), 25)
+        self.assertEqual(len(people), 50)
         for person in people:
             with self.subTest(name=person["name"]), patch.object(Path, "read_text", read):
                 self.assertEqual(person["tempo"], 0)
@@ -384,7 +384,7 @@ class SessionPromptTests(unittest.TestCase):
             return original_read(path, *args, **kwargs)
 
         for flag in (None, "0", "1"):
-            for name, test in (("Jean-Marc", False), ("Bertrand", False), ("E1S1", True)):
+            for name, test in (("Jean-Marc", False), ("Bertrand", False), ("ME1S1", True)):
                 with self.subTest(flag=flag, name=name), patch.dict(os.environ), \
                         patch.object(Path, "read_text", read):
                     os.environ.pop("ROSE_WEARINESS", None)
@@ -775,14 +775,14 @@ class IntegrationTests(unittest.TestCase):
         normal = rose.Session("Jacqueline")
         self.assertEqual(normal.profile["id"], "jacqueline")
         people = rose.catalogue(test=True)["personas"]
-        self.assertEqual(rose.Session("E1S2", test=True).profile["id"], "test-e1s2")
+        self.assertEqual(rose.Session("FE1S2", test=True).profile["id"], "test-fe1s2")
         unknown = rose.Session("Jacqueline", test=True)
         self.assertIn(unknown.profile["id"], {p["id"] for p in people})
         self.assertEqual(unknown.alias, "Jacqueline")
 
     def test_test_roster_uses_grid_payload_and_same_gate_without_bill(self):
         term = KeyTerm(typed("fixture") + typed("F") + [("fn", chat.K_SUITE)]
-                       + typed("E1S2") + typed("Bonjour") + typed("RETOUR"))
+                       + typed("FE1S2") + typed("Bonjour") + typed("RETOUR"))
         prompts = []
 
         def model(prompt, history):
@@ -797,13 +797,13 @@ class IntegrationTests(unittest.TestCase):
         self.assertIn(f"Catalogue 1/{pages}", str(term.rows))
         self.assertIn(f"Catalogue 2/{pages}", str(term.rows))
         self.assertEqual(len(prompts), 2)
-        voice = rose.Session("E1S2", test=True).profile["voice"]
+        voice = rose.Session("FE1S2", test=True).profile["voice"]
         self.assertTrue(all(voice in prompt for prompt in prompts))
         self.assertTrue(all("Français uniquement" in prompt for prompt in prompts))
         adapter.classify_name.assert_not_called()
         billing.assert_not_called()
         with patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}), patch.object(terminal, "show_bill") as billing:
-            terminal.run(KeyTerm(typed("wrong")), "E1S1", adapter, test=True)
+            terminal.run(KeyTerm(typed("wrong")), "ME1S1", adapter, test=True)
         self.assertEqual(len(prompts), 2)
         billing.assert_not_called()
 
@@ -831,7 +831,7 @@ class IntegrationTests(unittest.TestCase):
                   patch.object(terminal, "wait", side_effect=completed),
                   patch.object(rose, "bill") as prepare_bill,
                   patch.object(terminal, "show_bill") as show_bill):
-                action, pending = terminal.run(term, "E1S1", model, test=True)
+                action, pending = terminal.run(term, "ME1S1", model, test=True)
             self.assertEqual(action, expected)
             self.assertIsNone(pending)
             prepare_bill.assert_not_called()
@@ -860,7 +860,7 @@ class IntegrationTests(unittest.TestCase):
         from scripts import rose_console
         term = Mock()
         term.read_key.return_value = ("timeout", None)
-        with (patch("sys.argv", ["rose_console.py", "--test", "--name", "Test A"]),
+        with (patch("sys.argv", ["rose_console.py", "--test", "--name", "ME1S1"]),
               patch("sys.stdin.isatty", return_value=True), patch("sys.stdout.isatty", return_value=True),
               patch.object(rose_console.curses, "wrapper", side_effect=lambda session: session(Mock())),
               patch.object(rose_console.curses, "raw"), patch.object(rose_console.curses, "curs_set"),
@@ -869,7 +869,7 @@ class IntegrationTests(unittest.TestCase):
               patch.object(terminal, "run") as run):
             self.assertEqual(rose_console.main(), 0)
         simulated.assert_not_called()
-        self.assertEqual(run.call_args.args, (term, "Test A", live.return_value))
+        self.assertEqual(run.call_args.args, (term, "ME1S1", live.return_value))
         self.assertTrue(run.call_args.kwargs["test"])
 
     def test_missing_key_after_gate_does_not_generate_or_bill(self):

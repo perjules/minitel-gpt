@@ -7,12 +7,12 @@ le module d'usure, toujours désactivé. Aucun actif de personnalité n'est modi
 
 Le dossier `rose_scripts/`, à la racine du dépôt, contient un exemple UTF-8
 prêt à lancer : `rose_scripts/example.json`. Il utilise le profil neutre de
-test `E1S1` et vérifie notamment le souvenir du prénom dans la même session.
+test `ME1S1` et vérifie notamment le souvenir du prénom dans la même session.
 Copier ce fichier pour préparer d'autres essais :
 
 ```json
 {
-  "persona": "E1S1",
+  "persona": "ME1S1",
   "prompts": [
     "Bonsoir. Je m'appelle Camille.",
     "J'aime les vieux films et les soirées tranquilles. Et vous ?",
@@ -61,6 +61,12 @@ catalogue de test. La résolution respecte la casse indifférente et les alias
 déjà existants ; aucun nom inconnu ne déclenche une classification ou un tirage.
 `--test` limite explicitement la recherche au catalogue de test ; sans ce flag,
 les deux catalogues sont recherchés. Un nom ambigu est rejeté.
+La grille de test comporte 50 profils : `ME1S1` à `ME5S5` pour les hommes,
+`FE1S1` à `FE5S5` pour les femmes. M/F désigne le personnage, pas le participant.
+Chaque cellule E/S existe dans les deux genres, avec les mêmes consignes de
+registre et seulement les accords nécessaires dans la voix. Les anciens noms
+sans préfixe (`E1S1`, etc.) ne sont plus des profils valides ; modifier les
+scripts existants pour choisir explicitement M ou F.
 `prompts` doit être une liste de chaînes, chacune limitée aux 800 caractères
 de la saisie ordinaire. Tout le fichier est validé avant un appel modèle.
 `--name` et `--set-password` ne sont pas combinables avec `--script`.

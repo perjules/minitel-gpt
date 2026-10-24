@@ -103,15 +103,22 @@ une réplique éphémère, sans état de présence, journal, cache ou mémorisat
 
 ```bash
 .venv/bin/python scripts/rose_console.py --test
-.venv/bin/python scripts/rose_console.py --test --mock --name "Test A"
+.venv/bin/python scripts/rose_console.py --test --mock --name ME1S1
+.venv/bin/python scripts/rose_console.py --test --name FE1S1
 ```
 
 Dans la console habituelle, la commande **`3615 TEST`** ouvre ce même catalogue.
 Elle est reconnue uniquement au prompt ordinaire, avec les mêmes protections
 de contexte que `3615`. Le flag `--test` sélectionne seulement
-`config/rose_test_personas.json`, qui contient actuellement les stubs **Test A**
-et **Test B**. Leur schéma est identique au catalogue principal ; on pourra
-les remplacer ou en ajouter sans modifier le programme. Le nombre de pages
+`config/rose_test_personas.json`, qui contient **50 profils** : la grille
+E1–E5 × S1–S5 complète pour chaque genre. Les noms sont préfixés par **M**
+pour les hommes (`ME1S1`…`ME5S5`) et **F** pour les femmes (`FE1S1`…`FE5S5`).
+Le préfixe désigne le personnage, pas le participant. Les anciens noms sans
+préfixe ne sont plus des profils nommés : mettre à jour `--name` et les scripts.
+Les deux variantes de chaque cellule gardent les mêmes consignes de registre ;
+seuls les accords de la voix changent. Leur schéma reste identique au catalogue
+principal, sans modification du routage ni nouvel appel de classification pour
+ces noms connus. Le nombre de pages
 s'adapte à la taille du catalogue. La porte, le harness, le fournisseur,
 le rendu, l'isolation et les sorties utilisent le même code. En mode test,
 la facture est entièrement omise : aucune préparation ni aucun défilement,
