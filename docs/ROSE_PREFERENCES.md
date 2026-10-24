@@ -171,3 +171,19 @@ Le tempo est désormais chargé par l'orchestrateur pour les profils concernés 
 la grille reste sans bloc de tempo. Le module d'usure demeure un actif brouillon
 entièrement désactivé. La validation de cette édition est hors ligne et simulée ;
 elle ne mesure ni l'accord effectif du modèle ni sa modération.
+
+## Retour de jeu du propriétaire (25 octobre 2026)
+
+Le propriétaire rapporte un essai réel Mistral réussi avec `ME5S5` et `FE5S5`.
+Dans les deux genres, les personnages accompagnent la conversation sexuellement
+explicite, y compris des descriptions crues d'actes, du teasing érotique et une
+légère humiliation réciproque, jugée encore très vanilla. Le résultat dépasse
+ses attentes ; aucune différence problématique entre les variantes M/F n'est
+signalée. Ce retour fournit une première validation empirique positive du
+registre maximal dans la configuration testée.
+
+Il s'agit du compte rendu du propriétaire, distinct des tests automatisés
+simulés. Le modèle exact, les paramètres et l'interface de cet essai ne sont
+pas précisés. Ce retour n'établit pas le comportement des autres cellules,
+des autres modèles ou de toutes les conversations possibles. Aucun verbatim
+intime n'est ajouté à la documentation et aucune consigne n'est modifiée.
