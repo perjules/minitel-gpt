@@ -211,9 +211,17 @@ toutes les paraphrases. RETOUR et le mot d'arrêt restent les sorties garanties.
   génération à 180 tokens et réponse à 700 caractères. Rendu sûr sur 39 colonnes,
   au plus 20 lignes ; une réponse trop longue est explicitement abrégée.
 - Mot de passe exclu des payloads, historiques, journaux et impression. L'écho
-  console est supprimé. Sur UART, commande PRO3 clavier→écran OFF puis restauration
-  ON ; fonctionnement exact sur le Matra Minitel 1 **non vérifié physiquement**.
-  Ne pas conclure que la saisie matérielle est dissimulée à partir du test console.
+  console est supprimé. Sur UART, les aiguillages clavier→écran et clavier→modem
+  sont interrogés puis coupés avec acquittement avant la demande de mot de passe.
+  Leurs états précédents sont restaurés à la sortie, même après annulation ou
+  erreur. L'écho local normal passe par le modem bouclé : activer en plus le chemin
+  direct clavier→écran doublait chaque caractère après la porte. Sans réponse
+  protocole valide, la porte refuse de demander le mot de passe. Les réponses
+  de status ne deviennent pas des frappes. Référence :
+  [STUM, protocole et aiguillages](https://jbellue.github.io/stum1b/#le-protocole).
+  Après mise à jour, éteindre/rallumer une fois le Minitel pour effacer l'aiguillage
+  erroné laissé par l'ancien code. Les tests simulent les deux chemins d'écho ;
+  vérifier physiquement le masquage, les sélections et le retour au prompt normal.
 - Sortie : verrouillage et effacement de l'historique avant la facture.
   Aucun worker ne modifie l'état ; les réponses tardives sont écartées.
   Une requête déjà envoyée peut continuer chez le fournisseur après l'arrêt.

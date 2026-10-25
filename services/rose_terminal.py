@@ -1,9 +1,76 @@
 """Keyboard/renderer adapter for rose; no access to ordinary history or tools."""
 import sys
 import time
+from contextlib import contextmanager
 from queue import Empty
 
-from . import rose
+from . import rose, terminal_link
+
+
+class EchoUnavailable(RuntimeError):
+    """Do not request a password unless hardware echo suppression is confirmed."""
+
+
+def routing_status(term, receiver, command=None, timeout=1):
+    """Read a bounded PRO3 FROM reply; never treat its status byte as a key.
+
+    STUM, Protocol / routing: PRO2 TO receiver -> PRO3 FROM receiver status.
+    Bit 1 is the keyboard route; the other bits belong to unrelated modules.
+    https://jbellue.github.io/stum1b/#le-protocole
+    """
+    term.w(command if command is not None else bytes([0x1B, 0x3A, 0x62, receiver]))
+    prefix = bytes([0x1B, 0x3B, 0x63, receiver])
+    reply = bytearray()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        code = term.read_byte()
+        if code is None:
+            continue
+        reply.append(code)
+        del reply[:-5]
+        if len(reply) == 5 and reply[:4] == prefix and 0x40 <= reply[4] <= 0x4F:
+            return reply[4]
+    raise EchoUnavailable("Terminal routing acknowledgement unavailable")
+
+
+@contextmanager
+def hidden_echo(term):
+    setter = getattr(term.s, "set_local_echo", None)
+    if callable(setter):
+        previous = term.s.local_echo
+        try:
+            setter(False)
+            yield
+        finally:
+            setter(previous)
+        return
+
+    # A local Minitel normally echoes keyboard -> looped modem -> screen.
+    # Adding keyboard -> screen on exit creates a second visible copy.
+    # Snapshot both routes instead of assuming which one is in use.
+    term.s.reset_input_buffer()  # Discard pre-prompt typeahead/stale protocol replies.
+    saved = {receiver: bool(routing_status(term, receiver) & 0x02)
+             for receiver in (0x58, 0x5A)}
+    restore = []
+    try:
+        for receiver in saved:
+            # Record before sending: a failed write may still have reached the device.
+            restore.append(receiver)
+            command = bytes([0x1B, 0x3B, 0x60, receiver, 0x51])
+            if routing_status(term, receiver, command) & 0x02:
+                raise EchoUnavailable("Terminal keyboard echo is still enabled")
+        yield
+    finally:
+        interrupted = sys.exc_info()[0] is not None
+        failure = None
+        for receiver in restore:
+            command = bytes([0x1B, 0x3B, 0x61 if saved[receiver] else 0x60, receiver, 0x51])
+            try:
+                term.w(command)
+            except terminal_link.Unavailable as error:
+                failure = error
+        if failure is not None and not interrupted:
+            raise failure
 
 
 def api():
@@ -80,25 +147,18 @@ def gate(term):
     if not rose.password_value():
         display(term, "Service verrouillé. Configuration locale requise.")
         return False, "retour"
-    # Console has a direct echo switch; physical path uses protocol routing.
-    # Actual Matra Minitel 1 echo support still requires physical validation.
-    previous = getattr(term.s, "local_echo", True)
-    setter = getattr(term.s, "set_local_echo", None)
     try:
-        if callable(setter):
-            setter(False)
-        else:
-            term.w(b"\x1b\x3b\x60\x58\x51")  # keyboard -> screen OFF
-        display(term, "Mot de passe :")
-        attempt, action = read_field(term, secret=True)
-        accepted = action == "submit" and rose.authorized(attempt)
-        attempt = None
-    finally:
-        term.clear()
-        if callable(setter):
-            setter(previous)
-        else:
-            term.w(b"\x1b\x3b\x61\x58\x51")
+        with hidden_echo(term):
+            try:
+                display(term, "Mot de passe :")
+                attempt, action = read_field(term, secret=True)
+                accepted = action == "submit" and rose.authorized(attempt)
+                attempt = None
+            finally:
+                term.clear()
+    except EchoUnavailable:
+        display(term, "Masquage du clavier indisponible.\nRéessayez après vérification du terminal.")
+        return False, "retour"
     if not accepted and action == "submit":
         display(term, "Accès refusé.\n\n"
                 "Les services centraux d'accréditation ont rejeté votre dossier.\n\n"
