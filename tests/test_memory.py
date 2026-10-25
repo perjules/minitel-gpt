@@ -3,10 +3,12 @@
 import json
 import threading
 import unittest
+from datetime import datetime
 from pathlib import Path
 from queue import Queue
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
+from zoneinfo import ZoneInfo
 
 from test_terminal_startup import EndOfInput, FakeSerial, fn, screen_text
 from web_client import csrf_client
@@ -230,7 +232,9 @@ class MemoryTests(unittest.TestCase):
         self.assertIn(text, rows[1]["text"])
         self.assertNotIn("dangerous", logs[0].read_text())
         self.assertNotIn("private-example-key", logs[0].read_text())
-        self.assertIn("+02:00", rows[1]["at"])
+        stamp = datetime.fromisoformat(rows[1]["at"])
+        self.assertIsNotNone(stamp.utcoffset())
+        self.assertEqual(stamp.utcoffset(), stamp.astimezone(ZoneInfo("Europe/Paris")).utcoffset())
         self.assertEqual(rows[-1]["role"], "event")
         self.assertEqual(self.store.read(self.alice.key)["items"], [])
 
