@@ -119,13 +119,12 @@ class HostTests(unittest.TestCase):
         self.assertEqual(terminal.read_field(term, secret=True), (None, "overflow"))
         self.assertEqual(terminal.read_field(term), ("PUBLIC", "submit"))
 
-    def test_physical_echo_commands_restore_even_on_disconnect(self):
+    def test_console_echo_restores_even_on_interrupted_input(self):
         term = KeyTerm([])
-        del term.s.set_local_echo
         with patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}), self.assertRaises(StopIteration):
             terminal.gate(term)
-        self.assertIn(b"\x1b\x3b\x60\x58\x51", term.rows)
-        self.assertIn(b"\x1b\x3b\x61\x58\x51", term.rows)
+        self.assertEqual(term.s.set_local_echo.call_args_list[0].args, (False,))
+        self.assertEqual(term.s.set_local_echo.call_args_list[-1].args, (True,))
 
     def test_whole_safeword_and_explicit_stop_controls(self):
         for word in (" navet ", "NAVET", "NaVeT"):
@@ -965,6 +964,10 @@ class IntegrationTests(unittest.TestCase):
                 + startup.fn(chat.K_RETOUR)
                 + b"Public question" + startup.fn(chat.K_ENVOI))
         uart = startup.FakeSerial(keys)
+        # This test covers conversation isolation through the real key decoder;
+        # physical routing acknowledgements are exercised in test_rose_echo.py.
+        uart.local_echo = True
+        uart.set_local_echo = Mock()
         memory = Mock(key="owner", username="owner", pending=None, take_warning=lambda: "")
         memory.saved_language.return_value = "en"
         requests = []
