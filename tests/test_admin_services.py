@@ -5,7 +5,6 @@ from werkzeug.datastructures import MultiDict
 
 from services import admin_ui as admin
 from services import pronote
-from test_admin_navigation import console  # noqa: F401
 
 
 def test_uniform_cards_and_inert_placeholders(console):

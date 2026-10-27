@@ -7,7 +7,6 @@ import requests
 
 from services import admin_ui as admin
 from services import model_catalogue as catalogue
-from test_admin_navigation import console  # noqa: F401 - shared isolated configuration fixture
 
 
 def response(data):

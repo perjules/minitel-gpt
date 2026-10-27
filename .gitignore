@@ -19,3 +19,5 @@ config/rose-password.txt
 
 .env.lock
 config/*.lock
+
+config/rose-local.json

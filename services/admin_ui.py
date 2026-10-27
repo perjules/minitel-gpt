@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import secrets
+import stat
 import subprocess
 import threading
 import time
@@ -46,6 +47,8 @@ try:
         model_catalogue,
         pronote,
         pronote_answers,
+        rose,
+        rose_config,
         storage_health,
         system_health,
     )
@@ -62,6 +65,8 @@ except ImportError:
     import model_catalogue
     import pronote
     import pronote_answers
+    import rose
+    import rose_config
     import storage_health
     import system_health
 
@@ -1010,8 +1015,7 @@ function loadStorage(){
       document.getElementById('storage-status').textContent = s.error ? 'Stockage indisponible' :
         (s.warning ? 'ATTENTION : espace libre faible\\n' : '') +
         'Libre : ' + mib(s.free_bytes) + ' Mio\\n' +
-        'Anciens logs + Rose : ' + size(s.legacy_logs_and_rose) + ' Mio\\n' +
-        'Dont transcriptions Rose : ' + size(s.rose_transcripts) + ' Mio\\n' +
+        'Journaux et archives : ' + size(s.application_logs) + ' Mio\\n' +
         'Mémoire + conversations : ' + size(s.memory_and_conversations) + ' Mio';
     }).catch(() => { document.getElementById('storage-status').textContent = 'Stockage indisponible'; });
 }
@@ -1581,7 +1585,9 @@ def rollback_route():
 @require_login
 def storage_status():
     try:
-        return jsonify(storage_health.status(PROJ_DIR))
+        raw = storage_health.status(PROJ_DIR)
+        return jsonify(free_bytes=raw["free_bytes"], total_bytes=raw["total_bytes"], warning=raw["warning"],
+                       application_logs=raw["legacy_logs_and_rose"], memory_and_conversations=raw["memory_and_conversations"])
     except OSError:
         return jsonify(error="storage_unavailable"), 503
 
@@ -1664,6 +1670,141 @@ def service_configuration(feature):
         context = {"account": account, "enabled": gmail_enabled()}
     return render_template_string(admin_service_pages.HEAD + body + "</html>",
                                   title=titles[feature], message=message, **context)
+
+
+ROSE_HTML = """<!doctype html><html lang=fr><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1"><title>Atelier privé</title>
+<style>body{font:16px system-ui;max-width:850px;margin:20px auto;padding:16px;background:#19191d;color:#eee}a,summary{color:#4ecdc4}label{display:block;margin:12px 0}input,select,textarea{box-sizing:border-box;width:100%;padding:8px;font:inherit}input[type=hidden]{display:none}button{padding:10px;margin:8px 0}section,details{border:1px solid #555;padding:16px;margin:16px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style>
+{% if message %}<p role=status>{{message}}</p>{% endif %}
+{% if not unlocked %}<h1>Accès réservé</h1><form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=unlock>
+<label>Mot de passe<input type=password name=password required autocomplete=current-password></label><button>Déverrouiller</button></form>
+{% else %}<h1>Atelier Rose</h1><a href="/?section=services">Retour administration</a>
+<form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><button name=action value=lock>Verrouiller</button></form>
+<p>Les profils sont pris en compte aux nouvelles sessions ; le prompt commun et les niveaux partagés aux prochaines requêtes. Les éditions locales restent séparées des fichiers suivis par Git.</p>
+<section><h2>Personnalités</h2><form method=get>
+<label>Catalogue<select name=catalog><option value=main {{'selected' if catalog=='main'}}>Normal</option><option value=test {{'selected' if catalog=='test'}}>Test</option></select></label>
+<label>Profil<select name=profile>{% for p in people %}<option value="{{p.id}}" {{'selected' if p.id==person.id}}>{{p.name}}</option>{% endfor %}<option value=new {{'selected' if is_new}}>+ Nouveau profil</option></select></label><button>Ouvrir</button></form>
+<form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=person>
+<input type=hidden name=catalog value="{{catalog}}"><input type=hidden name=original_id value="{{'' if is_new else person.id}}">
+<label>Identifiant<input name=id value="{{person.id}}" maxlength=80 required {{'readonly' if not is_new}}></label>
+<label>Nom<input name=name value="{{person.name}}" maxlength=80 required></label>
+<label>Alias (un par ligne)<textarea name=aliases rows=3>{{person.aliases|join('\n')}}</textarea></label>
+<label>Genre<select name=gender><option value=homme {{'selected' if person.gender=='homme'}}>Homme</option><option value=femme {{'selected' if person.gender=='femme'}}>Femme</option></select></label>
+<label>Description<textarea name=bio rows=3>{{person.bio}}</textarea></label>
+{% for axis in ['e','s'] %}<label>Niveau {{axis|upper}}<select name="{{axis}}_level"><option value="">Texte historique sans niveau séparé</option>{% for n in range(1,6) %}<option value="{{n}}" {{'selected' if person.get(axis+'_level')==n}}>{{axis|upper}}{{n}}</option>{% endfor %}</select></label>{% endfor %}
+<label>Voix / consignes propres au profil<textarea name=voice rows=7>{{person.voice}}</textarea></label>
+<details><summary>Autres paramètres du profil (JSON)</summary><p>Tempo, modules, options et tarification existants. Les variantes e_prompt_override / s_prompt_override conservent les formulations historiques ; les vider permet de suivre le niveau partagé.</p><textarea name=metadata rows=8>{{metadata}}</textarea></details>
+<button>Enregistrer le profil</button></form></section>
+<section><h2>Prompt système commun</h2><form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=prompt><textarea name=prompt rows=12 required>{{prompt}}</textarea><button>Enregistrer le prompt</button></form></section>
+<details><summary>Prompts partagés E1–E5 / S1–S5</summary><form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=levels>
+{% for key,text in levels.items()|sort %}<label>{{key}}<textarea name="{{key}}" rows=4 required>{{text}}</textarea></label>{% endfor %}<button>Enregistrer les niveaux</button></form></details>
+<details><summary>Journaux et transcriptions</summary><p>Aucun fichier n’est supprimé ou filtré.</p><ul>{% for name in logs %}<li><a href="{{url_for('rose_admin',log=name)}}">{{name}}</a></li>{% else %}<li>Aucun fichier</li>{% endfor %}</ul>{% if log_text is not none %}<pre>{{log_text}}</pre>{% endif %}</details>
+{% endif %}</html>"""
+
+
+def private_rose_logs(name=None):
+    folder = PROJ_DIR / 'logs' / 'rose'
+    if folder.is_symlink() or folder.parent.is_symlink():
+        abort(400)
+    if name is None:
+        if not folder.exists():
+            return []
+        names = []
+        with os.scandir(folder) as entries:
+            for index, entry in enumerate(entries):
+                if index >= 1000:
+                    break
+                if entry.is_file(follow_symlinks=False):
+                    names.append(entry.name)
+        return sorted(names)
+    if not name or Path(name).name != name or '\\' in name or '\x00' in name:
+        abort(400)
+    try:
+        descriptor = os.open(folder / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, 'rb') as stream:
+            details = os.fstat(stream.fileno())
+            if not stat.S_ISREG(details.st_mode):
+                abort(400)
+            stream.seek(max(0, details.st_size - 65536))
+            return stream.read(65536).decode('utf-8', errors='replace')
+    except OSError:
+        abort(404)
+
+
+@app.route('/admin/rose', methods=['GET', 'POST'])
+@require_login
+def rose_admin():
+    unlocked = time.time() - session.get('rose_unlock', 0) < 1200
+    message = ''
+    if request.method == 'POST' and request.form.get('action') == 'lock':
+        session.pop('rose_unlock', None)
+        return redirect(url_for('rose_admin'))
+    if not unlocked:
+        if request.method == 'POST' and request.form.get('action') == 'unlock':
+            if rose.authorized(request.form.get('password', '')):
+                session['rose_unlock'] = time.time()
+                return redirect(url_for('rose_admin'))
+            message = 'Accès refusé.'
+        return render_template_string(ROSE_HTML, unlocked=False, message=message), 200 if request.method == 'GET' else 403
+    session['rose_unlock'] = time.time()
+    catalog = request.values.get('catalog', 'main')
+    if catalog not in {'main', 'test'}:
+        abort(400)
+    test = catalog == 'test'
+    if request.method == 'POST':
+        action = request.form.get('action')
+        if action == 'person':
+            try:
+                person = json.loads(request.form.get('metadata', '{}'))
+            except ValueError:
+                raise config_store.InvalidConfig('Paramètres JSON invalides') from None
+            if not isinstance(person, dict):
+                abort(400)
+            person.update({key: request.form.get(key, '').strip() for key in ('id', 'name', 'gender', 'bio', 'voice')})
+            original = request.form.get('original_id', '')
+            if original and original != person['id']:
+                abort(400)
+            person['aliases'] = [a.strip() for a in request.form.get('aliases', '').splitlines() if a.strip()]
+            for key in ('e_level', 's_level'):
+                value = request.form.get(key, '')
+                person.pop(key, None)
+                if value:
+                    if value not in {'1', '2', '3', '4', '5'}:
+                        abort(400)
+                    person[key] = int(value)
+            if not original and any(p['id'] == person['id'] for p in rose.catalogue(test)['personas']):
+                raise config_store.InvalidConfig('Identifiant déjà utilisé')
+            previous = next((p for p in rose.catalogue(test)['personas'] if p['id'] == original), None)
+            if previous:
+                previous = rose_config.editable(previous, rose_config.levels(rose.CONFIG))
+                for axis in ('e', 's'):
+                    if previous.get(axis + '_level') != person.get(axis + '_level'):
+                        person.pop(axis + '_prompt_override', None)
+            rose_config.save(rose.CONFIG, 'person', person=person, test=test)
+            return redirect(url_for('rose_admin', catalog=catalog, profile=person['id'], saved='1'))
+        if action == 'prompt':
+            rose_config.save(rose.CONFIG, 'prompt', text=request.form.get('prompt', ''))
+        elif action == 'levels':
+            rose_config.save(rose.CONFIG, 'levels', bank={f'{a}{n}': request.form.get(f'{a}{n}', '') for a in 'ES' for n in range(1, 6)})
+        else:
+            abort(400)
+        return redirect(url_for('rose_admin', catalog=catalog, saved='1'))
+    people = rose.catalogue(test)['personas']
+    identifier = request.args.get('profile', people[0]['id'])
+    bank = rose_config.levels(rose.CONFIG)
+    if identifier == 'new':
+        person = {'id': '', 'name': '', 'aliases': [], 'gender': 'femme', 'bio': '', 'voice': '', 'fees': [], 'tempo': 0, 'kinks': [], 'asexual': False, 'e_level': 1, 's_level': 1}
+    else:
+        person = next((p for p in people if p['id'] == identifier), None)
+        if person is None:
+            abort(404)
+        person = rose_config.editable(person, bank)
+    message = 'Enregistré.' if request.args.get('saved') else ''
+    metadata = {k: v for k, v in person.items() if k not in {'id', 'name', 'aliases', 'gender', 'bio', 'voice', 'e_level', 's_level'}}
+    return render_template_string(ROSE_HTML, unlocked=True, message=message, catalog=catalog, people=people,
+        person=person, is_new=identifier == 'new', levels=bank, prompt=rose_config.prompt(rose.CONFIG),
+        metadata=json.dumps(metadata, ensure_ascii=False, indent=2), logs=private_rose_logs(),
+        log_text=private_rose_logs(request.args['log']) if 'log' in request.args else None)
 
 
 PRONOTE_HTML = admin_service_pages.HEAD + """
