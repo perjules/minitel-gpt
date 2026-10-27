@@ -889,22 +889,24 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       <button class="btn btn-d" formaction=/delete-preset onclick="return confirm('Supprimer ce preset ?')">Supprimer</button>
     </form>
   </div>
+  <div class=block id=knowledgeBlock>
+    <h2>Connaissances de la personnalité sélectionnée</h2>
+    <p>Fichiers associés à : <b id=kpresetname></b></p>
+    <p class=sub>Textes injectés dans le contexte de cette personnalité. Ajout et suppression sont enregistrés immédiatement, indépendamment du brouillon du prompt. Le service Minitel redémarre si cette personnalité est active.</p>
+    <ul class=plist id=klist></ul>
+    <form method=POST action=/upload-knowledge enctype=multipart/form-data id=knowledgeForm><input type=hidden name=csrf value="{{csrf_token()}}">
+      <input type=hidden name=preset_key id=kkey>
+      <label for=knowledgeFiles>Fichiers texte (.txt), 256 Kio maximum par fichier</label>
+      <input type=file name=files id=knowledgeFiles accept=".txt" multiple required>
+      <button class="btn btn-p">Ajouter le(s) fichier(s)</button>
+    </form>
+  </div>
   <div class=block>
     <h2>Générer un brouillon de prompt par IA</h2>
     <p class=sub>Décrivez le projet : l'IA rédige les consignes, qui rempliront le champ « Prompt système » ci-dessus (éditable avant d'enregistrer).</p>
     <textarea id=desc rows=4 placeholder="Ex: Un assistant qui ne parle que de cuisine italienne, ton chaleureux, refuse tout autre sujet..."></textarea>
     <button class="btn btn-p" type=button onclick=genPrompt()>Générer les consignes</button>
     <div id=spin>⏳ Génération en cours...</div>
-  </div>
-  <div class=block>
-    <h2>📄 Fichiers de connaissance (.txt)</h2>
-    <p class=sub>Contenus que cette personnalité utilisera pour répondre (injectés dans son contexte). Pour : <b id=kpresetname></b></p>
-    <ul class=plist id=klist></ul>
-    <form method=POST action=/upload-knowledge enctype=multipart/form-data><input type=hidden name=csrf value="{{csrf_token()}}">
-      <input type=hidden name=preset_key id=kkey>
-      <input type=file name=files accept=".txt" multiple>
-      <button class="btn btn-p">Ajouter le(s) fichier(s)</button>
-    </form>
   </div>
   <div class=block>
     <h2>Tester le brouillon de la personnalité sélectionnée</h2>
@@ -1083,7 +1085,8 @@ function loadPreset(){
       const input=document.createElement('input');input.type='hidden';input.name=name;input.value=value;f.appendChild(input);
     }
     addCsrf(f);
-    const button=document.createElement('button');button.className='btn btn-d';button.textContent='Suppr.';f.appendChild(button);
+    const button=document.createElement('button');button.className='btn btn-d';button.textContent='Supprimer';f.appendChild(button);
+    f.addEventListener('submit',e=>{if(!confirm('Supprimer ce fichier de connaissance ?'))e.preventDefault();});
     li.appendChild(span);li.appendChild(f);ul.appendChild(li);
   });
 }
@@ -1434,7 +1437,7 @@ def upload_knowledge():
     data = load_prompts()
     if key not in data["presets"]:
         session["flash"] = "Personnalité inconnue."; session["flash_ok"] = False
-        return redirect(url_for("index"))
+        return redirect(url_for("index", section="ai", preset=key))
     folder = knowledge_folder(key)
     folder.mkdir(parents=True, exist_ok=True)
     files = request.files.getlist("files")
@@ -1456,7 +1459,7 @@ def upload_knowledge():
         restart_terminal()
     session["flash"] = f"{n} fichier(s) ajouté(s) à « {data['presets'][key].get('label', key)} »." if n else "Aucun fichier .txt valide."
     session["flash_ok"] = bool(n)
-    return redirect(url_for("index"))
+    return redirect(url_for("index", section="ai", preset=key))
 
 @app.route("/delete-knowledge", methods=["POST"])
 @require_login
@@ -1472,7 +1475,7 @@ def delete_knowledge():
         session["flash"] = f"Fichier {fn} supprimé."; session["flash_ok"] = True
     else:
         session["flash"] = "Fichier introuvable."; session["flash_ok"] = False
-    return redirect(url_for("index"))
+    return redirect(url_for("index", section="ai", preset=key))
 
 @app.route("/restart", methods=["POST"])
 @require_login
