@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Interface d'administration MINITEL GPT - http://<ip>:8080  (mot de passe 13100)
-Navigation par onglets : Tableau de bord · Personnalités · Paramètres.
+Interface d'administration MINITEL GPT - http://<ip>:8080.
+Navigation : Tableau de bord · Configuration IA · Services · Maintenance.
 """
 import hmac
 import io
@@ -10,13 +10,16 @@ import logging
 import os
 import re
 import secrets
+import stat
 import subprocess
 import threading
 import time
 import unicodedata
 from collections import OrderedDict
+from datetime import datetime
 from functools import wraps
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from dotenv import dotenv_values
 from flask import (
@@ -34,26 +37,40 @@ from werkzeug.utils import secure_filename
 
 try:
     from . import (
+        admin_service_pages,
         calculator,
         config_store,
+        gmail_auth,
+        gmail_client,
         gmail_mail,
         io_limits,
         memory_session,
         mistral_answers,
+        model_catalogue,
         pronote,
         pronote_answers,
+        rose,
+        rose_config,
         storage_health,
+        system_health,
     )
 except ImportError:
+    import admin_service_pages
     import calculator
     import config_store
+    import gmail_auth
+    import gmail_client
     import gmail_mail
     import io_limits
     import memory_session
     import mistral_answers
+    import model_catalogue
     import pronote
     import pronote_answers
+    import rose
+    import rose_config
     import storage_health
+    import system_health
 
 PROJ_DIR = Path(__file__).parent.parent
 ASSETS_DIR = PROJ_DIR / "assets"
@@ -62,7 +79,7 @@ PROMPTS_DEFAULT = PROJ_DIR / "config" / "prompts.default.json"
 KNOWLEDGE_DIR = PROJ_DIR / "config" / "knowledge"
 ENV_FILE = PROJ_DIR / ".env"
 LOGS_DIR = PROJ_DIR / "logs"
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "mistral")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 log = logging.getLogger(__name__)
 def admin_session_secret():
     configured = os.getenv("FLASK_SECRET", "")
@@ -361,35 +378,12 @@ def mask_key(k):
         return "(absente)"
     return (k[:6] + "..." + k[-4:]) if len(k) > 12 else "(définie)"
 
-# Modèles proposés (id, libellé avec coût + pertinence). Le terminal n'affiche
-# que 40 colonnes et répond court → un modèle léger suffit largement.
-MISTRAL_MODELS = [
-    ("ministral-8b-latest",  "Ministral 8B - le moins cher, très rapide (~0,10 $/M)"),
-    ("mistral-small-latest", "Mistral Small - bon équilibre, recommandé (~0,20 $/M)"),
-    ("mistral-medium-latest","Mistral Medium - plus pertinent (~0,40 $/M entrée)"),
-    ("mistral-large-latest", "Mistral Large - le plus pertinent (~2 $/M entrée)"),
-]
-CLAUDE_MODELS = [
-    ("claude-haiku-4-5",  "Claude Haiku 4.5 - le moins cher, le plus rapide, recommandé (1 $ / 5 $ par M)"),
-    ("claude-sonnet-5-5", "Claude Sonnet 5.5 - équilibre vitesse/intelligence (2 $ / 10 $ par M)"),
-    ("claude-opus-5-5",   "Claude Opus 5.5 - le plus pertinent, plus lent (4 $ / 20 $ par M)"),
-]
-
 def claude_options(model):
     """Paramètres propres au modèle : les Claude 5.x réfléchissent par défaut
     (thinking adaptatif) ; effort bas = réponse rapide et courte, adaptée au
     Minitel. Haiku 4.5 ne connaît pas ce paramètre (erreur 400)."""
     return {} if model.startswith("claude-haiku") else {"output_config": {"effort": "low"}}
-# Linkup n'est pas un LLM generatif mais un moteur de recherche web : la
-# "profondeur" remplace le modele. Tarifs : ~0,005 $ (fast/standard) ou
-# ~0,006 $ (deep) par recherche.
-LINKUP_DEPTHS = [
-    ("fast",     "Fast - reponse quasi instantanee, sans interpretation (~0,005 $/recherche)"),
-    ("standard", "Standard - recherche agentique iterative, recommande (~0,005 $/recherche)"),
-    ("deep",     "Deep - chainage multi-iterations, le plus pertinent, 5-30s (~0,006 $/recherche)"),
-]
-MISTRAL_MODEL_IDS = {m[0] for m in MISTRAL_MODELS}
-CLAUDE_MODEL_IDS = {m[0] for m in CLAUDE_MODELS}
+LINKUP_DEPTHS = [("fast", "Fast"), ("standard", "Standard"), ("deep", "Deep")]
 LINKUP_DEPTH_IDS = {m[0] for m in LINKUP_DEPTHS}
 
 # ── Auth ─────────────────────────────────────────────────────────────────
@@ -407,29 +401,38 @@ def restart_terminal():
         r = subprocess.run(["sudo", "-n", "systemctl", "restart", "minitel-chatgpt"],
                            capture_output=True, text=True, check=False, timeout=15)
         return r.returncode == 0
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, UnicodeError, subprocess.SubprocessError):
         return False
+
+
+def saved_feedback(message, restart_required=False):
+    session["flash"] = message
+    session["flash_ok"] = True
+    if restart_required:
+        restarted = restart_terminal()
+        status = ("Redémarrage du service Minitel confirmé." if restarted else
+                  "Redémarrage non confirmé : configuration enregistrée ; réessayer dans Maintenance.")
+        session["restart_status"] = status
+        session["flash"] += " " + status
+        session["flash_ok"] = restarted
+    else:
+        session["flash"] += " Le Minitel reste sur la personnalité active ; activer celle-ci pour l’appliquer."
 
 
 def svc_status(name):
     try:
         return subprocess.run(["systemctl", "is-active", name], capture_output=True,
-                              text=True, check=False, timeout=5).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
+                              text=True, check=False, timeout=5).stdout.strip() or "indisponible"
+    except (OSError, UnicodeError, subprocess.SubprocessError):
         return "unavailable"
 
 
 def ip_address():
-    try:
-        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True,
-                             check=False, timeout=5).stdout
-        return out.split()[0] if out.split() else "?"
-    except (OSError, subprocess.SubprocessError):
-        return "?"
+    return system_health.local_ip()
 
 
 def log_tail(name, n=40):
-    if name not in {"chatgpt", "wifi", "admin"}:
+    if name not in {"chatgpt", "wifi", "admin", "deploy"}:
         return "(journal inconnu)"
     try:
         result = subprocess.run(
@@ -485,9 +488,13 @@ def check_update():
     if rc != 0:
         return {"ok": False, "msg": "Échec de la vérification (Internet ?) : " + err}
     rc, behind, _ = git("rev-list", "--count", f"HEAD..origin/{branch}")
-    n = int(behind) if behind.isdigit() else 0
-    _, log, _ = git("log", "--format=%h  %s", f"HEAD..origin/{branch}")
-    return {"ok": True, "behind": n, "log": log}
+    if rc != 0 or not behind.isdigit():
+        return {"ok": False, "msg": "Comparaison des versions indisponible ; réessayer la vérification."}
+    n = int(behind)
+    rc, changes, _ = git("log", "-20", "--format=%h  %s", f"HEAD..origin/{branch}")
+    if rc != 0:
+        return {"ok": False, "msg": "Liste des mises à jour indisponible ; réessayer la vérification."}
+    return {"ok": True, "behind": n, "log": changes[:1600]}
 
 def do_update():
     return queue_deployment("update")
@@ -496,17 +503,18 @@ def do_rollback():
     return queue_deployment("rollback")
 
 
-def queue_deployment(operation):
+def queue_deployment(operation, payload=None):
     try:
         result = subprocess.run(
             ["sudo", "-n", "/usr/local/sbin/minitel-runtime", operation],
             capture_output=True, text=True, timeout=15, check=False,
+            input=json.dumps(payload) if payload is not None else None,
         )
     except (OSError, subprocess.SubprocessError, UnicodeError):
         return False, "Gestionnaire uv indisponible ; relancer sudo bash install.sh."
     if result.returncode:
         return False, "Opération refusée ; consulter le journal minitel-deploy."
-    return True, "Opération planifiée ; suivre /deployment-status ou journalctl -u minitel-deploy."
+    return True, "Opération planifiée ; actualiser Maintenance pour suivre le résultat."
 
 # ── Génération de prompt par IA ──────────────────────────────────────────
 def generate_prompt(description):
@@ -660,15 +668,19 @@ body{background:var(--bg);color:var(--text);font-family:'Courier New',monospace;
 .brand b{font-size:1.05em;color:var(--text)}
 .logout{color:var(--muted);text-decoration:none;font-size:.85em}.logout:hover{color:var(--danger)}
 nav.tabs{display:flex;gap:4px;max-width:920px;margin:18px auto 0;padding:0 20px;flex-wrap:wrap}
-nav.tabs button{background:transparent;border:1px solid var(--border);border-bottom:none;
-  color:var(--muted);padding:11px 20px;border-radius:8px 8px 0 0;cursor:pointer;font-family:inherit;font-size:.95em}
-nav.tabs button.active{background:var(--card);color:var(--accent);border-color:var(--border);font-weight:bold}
+nav.tabs a{background:transparent;border:1px solid var(--border);border-bottom:none;
+  color:var(--muted);padding:11px 20px;border-radius:8px 8px 0 0;cursor:pointer;font-family:inherit;font-size:.95em;text-decoration:none}
+nav.tabs a.active{background:var(--card);color:var(--accent);border-color:var(--border);font-weight:bold}
 main{max-width:920px;margin:0 auto;padding:0 20px}
 .tabwrap{background:var(--card);border:1px solid var(--border);border-radius:0 10px 10px 10px;padding:20px}
 .panel{display:none}.panel.active{display:block}
 .block{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:16px}
 .block:last-child{margin-bottom:0}
+.health-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}.health-grid .block{margin:0 0 16px}.reading{font-size:2em;margin:12px 0}meter{width:100%;height:24px}.warning{color:var(--danger)}a{color:var(--accent)}
+.block,.flash{overflow-wrap:anywhere}
+input[type=file]{max-width:100%}
 h2{color:var(--accent);margin:0 0 6px;font-size:1.1em}
+details.provider-settings{border-left:3px solid var(--accent);padding:10px 12px;margin-top:12px}summary{cursor:pointer;color:var(--accent);padding:6px 0}
 h3{color:var(--accent);font-size:1em;margin:14px 0 6px}
 .sub{color:var(--muted);font-size:.8em;margin:0 0 12px}
 label{color:#b8b8c0;font-size:.85em;display:block;margin:10px 0 4px}
@@ -677,6 +689,7 @@ select,input[type=text],input[type=password],textarea{width:100%;padding:10px;ba
 select:focus,input:focus,textarea:focus{outline:none;border-color:var(--accent)}
 textarea{resize:vertical;font-size:.85em;line-height:1.5}
 .btn{padding:10px 18px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:.9em;font-family:monospace;margin:8px 8px 0 0}
+#services .btn{display:inline-block}
 .btn-p{background:var(--accent);color:#06201d}.btn-p:hover{background:var(--accent-d)}
 .btn-s{background:transparent;color:var(--accent);border:1px solid var(--accent)}.btn-s:hover{background:#16302e}
 .btn-d{background:transparent;color:var(--danger);border:1px solid var(--danger)}.btn-d:hover{background:#2a1414}
@@ -698,6 +711,7 @@ pre{background:var(--bg);padding:10px;border-radius:6px;font-size:.72em;max-heig
 .fok{background:#10302b;color:var(--accent);border:1px solid var(--accent)}
 .ferr{background:#301414;color:var(--danger);border:1px solid var(--danger)}
 #spin{display:none;color:var(--muted);margin-top:8px}
+@media(max-width:600px){.topbar{flex-wrap:wrap;gap:8px}nav.tabs{padding:0 10px}nav.tabs a{flex:1 1 45%;text-align:center;padding:12px 8px}main{padding:0 10px}.tabwrap{padding:12px}.brand{gap:6px}.brand b{font-size:.9em}.row,.plist li{flex-wrap:wrap}input,select,textarea{min-width:0}}
 hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 .ipbox{font-size:.9em;color:var(--muted)}.ipbox b{color:var(--accent)}
 </style></head><body>
@@ -706,31 +720,141 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
   <form method=POST action=/logout><input type=hidden name=csrf value="{{csrf_token()}}"><button class=logout>Déconnexion</button></form>
 </div>
 
-{% if flash %}<div class="flash {{'fok' if flash_ok else 'ferr'}}">{{flash}}</div>{% endif %}
+{% if flash %}<div role=status class="flash {{'fok' if flash_ok else 'ferr'}}">{{flash}}</div>{% endif %}
 
 <nav class=tabs>
-  <button data-tab=dash class=active>Tableau de bord</button>
-  <button data-tab=perso>Personnalités</button>
-  <button data-tab=params>Paramètres</button>
+  {% for key,label in [('dash','Tableau de bord'),('ai','Configuration IA'),('services','Services'),('maintenance','Maintenance')] %}
+  <a href="{{url_for('index', section=key, preset=edit_key)}}" data-tab="{{key}}" class="{{'active' if section==key}}" {{'aria-current=page' if section==key}}>{{label}}</a>
+  {% endfor %}
 </nav>
 <main><div class=tabwrap>
 
 <!-- TABLEAU DE BORD -->
-<section class="panel active" id=dash>
-  <div class=block>
-    <h2>État du Pi</h2>
-    <p class=ipbox>Adresse : <b>http://{{ip}}:8080</b></p>
-    {% for s,st in services.items() %}
-    <div class=row><span class="dot {{'on' if st=='active' else 'off'}}"></span>{{s}}
-      <span style="margin-left:auto;color:{{'#4ecdc4' if st=='active' else '#667'}}">{{st}}</span></div>
-    {% endfor %}
-    <form method=POST action=/restart style=margin-top:10px><input type=hidden name=csrf value="{{csrf_token()}}">
-      <button class="btn btn-s">↺ Redémarrer le terminal</button></form>
-    <p class=sub>« inactive » sur wifi/boot = normal (services ponctuels).</p>
+<section class="panel {{'active' if section=='dash'}}" id=dash>
+  <p class=sub>Mesures à l’ouverture. <a href="/?section=dash">Actualiser</a></p>
+  <div class=health-grid>
+    <div class=block><h2>🌡️ Température</h2>
+      <p class=reading>{{health.temperature ~ ' °C' if health.temperature is not none else 'Indisponible'}}</p>
+      <p class=sub>Depuis le démarrage : {{health.uptime}}</p>
+    </div>
+    <div class=block><h2>Stockage</h2>
+      {% if health.disk %}
+      <meter min=0 max=100 value="{{health.disk.used_percent}}" low=70 high=90 optimum=0 aria-label="Espace disque utilisé"></meter>
+      <p>{{health.disk.used_percent}} % utilisé · {{health.disk.free_gib}} / {{health.disk.total_gib}} Gio libres</p>
+      {% if health.disk.warning %}<p class=warning>Espace libre faible</p>{% endif %}
+      {% else %}<p>Indisponible</p>{% endif %}
+      <a href="/?section=maintenance#storage">Gérer</a>
+    </div>
   </div>
+  <div class=block><h2>Services de l’appareil</h2>
+    {% for name,state in services.items() %}<div class=row>
+      <span class="dot {{'on' if state=='active' else 'warn'}}"></span>
+      {{'Service Minitel' if name=='minitel-chatgpt' else 'Administration'}} : {{state}}
+    </div>{% endfor %}
+    <p class=sub>L’état du service ne confirme pas la connexion physique du Minitel.</p>
+    <p>Wi-Fi : {{health.wifi}}</p><p>Adresse locale : {{ip}}</p><p>Tailscale : {{health.tailscale}}</p>
+  </div>
+  <div class=block><h2>Logiciel et IA</h2>
+    <p>Version : <b>{{version.split(' · ')[0]}}</b> · <a href="/?section=maintenance#software">Gérer</a></p>
+    {% if deployment.phase=='failed' %}<p class=warning>Le dernier déploiement a échoué. <a href="/?section=maintenance#software">Consulter</a></p>{% endif %}
+    <p>IA configurée : {{provider}} · {{configured_model}} · <a href="/?section=ai">Gérer</a></p>
+  </div>
+  <div class=block><h2>Journal récent du Minitel</h2>
+    <pre>{{log_chatgpt.splitlines()[-5:]|join('\n')}}</pre>
+    <a href="/?section=maintenance#logs">Voir les journaux</a>
+  </div>
+</section>
+
+<!-- PERSONNALITES (editeur) -->
+<section class="panel {{'active' if section=='ai'}}" id=ai>
   <div class=block>
-    <h2>Personnalités disponibles</h2>
-    <p class=sub>La personnalité active est celle utilisée par le Minitel.</p>
+    <h2>Fournisseur, modèle et clés API</h2>
+    <p>Fournisseur enregistré : <b>{{provider}}</b></p>
+    <p class=sub>Choisissez le moteur d'IA et son modèle. Le terminal et la génération
+      de prompts utilisent le fournisseur sélectionné. La clé de chaque fournisseur
+      est conservée indépendamment - vous pouvez basculer sans la ressaisir.</p>
+    <p class=sub>Enregistrer sauvegarde les réglages et redémarre automatiquement le service Minitel. Les tests et la génération utilisent les réglages enregistrés.</p>
+    <p class=sub id=llmState role=status>Configuration enregistrée.</p>
+    <form method=POST action=/save-llm id=llmForm><input type=hidden name=context_preset id=llmPreset value="{{edit_key}}"><input type=hidden name=csrf value="{{csrf_token()}}">
+      <label>Fournisseur utilisé</label>
+      <select name=llm_provider id=providerSel>
+        <option value=mistral {{'selected' if provider=='mistral'}}>Mistral</option>
+        <option value=claude {{'selected' if provider=='claude'}}>Claude (Anthropic)</option>
+        <option value=linkup {{'selected' if provider=='linkup'}}>Linkup (recherche web)</option>
+      </select>
+      {% if provider=='linkup' %}
+      <p class=sub style="margin-top:8px;color:#e0b84a">⚠ Linkup est un moteur de recherche web,
+        pas un générateur de texte : la personnalité (prompt système) et l'historique de
+        conversation ne s'appliquent pas. Chaque question devient une recherche web isolée,
+        dont la réponse sourcée sert de réponse du terminal.</p>
+      {% endif %}
+
+      <details class=provider-settings data-provider=mistral {{'open' if provider=='mistral'}}>
+        <summary>Mistral</summary>
+        <label>Clé API Mistral <span class="dot {{'off' if mistral_key_masked=='(absente)' else 'on'}}"></span><span class="keystat" style="color:{{'var(--danger)' if mistral_key_masked=='(absente)' else 'var(--accent)'}}">{{mistral_key_masked}}</span></label>
+        <input type=password name=mistral_key placeholder="clé Mistral... (vide = conserver l'actuelle)">
+        <label class=clearkey><input type=checkbox name=mistral_key_clear> Supprimer la clé existante</label>
+        <p class=sub style=margin:6px 0 0>Pas encore de clé ?
+          <a href="https://admin.mistral.ai/organization/api-keys" target=_blank rel=noopener>Créer une clé API Mistral &#8599;</a></p>
+        <label>Modèle Mistral</label>
+        <select name=mistral_model id=mistralModels>
+          {% for mid,desc in mistral_models %}
+          <option value="{{mid}}" {{'selected' if mid==mistral_model}}>{{desc}}</option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-s" type=button onclick="loadModels('mistral',true)">Actualiser les modèles</button>
+        <p class=sub id=mistralModelStatus role=status>Modèle enregistré ; liste chargée à l’ouverture.</p>
+        <details><summary>Identifiant manuel (facultatif)</summary>
+          <input type=text name=mistral_model_custom maxlength=200 placeholder="Identifiant du modèle">
+        </details>
+      </details>
+
+      <details class=provider-settings data-provider=claude {{'open' if provider=='claude'}}>
+        <summary>Claude (Anthropic)</summary>
+        <label>Clé API Claude <span class="dot {{'off' if claude_key_masked=='(absente)' else 'on'}}"></span><span class="keystat" style="color:{{'var(--danger)' if claude_key_masked=='(absente)' else 'var(--accent)'}}">{{claude_key_masked}}</span></label>
+        <input type=password name=anthropic_key placeholder="clé Anthropic sk-ant-... (vide = conserver l'actuelle)">
+        <label class=clearkey><input type=checkbox name=anthropic_key_clear> Supprimer la clé existante</label>
+        <p class=sub style=margin:6px 0 0>Pas encore de clé ?
+          <a href="https://platform.claude.com/" target=_blank rel=noopener>Créer une clé API Claude &#8599;</a></p>
+        <label>Modèle Claude</label>
+        <select name=claude_model id=claudeModels>
+          {% for cid,desc in claude_models %}
+          <option value="{{cid}}" {{'selected' if cid==claude_model}}>{{desc}}</option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-s" type=button onclick="loadModels('claude',true)">Actualiser les modèles</button>
+        <p class=sub id=claudeModelStatus role=status>Modèle enregistré ; liste chargée à l’ouverture.</p>
+        <details><summary>Identifiant manuel (facultatif)</summary>
+          <input type=text name=claude_model_custom maxlength=200 placeholder="Identifiant du modèle">
+        </details>
+      </details>
+
+      <details class=provider-settings data-provider=linkup {{'open' if provider=='linkup'}}>
+        <summary>Linkup (recherche web)</summary>
+        <label>Clé API Linkup <span class="dot {{'off' if linkup_key_masked=='(absente)' else 'on'}}"></span><span class="keystat" style="color:{{'var(--danger)' if linkup_key_masked=='(absente)' else 'var(--accent)'}}">{{linkup_key_masked}}</span></label>
+        <input type=password name=linkup_key placeholder="clé Linkup... (vide = conserver l'actuelle)">
+        <label class=clearkey><input type=checkbox name=linkup_key_clear> Supprimer la clé existante</label>
+        <p class=sub style=margin:6px 0 0>Pas encore de clé ?
+          <a href="https://app.linkup.so" target=_blank rel=noopener>Créer une clé API Linkup &#8599;</a></p>
+        <label>Profondeur de recherche</label>
+        <select name=linkup_depth>
+          {% for did,desc in linkup_depths %}
+          <option value="{{did}}" {{'selected' if did==linkup_depth}}>{{desc}}</option>
+          {% endfor %}
+        </select>
+      </details>
+
+      <hr>
+      <button class="btn btn-p">Enregistrer et appliquer</button>
+    </form>
+    <p class=sub>Les clés non modifiées sont conservées. Ouvrir un fournisseur pour modifier son modèle et ses options existantes.</p>
+  </div>
+
+  <details class=block id=advanced-personality><summary>Configuration avancée — personnalités, consignes et connaissances</summary>
+  <div class=block>
+    <h2>Personnalité active configurée sur le Minitel</h2>
+    <p>Active : <b>{{presets[active_key].label}}</b></p>
+    <p class=sub>Activer ici utilise la version déjà enregistrée et redémarre le service Minitel. Choisir une personnalité dans l’éditeur ne l’active pas.</p>
     <ul class=plist>
       {% for k,p in presets.items() %}
       <li>
@@ -739,28 +863,31 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
         {% else %}
         <form method=POST action=/apply-preset style=margin:0><input type=hidden name=csrf value="{{csrf_token()}}">
           <input type=hidden name=preset_key value="{{k}}">
-          <button class="btn btn-s" style=margin:0;padding:6px 12px>Activer</button>
+          <button class="btn btn-s" style=margin:0;padding:6px 12px>Activer la version enregistrée</button>
         </form>
         {% endif %}
       </li>
       {% endfor %}
     </ul>
   </div>
-</section>
-
-<!-- PERSONNALITES (editeur) -->
-<section class=panel id=perso>
   <div class=block>
-    <h2>Éditeur de personnalités</h2>
+    <h2>Créer une personnalité</h2>
+    <p class=sub>Crée un preset indépendant sans changer la personnalité active.</p>
+    <button class="btn btn-s" type=button onclick=newPreset()>+ Nouvelle personnalité</button>
+  </div>
+  <div class=block>
+    <h2>Modifier une personnalité</h2>
+    <label for=presetSel>Personnalité à modifier, prévisualiser ou tester</label>
     <div class=toolbar>
       <select id=presetSel onchange=loadPreset()>
         {% for k,p in presets.items() %}
-        <option value="{{k}}" {{'selected' if k==active_key}}>{{p.label}}{{' (active)' if k==active_key else ''}}</option>
+        <option value="{{k}}" {{'selected' if k==edit_key}}>{{p.label}}{{' (active)' if k==active_key else ''}}</option>
         {% endfor %}
       </select>
-      <button class="btn btn-s" type=button onclick=newPreset() style=margin:0>+ Nouveau</button>
     </div>
     <p class=sub id=activeInfo></p>
+    <p class=sub id=editState role=status>Version enregistrée.</p>
+    <p class=sub>Enregistrer sauvegarde le brouillon ; si cette personnalité est active, le service Minitel redémarre automatiquement. « Enregistrer et activer » sauvegarde, sélectionne et redémarre le service.</p>
     <form method=POST action=/save-prompt id=editForm><input type=hidden name=csrf value="{{csrf_token()}}">
       <input type=hidden name=preset_key id=fkey>
       <label>Nom affiché</label>
@@ -784,122 +911,68 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       <pre id=titlePreview style="display:none"></pre>
 
       <hr>
-      <button class="btn btn-p">💾 Enregistrer</button>
-      <button class="btn btn-s" formaction=/apply-preset>✓ Activer</button>
+      <button class="btn btn-p">Enregistrer et appliquer le brouillon</button>
+      <button class="btn btn-s" formaction="/test?mode=conversation" formtarget=_blank>Tester ce brouillon</button>
+      <button class="btn btn-s" formaction=/apply-preset>Enregistrer et activer</button>
       <button class="btn btn-d" formaction=/delete-preset onclick="return confirm('Supprimer ce preset ?')">Supprimer</button>
     </form>
   </div>
+  <div class=block id=knowledgeBlock>
+    <h2>Connaissances de la personnalité sélectionnée</h2>
+    <p>Fichiers associés à : <b id=kpresetname></b></p>
+    <p class=sub>Textes injectés dans le contexte de cette personnalité. Ajout et suppression sont enregistrés immédiatement, indépendamment du brouillon du prompt. Le service Minitel redémarre si cette personnalité est active.</p>
+    <ul class=plist id=klist></ul>
+    <form method=POST action=/upload-knowledge enctype=multipart/form-data id=knowledgeForm><input type=hidden name=csrf value="{{csrf_token()}}">
+      <input type=hidden name=preset_key id=kkey>
+      <label for=knowledgeFiles>Fichiers texte (.txt), 256 Kio maximum par fichier</label>
+      <input type=file name=files id=knowledgeFiles accept=".txt" multiple required>
+      <button class="btn btn-p">Ajouter le(s) fichier(s)</button>
+    </form>
+  </div>
   <div class=block>
-    <h2>✨ Générer un prompt par IA</h2>
+    <h2>Générer un brouillon de prompt par IA</h2>
     <p class=sub>Décrivez le projet : l'IA rédige les consignes, qui rempliront le champ « Prompt système » ci-dessus (éditable avant d'enregistrer).</p>
     <textarea id=desc rows=4 placeholder="Ex: Un assistant qui ne parle que de cuisine italienne, ton chaleureux, refuse tout autre sujet..."></textarea>
     <button class="btn btn-p" type=button onclick=genPrompt()>Générer les consignes</button>
     <div id=spin>⏳ Génération en cours...</div>
   </div>
-  <div class=block>
-    <h2>📄 Fichiers de connaissance (.txt)</h2>
-    <p class=sub>Contenus que cette personnalité utilisera pour répondre (injectés dans son contexte). Pour : <b id=kpresetname></b></p>
-    <ul class=plist id=klist></ul>
-    <form method=POST action=/upload-knowledge enctype=multipart/form-data><input type=hidden name=csrf value="{{csrf_token()}}">
-      <input type=hidden name=preset_key id=kkey>
-      <input type=file name=files accept=".txt" multiple>
-      <button class="btn btn-p">Ajouter le(s) fichier(s)</button>
-    </form>
+  </details>
+  <div class=block><h2>Tester le Minitel</h2>
+    <p class=sub>Conversation et Gmail utilisent leurs réglages enregistrés. Les requêtes sont réelles.</p>
+    <a class="btn btn-s" href=/test>Ouvrir la console de test</a>
   </div>
-  <div class=block>
-    <h2>🧪 Tester la personnalité</h2>
-    <p class=sub>Posez une question comme sur le Minitel, sans le Minitel. Le test
-      utilise le prompt système ci-dessus (même non enregistré), les fichiers de
-      connaissance, et le fournisseur d'IA configuré. La réponse est convertie en
-      ASCII, telle qu'elle s'afficherait à l'écran.</p>
-    <label>Nom pour mémoire (vide = commune, sans mot de passe)</label>
-    <input type=text id=memoryUser maxlength=60 placeholder="Nom ou vide">
-    <button class="btn btn-s" type=button onclick="testPreset(true)">SOMMAIRE / nouvelle session</button>
-    <p class=sub>Les demandes et réponses visibles sont journalisées sur le Pi. MEMOIRE rappelle les éléments délibérément enregistrés.</p>
-    <input type=text id=testMsg placeholder="Votre question..."
-      onkeydown="if(event.key==='Enter'){event.preventDefault();testPreset()}">
-    <button class="btn btn-p" type=button onclick=testPreset()>Envoyer</button>
-    <div id=testSpin style="display:none;color:var(--muted);margin-top:8px">⏳ Réponse en cours...</div>
-    <pre id=testOut style="display:none;margin-top:12px"></pre>
-  </div>
+
 </section>
 
-<!-- PARAMETRES -->
-<section class=panel id=params>
-  <div class=block><h2>Gmail</h2><p><a href="/gmail">Lire, répondre et écrire depuis le Minitel</a></p></div>
-  <div class=block><h2>PRONOTE</h2><p><a href="/pronote">Connexion parent et enfants autorisés</a></p></div>
+<section class="panel {{'active' if section=='services'}}" id=services>
+  <div class=health-grid>{% for service in service_cards %}<div class=block>
+    <h2>{{service.label}}</h2><p><span class="dot {{'on' if service.enabled else 'off'}}"></span>{{'Active' if service.enabled else 'Inactive'}}</p>
+    {% if service.placeholder %}<p class=sub>Administration en construction</p>
+    <label><input type=checkbox disabled aria-label="Activer {{service.label}}"> Activer</label>
+    {% else %}<form method=post action="/services/{{service.key}}/toggle"><input type=hidden name=csrf value="{{csrf_token()}}">
+      <label><input type=checkbox name=enabled value=1 {{'checked' if service.enabled}}> Activer</label><button class="btn btn-s">Appliquer</button>
+    </form>{% endif %}
+    <a class="btn btn-s" href="{{service.url}}">Configurer</a>
+  </div>{% endfor %}</div>
+</section>
+<section class="panel {{'active' if section=='maintenance'}}" id=maintenance>
   <div class=block>
-    <h2>Fournisseur d'IA (LLM)</h2>
-    <p class=sub>Choisissez le moteur d'IA et son modèle. Le terminal et la génération
-      de prompts utilisent le fournisseur sélectionné. La clé de chaque fournisseur
-      est conservée indépendamment - vous pouvez basculer sans la ressaisir.</p>
-    <form method=POST action=/save-llm><input type=hidden name=csrf value="{{csrf_token()}}">
-      <label>Fournisseur utilisé</label>
-      <select name=llm_provider>
-        <option value=mistral {{'selected' if provider=='mistral'}}>Mistral</option>
-        <option value=claude {{'selected' if provider=='claude'}}>Claude (Anthropic)</option>
-        <option value=linkup {{'selected' if provider=='linkup'}}>Linkup (recherche web)</option>
-      </select>
-      {% if provider=='linkup' %}
-      <p class=sub style="margin-top:8px;color:#e0b84a">⚠ Linkup est un moteur de recherche web,
-        pas un générateur de texte : la personnalité (prompt système) et l'historique de
-        conversation ne s'appliquent pas. Chaque question devient une recherche web isolée,
-        dont la réponse sourcée sert de réponse du terminal.</p>
-      {% endif %}
-
-      <div style="border-left:3px solid var(--accent);padding-left:12px;margin-top:16px">
-        <h3 style=margin-top:4px>Mistral</h3>
-        <label>Clé API Mistral <span class="dot {{'off' if mistral_key_masked=='(absente)' else 'on'}}"></span><span class="keystat" style="color:{{'var(--danger)' if mistral_key_masked=='(absente)' else 'var(--accent)'}}">{{mistral_key_masked}}</span></label>
-        <input type=password name=mistral_key placeholder="clé Mistral... (vide = conserver l'actuelle)">
-        <label class=clearkey><input type=checkbox name=mistral_key_clear> Supprimer la clé existante</label>
-        <p class=sub style=margin:6px 0 0>Pas encore de clé ?
-          <a href="https://admin.mistral.ai/organization/api-keys" target=_blank rel=noopener>Créer une clé API Mistral &#8599;</a></p>
-        <label>Modèle Mistral</label>
-        <select name=mistral_model>
-          {% for mid,desc in mistral_models %}
-          <option value="{{mid}}" {{'selected' if mid==mistral_model}}>{{desc}}</option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div style="border-left:3px solid var(--accent);padding-left:12px;margin-top:16px">
-        <h3 style=margin-top:4px>Claude (Anthropic)</h3>
-        <label>Clé API Claude <span class="dot {{'off' if claude_key_masked=='(absente)' else 'on'}}"></span><span class="keystat" style="color:{{'var(--danger)' if claude_key_masked=='(absente)' else 'var(--accent)'}}">{{claude_key_masked}}</span></label>
-        <input type=password name=anthropic_key placeholder="clé Anthropic sk-ant-... (vide = conserver l'actuelle)">
-        <label class=clearkey><input type=checkbox name=anthropic_key_clear> Supprimer la clé existante</label>
-        <p class=sub style=margin:6px 0 0>Pas encore de clé ?
-          <a href="https://platform.claude.com/" target=_blank rel=noopener>Créer une clé API Claude &#8599;</a></p>
-        <label>Modèle Claude</label>
-        <select name=claude_model>
-          {% for cid,desc in claude_models %}
-          <option value="{{cid}}" {{'selected' if cid==claude_model}}>{{desc}}</option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div style="border-left:3px solid var(--accent);padding-left:12px;margin-top:16px">
-        <h3 style=margin-top:4px>Linkup (recherche web)</h3>
-        <label>Clé API Linkup <span class="dot {{'off' if linkup_key_masked=='(absente)' else 'on'}}"></span><span class="keystat" style="color:{{'var(--danger)' if linkup_key_masked=='(absente)' else 'var(--accent)'}}">{{linkup_key_masked}}</span></label>
-        <input type=password name=linkup_key placeholder="clé Linkup... (vide = conserver l'actuelle)">
-        <label class=clearkey><input type=checkbox name=linkup_key_clear> Supprimer la clé existante</label>
-        <p class=sub style=margin:6px 0 0>Pas encore de clé ?
-          <a href="https://app.linkup.so" target=_blank rel=noopener>Créer une clé API Linkup &#8599;</a></p>
-        <label>Profondeur de recherche</label>
-        <select name=linkup_depth>
-          {% for did,desc in linkup_depths %}
-          <option value="{{did}}" {{'selected' if did==linkup_depth}}>{{desc}}</option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <hr>
-      <button class="btn btn-p">💾 Enregistrer la configuration</button>
-    </form>
-    <p class=sub style=margin-top:10px>Adresse de l'admin : consultable sur le Minitel via la touche <b>Guide</b>.</p>
+    <h2>Système</h2>
+    <p class=sub>Dernière demande de redémarrage de cette session : {{restart_status}}</p>
+    <p class=sub>Interrompt la conversation en cours. Ne redémarre pas le Pi.</p>
+    <form method=POST action=/restart onsubmit="return confirm('Redémarrer le service Minitel et interrompre la session en cours ?')"><input type=hidden name=csrf value="{{csrf_token()}}">
+      <button class="btn btn-s">↺ Redémarrer le terminal</button></form>
+    {% for operation,label in [('reboot','Redémarrer le Pi'),('poweroff','Arrêter le Pi')] %}
+    <form method=post action="/power/{{operation}}" onsubmit="return confirm('Confirmer cette opération ? La connexion sera interrompue.')">
+      <input type=hidden name=csrf value="{{csrf_token()}}"><button class="btn btn-d" {{'disabled' if deployment.phase in ['queued','preparing','activating']}}>{{label}}</button>
+    </form>{% endfor %}
   </div>
   <div class=block>
-    <h2>🔄 Mise à jour de l'application</h2>
-    <p class=sub>Version installée : <b>{{version}}</b></p>
+    <h2 id=software>🔄 Mise à jour de l'application</h2>
+    <p class=sub>Version installée : <b>{{version}}</b> · branche suivie : {{runtime_branch}}</p>
+    <p>Dernière vérification (cette session) : {{checked_at}} · {{update_status}}</p>
+    <p>Dernier déploiement : <b>{{deployment.phase}}</b>{% if deployment.error_type %} · {{deployment.error_type}}{% endif %}</p>
+    <a href="/?section=maintenance">Actualiser l’état</a>
     <form method=POST action=/check-update style=margin:0><input type=hidden name=csrf value="{{csrf_token()}}">
       <button class="btn btn-s">Vérifier les mises à jour</button>
     </form>
@@ -912,31 +985,39 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     </form>
     {% endif %}
     <hr>
+    <p>Version précédente : {{previous.commit}} · branche {{previous.branch}} · {{'disponible' if previous.available else 'indisponible'}}</p>
     <form method=POST action=/rollback onsubmit="return confirm('Revenir à la version précédente ?')" style=margin:0><input type=hidden name=csrf value="{{csrf_token()}}">
-      <button class="btn btn-d">↶ Revenir à la version précédente</button>
+      <button class="btn btn-d" {{'disabled' if not previous.available}}>↶ Revenir à la version précédente</button>
     </form>
+    <details {{'open' if branch_preview}}><summary>Changer de branche</summary>
+    <p>La branche et sa version seront déployées ensemble. Une copie locale modifiée ou des commits non publiés bloquent le changement.</p>
+    <form method=post action=/branch-preview><input type=hidden name=csrf value="{{csrf_token()}}">
+      <label>Branche sur origin<input type=text name=branch maxlength=128 list=branchChoices value="{{runtime_branch}}" required></label>
+      <datalist id=branchChoices><option value=main></option><option value=develop></option></datalist><button class="btn btn-s">Prévisualiser la version cible</button>
+    </form>
+    {% if branch_preview %}<p>Cible : <b>{{branch_preview.branch}}</b> · {{branch_preview.commit}}</p>
+    <form method=post action=/switch-branch onsubmit="return confirm('Déployer cette branche et redémarrer les services ?')"><input type=hidden name=csrf value="{{csrf_token()}}"><button class="btn btn-p">Confirmer le changement de branche</button></form>{% endif %}
+    </details>
+    <p class=sub>Une opération planifiée n’est pas encore appliquée. <a href="/deployment-status">État du déploiement</a> (lecture seule).</p>
     <p class=sub style=margin-top:8px>La mise à jour récupère le code depuis GitHub. Tes personnalités, clés et fichiers de connaissance ne sont pas touchés.</p>
   </div>
+
   <div class=block>
-    <h2>Logs du terminal <a href=/ class=sub style=margin-left:8px>rafraîchir</a></h2>
-    <pre>{{log_chatgpt}}</pre>
+    <h2 id=logs>Diagnostics et journaux</h2>
+    <p>Provisionnement Wi-Fi : {{provision_status}} (inactive peut être normal après le démarrage).</p>
+    <form method=get action="/#logs"><input type=hidden name=section value=maintenance>
+      <label>Journal<select name=journal>{% for key,label in [('chatgpt','Terminal'),('admin','Administration'),('wifi','Wi-Fi'),('deploy','Déploiement')] %}<option value="{{key}}" {{'selected' if journal==key}}>{{label}}</option>{% endfor %}</select></label>
+      <label>Lignes<select name=lines>{% for n in [40,100,200] %}<option {{'selected' if lines==n}}>{{n}}</option>{% endfor %}</select></label>
+      <button class="btn btn-s">Afficher / actualiser</button></form>
+    <pre>{{diagnostic_log}}</pre>
+    <a href=/diagnostics.txt>Télécharger le diagnostic système (sans conversations ni identifiants)</a>
   </div>
   <div class=block>
-    <h2>Stockage</h2>
+    <h2 id=storage>Stockage</h2>
     <p class=sub>Mesures en Mio. Les archives de conversation et anciens journaux restent conservés.</p>
-    <pre id=storage-status>Chargement…</pre>
-    <script>
-    fetch('/storage-status').then(r => r.json()).then(s => {
-      const mib = n => (n / 1048576).toFixed(1);
-      const size = x => mib(x.bytes) + (x.partial ? ' (mesure partielle)' : '');
-      document.getElementById('storage-status').textContent = s.error ? 'Stockage indisponible' :
-        (s.warning ? 'ATTENTION : espace libre faible\\n' : '') +
-        'Libre : ' + mib(s.free_bytes) + ' Mio\\n' +
-        'Anciens logs + Rose : ' + size(s.legacy_logs_and_rose) + ' Mio\\n' +
-        'Dont transcriptions Rose : ' + size(s.rose_transcripts) + ' Mio\\n' +
-        'Mémoire + conversations : ' + size(s.memory_and_conversations) + ' Mio';
-    }).catch(() => { document.getElementById('storage-status').textContent = 'Stockage indisponible'; });
-    </script>
+    <pre id=storage-status>Ouvrir Maintenance pour charger les mesures détaillées.</pre>
+    <noscript><a href="/storage-status">Consulter les mesures détaillées du stockage</a></noscript>
+
   </div>
 </section>
 
@@ -950,21 +1031,79 @@ const ACTIVE = {{active_key|tojson}};
 const KNOWLEDGE = {{knowledge|tojson}};
 const TITLE_FONTS = {{title_fonts|tojson}};
 const TITLE_ART_MAX = {{title_art_max}};
-// Onglets
-document.querySelectorAll('nav.tabs button').forEach(b=>{
-  b.onclick=()=>{
-    document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.remove('active'));
-    document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
-    b.classList.add('active');
-    document.getElementById(b.dataset.tab).classList.add('active');
-    localStorage.setItem('mgptTab', b.dataset.tab);
-  };
+let storageLoaded=false;
+function loadStorage(){
+  if(storageLoaded)return;
+  storageLoaded=true;
+    fetch('/storage-status').then(r => r.json()).then(s => {
+      const mib = n => (n / 1048576).toFixed(1);
+      const size = x => mib(x.bytes) + (x.partial ? ' (mesure partielle)' : '');
+      document.getElementById('storage-status').textContent = s.error ? 'Stockage indisponible' :
+        (s.warning ? 'ATTENTION : espace libre faible\\n' : '') +
+        'Libre : ' + mib(s.free_bytes) + ' Mio\\n' +
+        'Journaux et archives : ' + size(s.application_logs) + ' Mio\\n' +
+        'Mémoire + conversations : ' + size(s.memory_and_conversations) + ' Mio';
+    }).catch(() => { document.getElementById('storage-status').textContent = 'Stockage indisponible'; });
+}
+// Navigation locale : garde les champs édités ; les liens fonctionnent aussi sans JS.
+function showSection(section){
+  if(section==='maintenance')loadStorage();
+  if(section==='ai')loadModels(document.getElementById('providerSel').value);
+  document.querySelectorAll('nav.tabs a').forEach(a=>{
+    const active=a.dataset.tab===section;
+    a.classList.toggle('active',active);
+    if(active)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');
+  });
+  document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id===section));
+}
+document.querySelectorAll('nav.tabs a').forEach(a=>a.addEventListener('click',e=>{
+  e.preventDefault();showSection(a.dataset.tab);
+  const url=new URL(location.href);url.searchParams.set('section',a.dataset.tab);
+  history.replaceState(null,'',url);
+}));
+if(document.getElementById('maintenance').classList.contains('active'))loadStorage();
+const modelLists=new Set();
+async function loadModels(provider,force=false){
+  if(!['mistral','claude'].includes(provider)||(!force&&modelLists.has(provider)))return;
+  modelLists.add(provider);
+  const field=provider==='claude'?'anthropic':'mistral';
+  const form=document.getElementById('llmForm'), select=document.getElementById(provider+'Models');
+  const status=document.getElementById(provider+'ModelStatus');
+  const selected=select.value;
+  status.textContent='Chargement…';
+  try{
+    const response=await fetch('/models',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},
+      body:JSON.stringify({provider:provider,key:form.elements[field+'_key'].value,clear:form.elements[field+'_key_clear'].checked})});
+    const data=await response.json();
+    if(!data.ok)throw new Error(data.error);
+    const ids=new Set([selected]);select.replaceChildren(new Option(selected,selected));
+    data.models.forEach(m=>{if(!ids.has(m.id)){select.add(new Option(m.label,m.id));ids.add(m.id);}});
+    select.value=selected;status.textContent=data.models.length+' modèles disponibles. La sélection est conservée.';
+  }catch(error){status.textContent=error.message||'Liste indisponible ; modèle actuel conservé.';modelLists.delete(provider);}
+}
+if(document.getElementById('ai').classList.contains('active'))loadModels(document.getElementById('providerSel').value);
+document.querySelectorAll('.provider-settings').forEach(d=>d.addEventListener('toggle',()=>{if(d.open&&document.getElementById('ai').classList.contains('active'))loadModels(d.dataset.provider);}));
+// Les brouillons restent en mémoire seulement ; avertir avant de les perdre.
+const editForm=document.getElementById('editForm'), llmForm=document.getElementById('llmForm');
+let editBaseline='', llmBaseline='', selectedPreset=document.getElementById('presetSel').value;
+let allowUnload=false;
+function snapshot(form){return JSON.stringify(Array.from(new FormData(form).entries()).filter(([key])=>key!=='context_preset'));}
+function editDirty(){return editBaseline!==''&&snapshot(editForm)!==editBaseline;}
+function llmDirty(){return llmBaseline!==''&&snapshot(llmForm)!==llmBaseline;}
+function updateDirty(){
+  document.getElementById('editState').textContent=editDirty()?'Modifications non enregistrées.':'Version enregistrée — aucun brouillon modifié.';
+  document.getElementById('llmState').textContent=llmDirty()?'Réglages modifiés, non enregistrés.':'Configuration enregistrée.';
+}
+[editForm,llmForm].forEach(f=>['input','change'].forEach(name=>f.addEventListener(name,updateDirty)));
+window.addEventListener('beforeunload',e=>{if(!allowUnload&&(editDirty()||llmDirty())){e.preventDefault();e.returnValue='';}});
+document.addEventListener('submit',e=>{
+  if(e.defaultPrevented)return;
+  if(e.submitter&&e.submitter.formTarget==='_blank')return;
+  const losesEdit=e.target!==editForm&&editDirty();
+  const losesLlm=e.target!==llmForm&&llmDirty();
+  if((losesEdit||losesLlm)&&!confirm('Abandonner les modifications non enregistrées avant cette opération ?')){e.preventDefault();return;}
+  allowUnload=true;
 });
-(function(){const t=localStorage.getItem('mgptTab');
-  if(t&&document.getElementById(t)){
-    document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.toggle('active',x.dataset.tab===t));
-    document.querySelectorAll('.panel').forEach(x=>x.classList.toggle('active',x.id===t));
-  }})();
 // Editeur
 function titleRowHtml(text, font){
   var opts='';
@@ -975,7 +1114,7 @@ function titleRowHtml(text, font){
   return '<div class="row tarow" style="gap:8px">'
     + '<input type=text name=tat_text value="'+esc+'" maxlength=16 style="flex:1" placeholder="Mot...">'
     + '<select name=tat_font style="flex:1">'+opts+'</select>'
-    + '<button class="btn btn-d" type=button onclick="this.parentElement.remove()" style="margin:0;padding:6px 12px">✕</button>'
+    + '<button class="btn btn-d" type=button onclick="this.parentElement.remove();updateDirty()" style="margin:0;padding:6px 12px">✕</button>'
     + '</div>';
 }
 function addTitleRow(text, font){
@@ -983,6 +1122,7 @@ function addTitleRow(text, font){
   const wrap=document.getElementById('titleArtRows');
   if(wrap.querySelectorAll('.tarow').length>=TITLE_ART_MAX){alert('Maximum '+TITLE_ART_MAX+' mots.');return;}
   wrap.insertAdjacentHTML('beforeend', titleRowHtml(text, font));
+  updateDirty();
 }
 async function previewTitle(){
   const rows=document.querySelectorAll('#titleArtRows .tarow');
@@ -1004,11 +1144,15 @@ async function previewTitle(){
   }catch(e){pre.textContent='Erreur : '+e;}
 }
 function loadPreset(){
-  const k=document.getElementById('presetSel').value, p=PRESETS[k]; if(!p)return;
+  const sel=document.getElementById('presetSel'), k=sel.value, p=PRESETS[k]; if(!p)return;
+  if(editDirty()&&!confirm('Abandonner le brouillon non enregistré pour changer de personnalité ?')){sel.value=selectedPreset;return;}
+  selectedPreset=k;
+  document.getElementById('llmPreset').value=k;
+  const url=new URL(location.href);url.searchParams.set('preset',k);history.replaceState(null,'',url);
   fkey.value=k; flabel.value=p.label||''; ftitle.value=p.title_msg||'';
   fquestion.value=p.question_msg||''; floading.value=p.loading_msg||''; fsystem.value=p.system||'';
   document.getElementById('activeInfo').textContent=
-    (k===ACTIVE)?'● Personnalité actuellement active sur le Minitel.'
+    (k===ACTIVE)?'● Personnalité configurée comme active sur le Minitel.'
                 :'Personnalité inactive. Cliquez « Activer » pour l\\'utiliser.';
   // Animation d'accueil (titre ASCII)
   document.getElementById('titleArtRows').innerHTML='';
@@ -1029,58 +1173,40 @@ function loadPreset(){
       const input=document.createElement('input');input.type='hidden';input.name=name;input.value=value;f.appendChild(input);
     }
     addCsrf(f);
-    const button=document.createElement('button');button.className='btn btn-d';button.textContent='Suppr.';f.appendChild(button);
+    const button=document.createElement('button');button.className='btn btn-d';button.textContent='Supprimer';f.appendChild(button);
+    f.addEventListener('submit',e=>{if(!confirm('Supprimer ce fichier de connaissance ?'))e.preventDefault();});
     li.appendChild(span);li.appendChild(f);ul.appendChild(li);
   });
+  editBaseline=snapshot(editForm);updateDirty();
 }
 function newPreset(){
+  if((editDirty()||llmDirty())&&!confirm('Abandonner les modifications non enregistrées pour créer une personnalité ?'))return;
   const label=prompt("Nom de la nouvelle personnalité :"); if(!label)return;
   const f=document.createElement('form');f.method='POST';f.action='/new-preset';
   const a=document.createElement('input');a.name='label';a.value=label;f.appendChild(a);
   const b=document.createElement('input');b.name='key';b.value=label.toLowerCase().replace(/[^a-z0-9]+/g,'_');f.appendChild(b);
-  addCsrf(f);document.body.appendChild(f);localStorage.setItem('mgptTab','perso');f.submit();
+  addCsrf(f);document.body.appendChild(f);allowUnload=true;f.submit();
 }
 async function genPrompt(){
   const d=document.getElementById('desc').value.trim();
   if(!d){alert('Décrivez le projet d abord');return;}
+  const key=selectedPreset, previous=fsystem.value;
   spin.style.display='block';
   try{const r=await fetch('/generate-prompt',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},body:JSON.stringify({description:d})});
     const j=await r.json();
-    if(j.ok){fsystem.value=j.prompt;fsystem.scrollIntoView({behavior:'smooth'});}else alert('Erreur: '+j.error);
+    if(j.ok){
+      if(key!==selectedPreset||fsystem.value!==previous){alert('Le brouillon a changé pendant la génération. Relancez pour cette personnalité.');return;}
+      fsystem.value=j.prompt;updateDirty();fsystem.scrollIntoView({behavior:'smooth'});
+    }else alert('Erreur: '+j.error);
   }catch(e){alert('Erreur: '+e);}
-  spin.style.display='none';
+  finally{spin.style.display='none';}
 }
-let testSequence=0;
-async function testPreset(reset=false){
-  const msg=document.getElementById('testMsg').value.trim();
-  if(!msg&&!reset){alert('Saisissez une question');return;}
-  const sequence=++testSequence;
-  const key=document.getElementById('presetSel').value;
-  const system=document.getElementById('fsystem').value;
-  const spin=document.getElementById('testSpin'), out=document.getElementById('testOut');
-  spin.style.display='block'; out.style.display='none';
-  try{
-    const r=await fetch('/test-preset',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},
-      body:JSON.stringify({preset_key:key,message:msg,system:system,memory_user:document.getElementById('memoryUser').value,reset:reset})});
-    const j=await r.json();
-    if(sequence!==testSequence)return;
-    out.style.display='block';
-    if(j.ok&&j.scene){
-      out.textContent='';
-      const started=performance.now();
-      for(const line of j.scene){
-        if(sequence!==testSequence)return;
-        if(performance.now()-started>90000)break;
-        out.textContent+=line+'\\n';
-        await new Promise(resolve=>setTimeout(resolve,220));
-      }
-    }else{
-      out.textContent = j.ok ? (j.answer||'(réponse vide)') : ('Erreur : '+j.error);
-    }
-  }catch(e){if(sequence===testSequence){out.style.display='block';out.textContent='Erreur : '+e;}}
-  if(sequence===testSequence)spin.style.display='none';
-}
+llmBaseline=snapshot(llmForm);
 loadPreset();
+document.getElementById('providerSel').addEventListener('change',function(){
+  document.querySelectorAll('.provider-settings').forEach(d=>d.open=d.dataset.provider===this.value);
+  loadModels(this.value);
+});
 // Desactive le champ mot de passe quand "Supprimer la cle existante" est coche
 document.querySelectorAll('.clearkey input[type=checkbox]').forEach(function(cb){
   cb.addEventListener('change', function(){
@@ -1107,6 +1233,8 @@ def health():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     error = None
+    if not ADMIN_PASSWORD.strip():
+        return render_template_string(LOGIN_HTML, error="ADMIN_PASSWORD doit être défini dans .env ; redémarrer l’administration après configuration."), 503
     if request.method == "POST":
         if hmac.compare_digest(request.form.get("password", "").encode(errors="replace"), ADMIN_PASSWORD.encode()):
             session.clear()
@@ -1127,24 +1255,46 @@ def logout():
 @app.route("/")
 @require_login
 def index():
+    section = request.args.get("section", "dash")
+    if section not in {"dash", "ai", "services", "maintenance"}:
+        section = "dash"
     data = load_prompts()
     presets = normalized_presets(data)
+    edit_key = request.args.get("preset", data["active"])
+    if edit_key not in presets:
+        edit_key = data["active"]
     services = {"minitel-chatgpt": svc_status("minitel-chatgpt"),
-                "wifi-manager": svc_status("wifi-manager"),
                 "admin-ui": svc_status("admin-ui")}
+    journal = request.args.get("journal", "chatgpt")
+    if journal not in {"chatgpt", "admin", "wifi", "deploy"}:
+        journal = "chatgpt"
+    lines = request.args.get("lines", "40")
+    lines = int(lines) if lines in {"40", "100", "200"} else 40
+    recent_log = log_tail("chatgpt")
     flash = session.pop("flash", None); flash_ok = session.pop("flash_ok", False)
     return render_template_string(
-        ADMIN_HTML, presets=presets, knowledge=all_knowledge(),
+        ADMIN_HTML, service_cards=service_cards(), journal=journal, lines=lines,
+        diagnostic_log=recent_log if journal == "chatgpt" and lines == 40 else log_tail(journal, lines), provision_status=svc_status("wifi-manager"),
+        previous=previous_release(), branch_preview=session.get("branch_preview"),
+        checked_at=session.get("update_checked_at", "jamais"), section=section, presets=presets, knowledge=all_knowledge(),
+        health={"uptime": system_health.uptime(), "disk": system_health.disk(PROJ_DIR),
+                "wifi": system_health.wifi(), "tailscale": system_health.tailscale(),
+                "temperature": system_health.temperature()},
+        deployment=system_health.deployment(DEPLOYMENT_STATUS), runtime_branch=runtime_branch(),
+        restart_status=session.get("restart_status", "aucune"),
+        update_status=session.get("update_status", "non vérifiées dans cette session"),
         title_fonts=TITLE_FONTS, title_art_max=TITLE_ART_MAX_WORDS,
-        active_key=data["active"], services=services, ip=ip_address(),
-        log_chatgpt=log_tail("chatgpt"),
+        active_key=data["active"], edit_key=edit_key, services=services, ip=ip_address(),
+        log_chatgpt=recent_log,
         provider=llm_provider(),
+        configured_model={"mistral": mistral_model, "claude": claude_model, "linkup": linkup_depth}[llm_provider()](),
         mistral_key_masked=mask_key(mistral_key()), mistral_model=mistral_model(),
         claude_key_masked=mask_key(anthropic_key()), claude_model=claude_model(),
         linkup_key_masked=mask_key(linkup_key()), linkup_depth=linkup_depth(),
-        mistral_models=MISTRAL_MODELS, claude_models=CLAUDE_MODELS,
+        mistral_models=[(mistral_model(), mistral_model())],
+        claude_models=[(claude_model(), claude_model())],
         linkup_depths=LINKUP_DEPTHS,
-        version=current_version(), update_log=session.pop("update_log", None),
+        version=current_version(), update_log=session.get("update_log"),
         flash=flash, flash_ok=flash_ok)
 
 def parse_title_art_form():
@@ -1165,6 +1315,16 @@ def parse_title_art_form():
             break
     return segments
 
+def update_prompt_from_form(preset, key):
+    preset["label"] = request.form.get("label", key).strip() or key
+    for field in ("title_msg", "question_msg", "loading_msg"):
+        preset[field] = to_minitel_ascii(request.form.get(field, DEFAULTS[field]))[:40]
+    preset["title_art"] = parse_title_art_form() or TITLE_ART_DEFAULT
+    system = request.form.get("system_prompt", "").strip()
+    if system:
+        preset["system"] = system
+
+
 @app.route("/save-prompt", methods=["POST"])
 @require_login
 @prompt_transaction
@@ -1172,20 +1332,10 @@ def save_prompt():
     data = load_prompts()
     k = request.form.get("preset_key", "").strip() or data["active"]
     p = data["presets"].setdefault(k, {})
-    p["label"] = request.form.get("label", k).strip() or k
-    p["title_msg"] = to_minitel_ascii(request.form.get("title_msg", DEFAULTS["title_msg"]))[:40]
-    p["question_msg"] = to_minitel_ascii(request.form.get("question_msg", DEFAULTS["question_msg"]))[:40]
-    p["loading_msg"] = to_minitel_ascii(request.form.get("loading_msg", DEFAULTS["loading_msg"]))[:40]
-    p["title_art"] = parse_title_art_form() or TITLE_ART_DEFAULT
-    sp = request.form.get("system_prompt", "").strip()
-    if sp:
-        p["system"] = sp
+    update_prompt_from_form(p, k)
     save_prompts(data)
-    if k == data["active"]:
-        restart_terminal()
-    session["flash"] = f"Personnalité '{p['label']}' enregistrée."
-    session["flash_ok"] = True
-    return redirect(url_for("index"))
+    saved_feedback(f"Personnalité '{p['label']}' enregistrée.", k == data["active"])
+    return redirect(url_for("index", section="ai", preset=k))
 
 @app.route("/apply-preset", methods=["POST"])
 @require_login
@@ -1195,20 +1345,15 @@ def apply_preset():
     k = request.form.get("preset_key", "")
     if k in data["presets"]:
         p = data["presets"][k]
-        if request.form.get("label"):
-            p["label"] = request.form.get("label").strip()
-            p["title_msg"] = to_minitel_ascii(request.form.get("title_msg", DEFAULTS["title_msg"]))[:40]
-            p["question_msg"] = to_minitel_ascii(request.form.get("question_msg", DEFAULTS["question_msg"]))[:40]
-            p["loading_msg"] = to_minitel_ascii(request.form.get("loading_msg", DEFAULTS["loading_msg"]))[:40]
-            p["title_art"] = parse_title_art_form() or TITLE_ART_DEFAULT
-            if request.form.get("system_prompt", "").strip():
-                p["system"] = request.form.get("system_prompt").strip()
+        if "label" in request.form or "system_prompt" in request.form:
+            update_prompt_from_form(p, k)
         data["active"] = k
         save_prompts(data)
-        restart_terminal()
-        session["flash"] = f"Personnalité '{p.get('label', k)}' activée."
-        session["flash_ok"] = True
-    return redirect(url_for("index"))
+        saved_feedback(f"Personnalité '{p.get('label', k)}' enregistrée et sélectionnée comme active.", True)
+    else:
+        session["flash"] = "Personnalité inconnue."
+        session["flash_ok"] = False
+    return redirect(url_for("index", section="ai", preset=k))
 
 @app.route("/preview-title", methods=["POST"])
 @require_login
@@ -1238,7 +1383,7 @@ def new_preset():
         save_prompts(data)
         session["flash"] = f"Personnalité '{label}' créée. Éditez-la puis Activez-la."
         session["flash_ok"] = True
-    return redirect(url_for("index"))
+    return redirect(url_for("index", section="ai", preset=key))
 
 @app.route("/delete-preset", methods=["POST"])
 @require_login
@@ -1252,11 +1397,13 @@ def delete_preset():
         del data["presets"][k]
         if data["active"] == k:
             data["active"] = next(iter(data["presets"]))
-            save_prompts(data); restart_terminal()
+            save_prompts(data)
+            saved_feedback("Personnalité supprimée ; une autre personnalité a été sélectionnée comme active.", True)
         else:
             save_prompts(data)
-        session["flash"] = "Personnalité supprimée."; session["flash_ok"] = True
-    return redirect(url_for("index"))
+            session["flash"] = "Personnalité inactive supprimée."
+            session["flash_ok"] = True
+    return redirect(url_for("index", section="ai"))
 
 @app.route("/generate-prompt", methods=["POST"])
 @require_login
@@ -1328,6 +1475,23 @@ def test_preset_route():
     except Exception as e:  # noqa: BLE001 - Isolate failures of the optional admin test integrations.
         return jsonify(ok=False, error=str(e))
 
+@app.route("/models", methods=["POST"])
+@require_login
+def available_models():
+    data = request.json or {}
+    provider = data.get("provider")
+    if provider not in {"mistral", "claude"}:
+        return jsonify(ok=False, error="Fournisseur invalide"), 400
+    key = data.get("key", "")
+    if not isinstance(key, str) or len(key) > 4096 or data.get("clear"):
+        return jsonify(ok=False, error="Clé API requise"), 400
+    key = key.strip() or {"mistral": mistral_key, "claude": anthropic_key}[provider]()
+    try:
+        return jsonify(ok=True, models=model_catalogue.models(provider, key))
+    except model_catalogue.CatalogueError as error:
+        return jsonify(ok=False, error=str(error)), 502
+
+
 @app.route("/save-llm", methods=["POST"])
 @require_login
 def save_llm():
@@ -1341,22 +1505,22 @@ def save_llm():
             updates[key] = ""
         elif value:
             updates[key] = value
-    for field, key, allowed in (("mistral_model", "MISTRAL_MODEL", MISTRAL_MODEL_IDS),
-                                ("claude_model", "CLAUDE_MODEL", CLAUDE_MODEL_IDS),
-                                ("linkup_depth", "LINKUP_DEPTH", LINKUP_DEPTH_IDS)):
-        value = request.form.get(field, "").strip()
-        if value in allowed:
+    for field, key in (("mistral_model", "MISTRAL_MODEL"), ("claude_model", "CLAUDE_MODEL")):
+        value = request.form.get(field + "_custom", "").strip() or request.form.get(field, "").strip()
+        if value:
+            if not model_catalogue.valid_id(value):
+                abort(400, "Identifiant de modèle invalide")
             updates[key] = value
+    depth = request.form.get("linkup_depth", "").strip()
+    if depth in LINKUP_DEPTH_IDS:
+        updates["LINKUP_DEPTH"] = depth
     config_store.update_env(ENV_FILE, updates)
-    restarted = restart_terminal()
-    session["flash"] = ("Configuration enregistrée ; terminal redémarré." if restarted
-                        else "Configuration enregistrée ; redémarrage non confirmé, vérifiez le service.")
-    session["flash_ok"] = restarted
+    saved_feedback("Configuration IA enregistrée.", True)
     selected_key = {"claude": anthropic_key, "linkup": linkup_key, "mistral": mistral_key}[provider]()
     if not is_real_key(selected_key):
         session["flash"] += " Aucune clé API n'est définie pour ce fournisseur."
         session["flash_ok"] = False
-    return redirect(url_for("index"))
+    return redirect(url_for("index", section="ai", preset=request.form.get("context_preset", "")))
 
 
 @app.route("/upload-knowledge", methods=["POST"])
@@ -1367,7 +1531,7 @@ def upload_knowledge():
     data = load_prompts()
     if key not in data["presets"]:
         session["flash"] = "Personnalité inconnue."; session["flash_ok"] = False
-        return redirect(url_for("index"))
+        return redirect(url_for("index", section="ai", preset=key))
     folder = knowledge_folder(key)
     folder.mkdir(parents=True, exist_ok=True)
     files = request.files.getlist("files")
@@ -1385,11 +1549,13 @@ def upload_knowledge():
     for name, content in uploads:
         config_store.atomic_write(knowledge_target(folder, name), content)
     n = len(uploads)
-    if key == data["active"]:
-        restart_terminal()
-    session["flash"] = f"{n} fichier(s) ajouté(s) à « {data['presets'][key].get('label', key)} »." if n else "Aucun fichier .txt valide."
-    session["flash_ok"] = bool(n)
-    return redirect(url_for("index"))
+    if n:
+        saved_feedback(f"{n} fichier(s) ajouté(s) à « {data['presets'][key].get('label', key)} ».",
+                       key == data["active"])
+    else:
+        session["flash"] = "Aucun fichier .txt valide."
+        session["flash_ok"] = False
+    return redirect(url_for("index", section="ai", preset=key))
 
 @app.route("/delete-knowledge", methods=["POST"])
 @require_login
@@ -1400,12 +1566,10 @@ def delete_knowledge():
     target = knowledge_target(knowledge_folder(key), fn)
     if fn and target.is_file():
         target.unlink()
-        if key == load_prompts()["active"]:
-            restart_terminal()
-        session["flash"] = f"Fichier {fn} supprimé."; session["flash_ok"] = True
+        saved_feedback(f"Fichier {fn} supprimé.", key == load_prompts()["active"])
     else:
         session["flash"] = "Fichier introuvable."; session["flash_ok"] = False
-    return redirect(url_for("index"))
+    return redirect(url_for("index", section="ai", preset=key))
 
 @app.route("/restart", methods=["POST"])
 @require_login
@@ -1413,13 +1577,18 @@ def restart():
     ok = restart_terminal()
     session["flash"] = "Terminal redémarré." if ok else "Échec (sudo requis)."
     session["flash_ok"] = ok
-    return redirect(url_for("index"))
+    session["restart_status"] = session["flash"]
+    return redirect(url_for("index", section="maintenance"))
 
 @app.route("/check-update", methods=["POST"])
 @require_login
 def check_update_route():
     res = check_update()
+    session["update_checked_at"] = datetime.now(ZoneInfo("Europe/Paris")).strftime("%d/%m/%Y %H:%M:%S")
+    session["update_status"] = (f"{res['behind']} mise(s) à jour disponible(s)" if res.get("ok")
+                                else "dernière vérification en échec")
     if not res["ok"]:
+        session.pop("update_log", None)
         session["flash"] = res["msg"]; session["flash_ok"] = False
     elif res["behind"] == 0:
         session["flash"] = "L'application est à jour."; session["flash_ok"] = True
@@ -1428,31 +1597,110 @@ def check_update_route():
         session["update_log"] = res["log"]
         session["flash"] = f"{res['behind']} mise(s) à jour disponible(s)."
         session["flash_ok"] = True
-    return redirect(url_for("index"))
+    return redirect(url_for("index", section="maintenance"))
 
 @app.route("/update", methods=["POST"])
 @require_login
 def update_route():
     ok, msg = do_update()
     session.pop("update_log", None)
+    session.pop("update_status", None)
     session["flash"] = msg if ok else "Échec de la mise à jour : " + msg
     session["flash_ok"] = ok
-    return redirect(url_for("index"))
+    return redirect(url_for("index", section="maintenance"))
 
 @app.route("/rollback", methods=["POST"])
 @require_login
 def rollback_route():
     ok, msg = do_rollback()
+    session.pop("update_log", None)
+    session.pop("update_status", None)
     session["flash"] = msg if ok else "Échec : " + msg
     session["flash_ok"] = ok
-    return redirect(url_for("index"))
+    return redirect(url_for("index", section="maintenance"))
+
+
+def previous_release():
+    try:
+        data = json.loads(RUNTIME_STATE.read_text())
+        previous = data.get("previous") or {}
+        return {"commit": previous.get("commit", "—"),
+                "branch": data.get("previous_branch", data.get("branch", "—")),
+                "available": bool(previous.get("release") and Path(previous["release"], "venv/bin/python").exists())}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {"commit": "—", "branch": "—", "available": False}
+
+
+def valid_branch(branch):
+    return bool(isinstance(branch, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}", branch) and
+                git("check-ref-format", "--branch", branch)[0] == 0)
+
+
+@app.route("/branch-preview", methods=["POST"])
+@require_login
+def preview_branch():
+    session.pop("branch_preview", None)
+    branch = request.form.get("branch", "").strip()
+    if not valid_branch(branch):
+        abort(400, "Nom de branche invalide")
+    rc, _, _ = git("fetch", "origin", "+refs/heads/" + branch + ":refs/remotes/origin/" + branch)
+    if not rc:
+        rc, commit, _ = git("rev-parse", "refs/remotes/origin/" + branch)
+        if not rc and re.fullmatch(r"[0-9a-f]{40}", commit):
+            session["branch_preview"] = {"branch": branch, "commit": commit}
+            session["flash"] = "Version cible récupérée. Confirmez le changement de branche."
+            session["flash_ok"] = True
+            return redirect(url_for("index", section="maintenance", _anchor="software"))
+    session["flash"], session["flash_ok"] = "Branche indisponible sur origin ; réessayer.", False
+    return redirect(url_for("index", section="maintenance", _anchor="software"))
+
+
+@app.route("/switch-branch", methods=["POST"])
+@require_login
+def switch_branch_route():
+    preview = session.pop("branch_preview", None)
+    if not isinstance(preview, dict):
+        abort(400, "Prévisualisez d’abord la branche cible")
+    ok, message = queue_deployment("switch-branch", preview)
+    session["flash"], session["flash_ok"] = message, ok
+    session.pop("update_log", None)
+    session.pop("update_status", None)
+    return redirect(url_for("index", section="maintenance", _anchor="software"))
+
+
+@app.route("/power/<operation>", methods=["POST"])
+@require_login
+def power_route(operation):
+    if operation not in {"reboot", "poweroff"}:
+        abort(404)
+    ok, _ = queue_deployment(operation)
+    session["flash"] = (("Redémarrage" if operation == "reboot" else "Arrêt") + " du Pi planifié ; connexion interrompue dans quelques secondes." if ok else
+                        "Opération refusée ; vérifier le gestionnaire installé et les opérations en cours.")
+    session["flash_ok"] = ok
+    return redirect(url_for("index", section="maintenance"))
+
+
+@app.route("/diagnostics.txt")
+@require_login
+def diagnostic_report():
+    report = {"version": current_version(), "branch": runtime_branch(),
+              "services": {key: svc_status(key) for key in ("minitel-chatgpt", "admin-ui", "wifi-manager")},
+              "uptime": system_health.uptime(), "temperature_c": system_health.temperature(),
+              "disk": system_health.disk(PROJ_DIR), "local_ip": ip_address(),
+              "wifi": system_health.wifi(), "tailscale": system_health.tailscale(),
+              "deployment": system_health.deployment(DEPLOYMENT_STATUS)}
+    response = app.response_class(json.dumps(report, ensure_ascii=False, indent=2) + "\n", mimetype="text/plain")
+    response.headers["Content-Disposition"] = "attachment; filename=minitel-diagnostic.txt"
+    return response
 
 
 @app.route("/storage-status")
 @require_login
 def storage_status():
     try:
-        return jsonify(storage_health.status(PROJ_DIR))
+        raw = storage_health.status(PROJ_DIR)
+        return jsonify(free_bytes=raw["free_bytes"], total_bytes=raw["total_bytes"], warning=raw["warning"],
+                       application_logs=raw["legacy_logs_and_rose"], memory_and_conversations=raw["memory_and_conversations"])
     except OSError:
         return jsonify(error="storage_unavailable"), 503
 
@@ -1466,42 +1714,236 @@ def deployment_status():
         return jsonify({"phase": "not_installed"})
 
 
-PRONOTE_HTML = """<!doctype html><html lang="fr"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>PRONOTE — 3615 IA</title><style>
-body{font:16px system-ui;max-width:800px;margin:24px auto;padding:16px;background:#111;color:#eee}
-a{color:#7cf}input,textarea,select,button{box-sizing:border-box;width:100%;padding:10px;margin:6px 0 16px}
-input[type=checkbox]{width:auto}label{display:block}fieldset{margin:24px 0}pre{white-space:pre-wrap}
-</style><a href="/">Retour administration</a><h1>PRONOTE</h1>
-<p>Lecture seule : devoirs et notes. Les identifiants restent sur ce Pi.
-Les résultats scolaires minimaux sont transmis à Mistral pour répondre.</p>
-<p>Dépendance installée : {{ 'oui' if status.dependency_ready else 'non — installer scripts/install_pronote.sh' }}.
-Intégration : {{ 'active' if status.enabled else 'désactivée' }}.</p>
-{% if message %}<p role="status">{{ message }}</p>{% endif %}
-{% if children %}<p>Enfants de ce compte (administration uniquement) :</p><ul>
-{% for child in children %}<li>{{ child }}</li>{% endfor %}</ul>{% endif %}
-<form method="post" autocomplete="off"><input type="hidden" name="csrf" value="{{ csrf }}">
-<fieldset><legend>Connecter un compte parent</legend>
-<label>Nom local du compte (ex. famille)<input name="account" required pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,39}" maxlength="40" autocapitalize="none" autocorrect="off" spellcheck="false"></label>
-<label>Données du QR PRONOTE parent (JSON : url, login, jeton)
-<textarea name="qr" required rows="5" maxlength="12000"></textarea></label>
-<label>Code QR à 4 chiffres<input name="pin" type="password" required inputmode="numeric" pattern="[0-9]{4}"></label>
-<label>Code de sécurité du compte si demandé (distinct du code QR)
-<input name="account_pin" type="password"></label>
-<button name="action" value="enroll">Connecter et vérifier le jeton</button>
-</fieldset></form>
-<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}">
-<fieldset><legend>Autoriser les enfants</legend>
-<p>Un alias utilisé sur le Minitel → un compte et le nom PRONOTE exact.
-Aucun enfant n'est autorisé automatiquement. Les alias seuls sont envoyés à Mistral.</p>
-<label>Configuration JSON<textarea name="children" rows="8" required>{{ mapping }}</textarea></label>
-<label><input name="enabled" type="checkbox" {% if status.enabled %}checked{% endif %}> Activer pour Mistral Conversations</label>
-<button name="action" value="configure">Enregistrer</button></fieldset></form>
-<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}">
-<label>Nom local du compte<input name="account" required autocapitalize="none" autocorrect="off" spellcheck="false"></label>
-<button name="action" value="children">Relire les noms des enfants</button></form>
-<p>Exemple de configuration : <code>{"Alex":{"account":"famille","name":"NOM Prénom"}}</code>.</p>
-</html>"""
+def gmail_enabled():
+    return read_env().get("GMAIL_ENABLED", os.getenv("GMAIL_ENABLED", "0")).casefold() in {"1", "true", "yes"}
+
+
+def service_cards():
+    try:
+        school_enabled = pronote.backend().config()["enabled"]
+    except pronote.PronoteError:
+        school_enabled = False
+    return [
+        {"key": "gmail", "label": "Gmail", "enabled": gmail_enabled(), "placeholder": False, "url": "/services/gmail"},
+        {"key": "pronote", "label": "PRONOTE", "enabled": school_enabled, "placeholder": False, "url": "/pronote"},
+        *({"key": key, "label": label, "enabled": False, "placeholder": True, "url": "/services/" + key}
+          for key, label in (("alexa", "Alexa"), ("printer", "Imprimante"), ("smart-home", "Maison connectée"))),
+    ]
+
+
+@app.route("/services/<feature>/toggle", methods=["POST"])
+@require_login
+def toggle_service(feature):
+    enabled = request.form.get("enabled") == "1"
+    if feature == "gmail":
+        value = "1" if enabled else "0"
+        config_store.update_env(ENV_FILE, {"GMAIL_ENABLED": value})
+        os.environ["GMAIL_ENABLED"] = value
+        discard_mail(session.get("gmail_session"))
+        saved_feedback("Activation Gmail enregistrée.", True)
+    elif feature == "pronote":
+        local = pronote.backend()
+        local.configure(enabled, local.config()["children"])
+        session["flash"] = "Activation PRONOTE enregistrée ; appliquée aux prochaines requêtes."
+        session["flash_ok"] = True
+    else:
+        abort(404)
+    return redirect(url_for("index", section="services"))
+
+
+@app.route("/services/<feature>", methods=["GET", "POST"])
+@require_login
+def service_configuration(feature):
+    message = ""
+    titles = {"gmail": "Gmail", "alexa": "Alexa", "printer": "Imprimante", "smart-home": "Maison connectée"}
+    if feature not in titles:
+        abort(404)
+    if feature != "gmail":
+        if request.method == "POST":
+            abort(405)
+        body = admin_service_pages.PLACEHOLDER
+        context = {}
+    else:
+        body = admin_service_pages.GMAIL + admin_service_pages.FUTURE
+        account = "Compte partagé — enrôlement à vérifier sur le Pi."
+        try:
+            account = gmail_auth.TokenSource().delivered_info()["email_address"]
+        except gmail_auth.GmailError:
+            pass
+        if request.method == "POST":
+            if request.form.get("action") != "check":
+                abort(400)
+            try:
+                if not gmail_enabled():
+                    raise gmail_auth.GmailError("disabled")
+                gmail_client.GmailClient().list("", time.monotonic() + 20)
+                message = "Connexion Gmail vérifiée. Aucun message envoyé ni marqué comme lu."
+            except gmail_auth.GmailError:
+                message = "Connexion non confirmée ; vérifier l’activation et l’enrôlement."
+        context = {"account": account, "enabled": gmail_enabled(), "single_account": True}
+    return render_template_string(admin_service_pages.HEAD + body + "</html>",
+                                  title=titles[feature], message=message, **context)
+
+
+ROSE_HTML = """<!doctype html><html lang=fr><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1"><title>Atelier privé</title>
+<style>body{font:16px system-ui;max-width:850px;margin:20px auto;padding:16px;background:#19191d;color:#eee}a,summary{color:#4ecdc4}label{display:block;margin:12px 0}input,select,textarea{box-sizing:border-box;width:100%;padding:8px;font:inherit}input[type=hidden]{display:none}button{padding:10px;margin:8px 0}section,details{border:1px solid #555;padding:16px;margin:16px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style>
+{% if message %}<p role=status>{{message}}</p>{% endif %}
+{% if not unlocked %}<h1>Accès réservé</h1><form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=unlock>
+<label>Mot de passe<input type=password name=password required autocomplete=current-password></label><button>Déverrouiller</button></form>
+{% else %}<h1>Atelier Rose</h1><a href="/?section=services">Retour administration</a>
+<form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><button name=action value=lock>Verrouiller</button></form>
+<p>Les profils sont pris en compte aux nouvelles sessions ; le prompt commun et les niveaux partagés aux prochaines requêtes. Les éditions locales restent séparées des fichiers suivis par Git.</p>
+<section><h2>Personnalités</h2><form method=get>
+<label>Catalogue<select name=catalog><option value=main {{'selected' if catalog=='main'}}>Normal</option><option value=test {{'selected' if catalog=='test'}}>Test</option></select></label>
+<label>Profil<select name=profile>{% for p in people %}<option value="{{p.id}}" {{'selected' if p.id==person.id}}>{{p.name}}</option>{% endfor %}<option value=new {{'selected' if is_new}}>+ Nouveau profil</option></select></label><button>Ouvrir</button></form>
+<form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=person>
+<input type=hidden name=catalog value="{{catalog}}"><input type=hidden name=original_id value="{{'' if is_new else person.id}}">
+<label>Identifiant<input name=id value="{{person.id}}" maxlength=80 required {{'readonly' if not is_new}}></label>
+<label>Nom<input name=name value="{{person.name}}" maxlength=80 required></label>
+<label>Alias (un par ligne)<textarea name=aliases rows=3>{{person.aliases|join('\n')}}</textarea></label>
+<label>Genre<select name=gender><option value=homme {{'selected' if person.gender=='homme'}}>Homme</option><option value=femme {{'selected' if person.gender=='femme'}}>Femme</option></select></label>
+<label>Description<textarea name=bio rows=3>{{person.bio}}</textarea></label>
+{% for axis in ['e','s'] %}<label>Niveau {{axis|upper}}<select name="{{axis}}_level"><option value="">Texte historique sans niveau séparé</option>{% for n in range(1,6) %}<option value="{{n}}" {{'selected' if person.get(axis+'_level')==n}}>{{axis|upper}}{{n}}</option>{% endfor %}</select></label>{% endfor %}
+<label>Voix / consignes propres au profil<textarea name=voice rows=7>{{person.voice}}</textarea></label>
+<details><summary>Autres paramètres du profil (JSON)</summary><p>Tempo, modules, options et tarification existants. Les variantes e_prompt_override / s_prompt_override conservent les formulations historiques ; les vider permet de suivre le niveau partagé.</p><textarea name=metadata rows=8>{{metadata}}</textarea></details>
+<button>Enregistrer le profil</button></form></section>
+<section><h2>Prompt système commun</h2><form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=prompt><textarea name=prompt rows=12 required>{{prompt}}</textarea><button>Enregistrer le prompt</button></form></section>
+<details><summary>Prompts partagés E1–E5 / S1–S5</summary><form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=levels>
+{% for key,text in levels.items()|sort %}<label>{{key}}<textarea name="{{key}}" rows=4 required>{{text}}</textarea></label>{% endfor %}<button>Enregistrer les niveaux</button></form></details>
+<details><summary>Journaux et transcriptions</summary><p>Aucun fichier n’est supprimé ou filtré.</p><ul>{% for name in logs %}<li><a href="{{url_for('rose_admin',log=name)}}">{{name}}</a></li>{% else %}<li>Aucun fichier</li>{% endfor %}</ul>{% if log_text is not none %}<pre>{{log_text}}</pre>{% endif %}</details>
+{% endif %}</html>"""
+
+
+def private_rose_logs(name=None):
+    folder = PROJ_DIR / 'logs' / 'rose'
+    if folder.is_symlink() or folder.parent.is_symlink():
+        abort(400)
+    if name is None:
+        if not folder.exists():
+            return []
+        names = []
+        with os.scandir(folder) as entries:
+            for index, entry in enumerate(entries):
+                if index >= 1000:
+                    break
+                if entry.is_file(follow_symlinks=False):
+                    names.append(entry.name)
+        return sorted(names)
+    if not name or Path(name).name != name or '\\' in name or '\x00' in name:
+        abort(400)
+    try:
+        descriptor = os.open(folder / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, 'rb') as stream:
+            details = os.fstat(stream.fileno())
+            if not stat.S_ISREG(details.st_mode):
+                abort(400)
+            stream.seek(max(0, details.st_size - 65536))
+            return stream.read(65536).decode('utf-8', errors='replace')
+    except OSError:
+        abort(404)
+
+
+@app.route('/admin/rose', methods=['GET', 'POST'])
+@require_login
+def rose_admin():
+    unlocked = time.time() - session.get('rose_unlock', 0) < 1200
+    message = ''
+    if request.method == 'POST' and request.form.get('action') == 'lock':
+        session.pop('rose_unlock', None)
+        return redirect(url_for('rose_admin'))
+    if not unlocked:
+        if request.method == 'POST' and request.form.get('action') == 'unlock':
+            if rose.authorized(request.form.get('password', '')):
+                session['rose_unlock'] = time.time()
+                return redirect(url_for('rose_admin'))
+            message = 'Accès refusé.'
+        return render_template_string(ROSE_HTML, unlocked=False, message=message), 200 if request.method == 'GET' else 403
+    session['rose_unlock'] = time.time()
+    catalog = request.values.get('catalog', 'main')
+    if catalog not in {'main', 'test'}:
+        abort(400)
+    test = catalog == 'test'
+    if request.method == 'POST':
+        action = request.form.get('action')
+        if action == 'person':
+            try:
+                person = json.loads(request.form.get('metadata', '{}'))
+            except ValueError:
+                raise config_store.InvalidConfig('Paramètres JSON invalides') from None
+            if not isinstance(person, dict):
+                abort(400)
+            person.update({key: request.form.get(key, '').strip() for key in ('id', 'name', 'gender', 'bio', 'voice')})
+            original = request.form.get('original_id', '')
+            if original and original != person['id']:
+                abort(400)
+            person['aliases'] = [a.strip() for a in request.form.get('aliases', '').splitlines() if a.strip()]
+            for key in ('e_level', 's_level'):
+                value = request.form.get(key, '')
+                person.pop(key, None)
+                if value:
+                    if value not in {'1', '2', '3', '4', '5'}:
+                        abort(400)
+                    person[key] = int(value)
+            if not original and any(p['id'] == person['id'] for p in rose.catalogue(test)['personas']):
+                raise config_store.InvalidConfig('Identifiant déjà utilisé')
+            previous = next((p for p in rose.catalogue(test)['personas'] if p['id'] == original), None)
+            if previous:
+                previous = rose_config.editable(previous, rose_config.levels(rose.CONFIG))
+                for axis in ('e', 's'):
+                    if previous.get(axis + '_level') != person.get(axis + '_level'):
+                        person.pop(axis + '_prompt_override', None)
+            rose_config.save(rose.CONFIG, 'person', person=person, test=test)
+            return redirect(url_for('rose_admin', catalog=catalog, profile=person['id'], saved='1'))
+        if action == 'prompt':
+            rose_config.save(rose.CONFIG, 'prompt', text=request.form.get('prompt', ''))
+        elif action == 'levels':
+            rose_config.save(rose.CONFIG, 'levels', bank={f'{a}{n}': request.form.get(f'{a}{n}', '') for a in 'ES' for n in range(1, 6)})
+        else:
+            abort(400)
+        return redirect(url_for('rose_admin', catalog=catalog, saved='1'))
+    people = rose.catalogue(test)['personas']
+    identifier = request.args.get('profile', people[0]['id'])
+    bank = rose_config.levels(rose.CONFIG)
+    if identifier == 'new':
+        person = {'id': '', 'name': '', 'aliases': [], 'gender': 'femme', 'bio': '', 'voice': '', 'fees': [], 'tempo': 0, 'kinks': [], 'asexual': False, 'e_level': 1, 's_level': 1}
+    else:
+        person = next((p for p in people if p['id'] == identifier), None)
+        if person is None:
+            abort(404)
+        person = rose_config.editable(person, bank)
+    message = 'Enregistré.' if request.args.get('saved') else ''
+    metadata = {k: v for k, v in person.items() if k not in {'id', 'name', 'aliases', 'gender', 'bio', 'voice', 'e_level', 's_level'}}
+    return render_template_string(ROSE_HTML, unlocked=True, message=message, catalog=catalog, people=people,
+        person=person, is_new=identifier == 'new', levels=bank, prompt=rose_config.prompt(rose.CONFIG),
+        metadata=json.dumps(metadata, ensure_ascii=False, indent=2), logs=private_rose_logs(),
+        log_text=private_rose_logs(request.args['log']) if 'log' in request.args else None)
+
+
+PRONOTE_HTML = admin_service_pages.HEAD + """
+<p>Lecture seule. Dépendance : {{'installée' if status.dependency_ready else 'indisponible'}}.
+Intégration : {{'active' if status.enabled else 'inactive'}}. État local, sans vérification réseau automatique.</p>
+<section><h2>Comptes parents</h2><ul>{% for account in accounts %}<li>{{account}}</li>{% else %}<li>Aucun compte détecté</li>{% endfor %}</ul></section>
+{% if children %}<p>Enfants disponibles : {{children|join(', ')}}</p>{% endif %}
+<details><summary>Connecter ou reconnecter un compte parent</summary>
+<form method=post autocomplete=off><input type=hidden name=csrf value="{{csrf}}">
+<label>Nom local du compte<input name=account required pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,39}" maxlength=40 autocapitalize="none" autocorrect="off" spellcheck="false"></label>
+<label>Données du QR parent (JSON : url, login, jeton)<textarea name=qr required rows=5 maxlength=12000></textarea></label>
+<label>Code QR<input name=pin type=password required inputmode=numeric pattern="[0-9]{4}"></label>
+<label>Code de sécurité du compte si demandé<input name=account_pin type=password></label>
+<button name=action value=enroll>Connecter et vérifier</button></form></details>
+<section><h2>Enfants autorisés</h2><p>Chaque alias est explicitement associé à un compte et au nom PRONOTE exact.</p>
+<form method=post><input type=hidden name=csrf value="{{csrf}}">
+<table><thead><tr><th>Alias Minitel</th><th>Compte</th><th>Nom PRONOTE</th><th></th></tr></thead><tbody id=childRows>
+{% for alias,child in child_mapping.items() %}<tr><td><input name=alias value="{{alias}}" maxlength=40></td><td><input name=child_account value="{{child.account}}" maxlength=40></td><td><input name=child_name value="{{child.name}}" maxlength=160></td><td><button type=button onclick="this.closest('tr').remove()">Retirer</button></td></tr>{% endfor %}
+</tbody></table><button type=button onclick="document.getElementById('childRows').insertAdjacentHTML('beforeend',document.getElementById('childRow').innerHTML)">Ajouter un enfant</button>
+<label><input type=checkbox name=enabled {{'checked' if status.enabled}}> Activer l’intégration</label>
+<button name=action value=configure>Enregistrer</button></form></section>
+<template id=childRow><tr><td><input name=alias maxlength=40 placeholder=Alias></td><td><input name=child_account maxlength=40 placeholder=Compte></td><td><input name=child_name maxlength=160 placeholder="Nom PRONOTE exact"></td><td><button type=button onclick="this.closest('tr').remove()">Retirer</button></td></tr></template>
+<form method=post><input type=hidden name=csrf value="{{csrf}}"><label>Compte à vérifier<input name=account required autocapitalize="none" autocorrect="off" spellcheck="false"></label><button name=action value=children>Vérifier la connexion et relire les enfants</button></form>
+<details><summary>Configuration JSON avancée</summary><form method=post><input type=hidden name=csrf value="{{csrf}}">
+<textarea name=children rows=8 required>{{mapping}}</textarea><label><input type=checkbox name=enabled {{'checked' if status.enabled}}> Activer</label><button name=action value=configure>Enregistrer le JSON</button></form></details>
+""" + admin_service_pages.FUTURE + "</html>"
 
 
 @app.route("/pronote", methods=["GET", "POST"])
@@ -1528,10 +1970,22 @@ def pronote_admin():
             elif action == "children":
                 children = local.admin_children(request.form.get("account", ""))
             elif action == "configure":
-                mapping_text = request.form.get("children", "{}")
-                if len(mapping_text) > 16000:
-                    raise pronote.PronoteError("configuration_error")
-                local.configure("enabled" in request.form, json.loads(mapping_text))
+                if "children" in request.form:
+                    mapping_text = request.form["children"]
+                    if len(mapping_text) > 16000:
+                        raise pronote.PronoteError("configuration_error")
+                    mapping = json.loads(mapping_text)
+                else:
+                    mapping = {}
+                    rows = zip(request.form.getlist("alias"), request.form.getlist("child_account"), request.form.getlist("child_name"), strict=True)
+                    for alias, account, name in rows:
+                        alias, account, name = alias.strip(), account.strip(), name.strip()
+                        if not any((alias, account, name)):
+                            continue
+                        if not all((alias, account, name)) or alias in mapping:
+                            raise pronote.PronoteError("configuration_error")
+                        mapping[alias] = {"account": account, "name": name}
+                local.configure("enabled" in request.form, mapping)
                 message = "Configuration enregistrée."
             else:
                 return "Action inconnue", 400
@@ -1545,7 +1999,9 @@ def pronote_admin():
         config = {"enabled": False, "children": {}}
         status = {"enabled": False, "dependency_ready": False}
     response = app.make_response(render_template_string(
-        PRONOTE_HTML, csrf=session["pronote_csrf"], message=message, children=children,
+        PRONOTE_HTML, title="PRONOTE", accounts=sorted({m["account"] for m in config["children"].values()} |
+            {p.name.removesuffix(".credentials.json") for p in local.directory.glob("*.credentials.json") if p.is_file() and not p.is_symlink()}),
+        child_mapping=config["children"], csrf=session["pronote_csrf"], message=message, children=children,
         status=status, mapping=json.dumps(config["children"], ensure_ascii=False, indent=2)))
     response.headers["Cache-Control"] = "no-store"
     response.headers["Referrer-Policy"] = "no-referrer"
@@ -1652,9 +2108,13 @@ GMAIL_HTML = """<!doctype html><html lang="fr"><meta charset="utf-8">
 <style>body{background:#101820;color:#eee;font:16px system-ui;max-width:700px;margin:2em auto;padding:1em}
 pre{font:16px monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:#000;color:#7fffa0;padding:1em}
 input,button{font:inherit;padding:.5em;margin:.2em} input[type=text]{width:90%}</style>
-<a href="/">Administration</a><h1>Gmail</h1>
-<p>Destination mémoire/journal : {{ memory_label }}. Le nom se choisit dans le test de personnalité.</p>
-<p>Brouillons temporaires; commandes et réponses visibles journalisées dans la mémoire sélectionnée au test de personnalité. Lecture sans marquer comme lu. Le modèle ne peut pas envoyer.</p>
+<a href="/?section=services">Retour aux services</a><h1>Tester le Minitel — Gmail</h1>
+<nav><a href="/test?mode=conversation">Conversation</a> · <a href="/test?mode=gmail">Gmail</a> · <a href="/services/gmail">Configurer Gmail</a></nav>
+<form method=post><input type=hidden name=csrf value="{{csrf}}">
+<label>Utilisateur (vide = mémoire commune)<input type=text name=username maxlength=60 value="{{username}}"></label>
+<button name=action value=user>Choisir l’utilisateur</button></form>
+<p>Compte Gmail partagé. Destination mémoire/journal : {{ memory_label }}.</p>
+<p>Brouillons temporaires; commandes et réponses visibles journalisées dans la mémoire sélectionnée ici. Lecture sans marquer comme lu. Le modèle ne peut pas envoyer.</p>
 {% if not enabled %}<p>Gmail désactivé. Suivre docs/GMAIL.md pour la connexion sur ordinateur.</p>{% endif %}
 <pre>{{ page }}</pre><p>Page {{ position }} / {{ count }}</p>
 <form method="post" autocomplete="off"><input type="hidden" name="csrf" value="{{ csrf }}">
@@ -1670,6 +2130,26 @@ input,button{font:inherit;padding:.5em;margin:.2em} input[type=text]{width:90%}<
 Les dates de la liste sont affichées en Europe/Paris.</p></html>"""
 
 
+@app.route("/test", methods=["GET", "POST"])
+@require_login
+def test_console():
+    mode = request.args.get("mode", "conversation")
+    if mode == "gmail":
+        return gmail_admin()
+    if mode != "conversation":
+        abort(400)
+    data = load_prompts()
+    preset, draft = data["active"], None
+    if request.method == "POST":
+        preset = request.form.get("preset_key", "")
+        if preset not in data["presets"]:
+            abort(400)
+        draft = request.form.get("system_prompt", "")
+    return render_template_string(admin_service_pages.HEAD + admin_service_pages.TEST_NAV +
+                                  admin_service_pages.CHAT_TEST + "</html>",
+                                  title="Tester le Minitel", message="Brouillon non enregistré ; aucune sauvegarde ni activation." if draft is not None else "", preset=preset, draft=draft, username=memory_entry().username)
+
+
 @app.route("/gmail", methods=["GET", "POST"])
 @require_login
 def gmail_admin():
@@ -1678,7 +2158,8 @@ def gmail_admin():
         request.form.get("csrf", "").encode(), session["gmail_csrf"].encode()
     ):
         return "Requête refusée", 403
-    selected = memory_entry()
+    user_change = request.method == "POST" and request.form.get("action") == "user"
+    selected = memory_entry(request.form.get("username", "") if user_change else None)
     item = mail_entry(selected.username)
     cancelling = request.method == "POST" and (
         request.form.get("action") in ("cancel", "reset")
@@ -1695,7 +2176,7 @@ def gmail_admin():
             else ("Gmail: busy", 409)
         )
     try:
-        if request.method == "POST":
+        if request.method == "POST" and not user_change:
             action = request.form.get("action", "")
             if action in ("next", "previous"):
                 item["page"] = max(
@@ -1739,7 +2220,7 @@ def gmail_admin():
             render_template_string(
                 GMAIL_HTML,
                 enabled=gmail_mail.enabled(),
-                memory_label=selected.label,
+                memory_label=selected.label, username=selected.username,
                 csrf=session["gmail_csrf"],
                 page=item["pages"][item["page"]],
                 position=item["page"] + 1,

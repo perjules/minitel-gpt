@@ -20,6 +20,7 @@ from services import config_store, io_limits, terminal_link
 
 @pytest.fixture
 def settings(tmp_path, monkeypatch):
+    monkeypatch.setattr(admin, "ADMIN_PASSWORD", "synthetic-admin-password")
     prompts = tmp_path / "prompts.json"
     original = {"active": "main", "presets": {"main": {"label": "Main", "system": "private personality"}}}
     config_store.save_prompts(prompts, original)
@@ -217,13 +218,13 @@ def test_html_forms_have_tokens_and_embedded_json_cannot_close_script(settings, 
     config_store.save_prompts(path, data)
     monkeypatch.setattr(admin, "svc_status", lambda _: "active")
     monkeypatch.setattr(admin, "ip_address", lambda: "127.0.0.1")
-    monkeypatch.setattr(admin, "log_tail", lambda _: "log")
+    monkeypatch.setattr(admin, "log_tail", lambda _, n=40: "log")
     monkeypatch.setattr(admin, "current_version", lambda: "test")
     page = client.get("/")
     assert page.status_code == 200
     assert "<script id=unexpected>" not in page.text
     assert r"\u003c/script\u003e" in page.text
-    forms = re.findall(r'<form\b[^>]*>(.*?)</form>', page.text, re.DOTALL)
+    forms = [body for attrs, body in re.findall(r'<form\b([^>]*)>(.*?)</form>', page.text, re.DOTALL) if 'post' in attrs.lower()]
     assert forms and all('name=csrf' in form or 'name="csrf"' in form for form in forms)
     assert "X-CSRF-Token" in page.text
 

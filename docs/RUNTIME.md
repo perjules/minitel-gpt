@@ -181,10 +181,12 @@ sudo journalctl --namespace=minitel-gpt -u wifi-manager -n 100 --no-pager
 sudo journalctl --namespace=minitel-gpt --disk-usage
 ```
 
-The admin log viewer uses a root-owned isolated Python helper with three fixed,
-read-only selections. Its sudoers rule permits no arbitrary units or arguments.
-The dashboard also shows free space and sizes of legacy logs/Rose transcripts
-and persistent memory/conversations; scans are bounded and never follow links.
+The admin log viewer uses a root-owned isolated Python helper with four fixed,
+read-only selections (terminal, admin, Wi-Fi and deployment). Deployment uses the
+default journal namespace; application services use minitel-gpt. Its sudoers rule permits no arbitrary units or arguments.
+The dashboard shows free disk space. Maintenance exposes generic log/archive and
+memory usage totals; scans are bounded and never follow links. Private transcript
+files are available only behind the separate private-panel password gate.
 Low-space warnings appear below 1 GiB free or 10% free. Partial measurements are
 labelled. Diagnostic journals rotate automatically; saved memory, conversations,
 Rose transcripts and old `logs/*.log` files are never automatically deleted.
@@ -276,22 +278,19 @@ The root Wi-Fi service has a fixed working directory and command environment and
 never imports the user-writable application `.env`. NetworkManager calls have
 explicit process deadlines and operate on UUIDs; escaped names are decoded.
 
-After a sustained disconnect the setup hotspot remains available in five-minute
-windows, between bounded attempts to reconnect autoconnect-enabled saved client
-profiles. Saved profiles and their autoconnect preferences are never disabled or
-deleted. Provisioning tests a unique candidate and saves it for autoconnect only
-after association and an address are confirmed. A failed candidate removes only
-that candidate and restores the hotspot. Setup and monitoring share a lock.
-Profiles disabled by an older installation remain disabled: explicitly re-enable
-the intended profile with `sudo nmcli con modify uuid <UUID> connection.autoconnect yes`.
+At boot, the service gives NetworkManager a bounded grace period to connect to a
+saved client network. If connectivity is present it leaves reconnection entirely
+to NetworkManager. Otherwise it enables the provisioning hotspot once. There is
+no periodic monitor that takes over wlan0 after a later disconnect. Saved profiles
+and autoconnect preferences are preserved. An explicit setup request tests a unique
+candidate, removes only that candidate on failure and restores the hotspot.
 
 The port-80 server permits configuration only when the connection actually arrives
 on 192.168.4.1 from the setup subnet while hotspot mode is active. Host headers do
 not grant access. Requests need a session-bound token and valid, bounded JSON;
 the normal home LAN exposes no network-changing operation. The hotspot is still
 open for deliberate local provisioning. Passwords retain spaces and never enter
-command logs. A stopped HTTP server causes the manager to fail and restart.
-Validate hotspot retry windows, wrong-password recovery and live provisioning on
+command logs. Validate boot grace, wrong-password recovery and live provisioning on
 the Pi before promoting to main; offline tests mock every NetworkManager command.
 
 ## Operation deadlines and resource budgets
@@ -350,3 +349,15 @@ knowledge readers refuse links and non-regular files such as FIFOs. Configuratio
 reads are capped at 2 MiB. Lock contention fails after a bounded wait instead of
 blocking indefinitely. The terminal's direct systemd entry point shares package
 exception identities with its adapters so these failures reach the supervisor.
+
+## Admin branch and power controls
+
+See [ADMIN_CONSOLE.md](ADMIN_CONSOLE.md) for the manual first rollout, explicit
+ADMIN_PASSWORD requirement and console behavior. New fixed helper operations are
+`switch-branch` (bounded JSON stdin containing branch and confirmed commit),
+`reboot` and `poweroff`. Only root can run the apply operation; the admin queues
+it through the narrowly scoped sudo rule. Branch preparation precedes activation,
+and retained-pair rollback also restores the previous branch. Both local commits
+and private installation data are protected. A target branch must support the
+shared runtime assets. Power requests are delayed transient systemd jobs and do
+not run concurrently with deployment. This adds no permanent monitoring service.

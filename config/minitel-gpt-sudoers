@@ -1,5 +1,5 @@
 minitel ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart minitel-chatgpt, /usr/bin/systemctl start minitel-chatgpt, /usr/bin/systemctl stop minitel-chatgpt, /usr/bin/systemctl restart wifi-manager, /usr/bin/systemctl restart admin-ui
 
-minitel ALL=(root) NOPASSWD: /usr/local/sbin/minitel-runtime update, /usr/local/sbin/minitel-runtime rollback
+minitel ALL=(root) NOPASSWD: /usr/local/sbin/minitel-runtime update, /usr/local/sbin/minitel-runtime rollback, /usr/local/sbin/minitel-runtime switch-branch, /usr/local/sbin/minitel-runtime reboot, /usr/local/sbin/minitel-runtime poweroff
 
 minitel ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot

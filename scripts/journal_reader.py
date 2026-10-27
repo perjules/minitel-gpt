@@ -4,12 +4,12 @@ import os
 import subprocess
 import sys
 
-UNITS = {"chatgpt": "minitel-chatgpt", "wifi": "wifi-manager", "admin": "admin-ui"}
+UNITS = {"chatgpt": "minitel-chatgpt", "wifi": "wifi-manager", "admin": "admin-ui", "deploy": "minitel-deploy"}
 
 
 def read(name):
     return subprocess.run(
-        ["/usr/bin/journalctl", "--namespace=minitel-gpt", "--unit=" + UNITS[name],
+        ["/usr/bin/journalctl", *([] if name == "deploy" else ["--namespace=minitel-gpt"]), "--unit=" + UNITS[name],
          "--lines=200", "--no-pager", "--output=short-iso"],
         capture_output=True, text=True, check=True, timeout=5,
         env={"PATH": "/usr/bin:/bin", "LC_ALL": "C.UTF-8", "SYSTEMD_PAGER": "/bin/cat"},

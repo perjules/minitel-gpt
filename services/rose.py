@@ -21,6 +21,11 @@ from queue import Queue
 
 import requests
 
+try:
+    from . import rose_config
+except ImportError:
+    import rose_config
+
 CONFIG = Path(__file__).resolve().parents[1] / "config"
 PASSWORD_FILE = CONFIG / "rose-password.txt"
 URL = "https://api.mistral.ai/v1/chat/completions"
@@ -61,8 +66,7 @@ def authorized(attempt):
 
 
 def catalogue(test=False):
-    filename = "rose_test_personas.json" if test else "rose_personas.json"
-    return json.loads((CONFIG / filename).read_text(encoding="utf-8"))
+    return rose_config.catalogue(CONFIG, test)
 
 
 def known_name(alias, test=False):
@@ -288,8 +292,8 @@ class Session:
             if len(text) > MAX_INPUT:
                 raise ValueError("Message trop long")
             self.messages += 1
-        prompt = (CONFIG / "rose_prompt.txt").read_text(encoding="utf-8")
-        profile = {k: self.profile[k] for k in ("voice", "gender")}
+        prompt = rose_config.prompt(CONFIG)
+        profile = {"voice": rose_config.voice(CONFIG, self.profile), "gender": self.profile["gender"]}
         prompt += "\nProfil fixe : " + json.dumps(profile, ensure_ascii=False)
         if self.tempo_prompt:
             prompt += "\n\n" + self.tempo_prompt

@@ -409,7 +409,8 @@ def main():
         daemon=True,
     )
     server.start()
-    startup_provisioning()\n    server.join()
+    startup_provisioning()
+    server.join()
 
 
 if __name__ == "__main__":
