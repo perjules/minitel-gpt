@@ -43,6 +43,7 @@ try:
         pronote,
         pronote_answers,
         storage_health,
+        system_health,
     )
 except ImportError:
     import calculator
@@ -54,6 +55,7 @@ except ImportError:
     import pronote
     import pronote_answers
     import storage_health
+    import system_health
 
 PROJ_DIR = Path(__file__).parent.parent
 ASSETS_DIR = PROJ_DIR / "assets"
@@ -720,6 +722,8 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 <section class="panel {{'active' if section=='dash'}}" id=dash>
   <div class=block>
     <h2>Services de l’appareil</h2>
+    <p class=sub>Mesures à l’ouverture de la page. <a href="/?section=dash">Actualiser</a></p>
+    <p>Durée depuis le démarrage : <b>{{health.uptime}}</b></p>
     <p class=ipbox>Adresse : <b>http://{{ip}}:8080</b></p>
     {% for s,st in services.items() %}
     <div class=row><span class="dot {{'on' if st=='active' else 'off'}}"></span>{{s}}
@@ -730,7 +734,12 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 
   <div class=block>
     <h2>Réseau et logiciel</h2>
+    <p>Wi-Fi : {{health.wifi}}</p>
+    <p>Tailscale : {{health.tailscale}}</p>
+    <p>Stockage : {% if health.disk %}{{health.disk.free_gib}} / {{health.disk.total_gib}} Gio libres · {{health.disk.used_percent}} % utilisé{% if health.disk.warning %} — ATTENTION : espace faible{% endif %}{% else %}indisponible{% endif %}</p>
     <p>Version : <b>{{version}}</b></p>
+    <p>Mises à jour : {{update_status}}</p>
+    <p>Dernier déploiement : {{deployment.phase}}{% if deployment.error %} · {{deployment.error}}{% endif %}</p>
     <p>Personnalité active : <b>{{presets[active_key].label}}</b></p>
     <p class=sub>Connexion gérée par NetworkManager ; le portail Wi-Fi sert au provisionnement au démarrage.</p>
     <a href="/?section=ai">Configurer l’IA et la personnalité</a>
@@ -920,7 +929,10 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
   </div>
   <div class=block>
     <h2>🔄 Mise à jour de l'application</h2>
-    <p class=sub>Version installée : <b>{{version}}</b></p>
+    <p class=sub>Version installée : <b>{{version}}</b> · branche suivie : {{runtime_branch}}</p>
+    <p>Mises à jour : {{update_status}}</p>
+    <p>Dernier déploiement : <b>{{deployment.phase}}</b>{% if deployment.error %} · {{deployment.error}}{% endif %}</p>
+    <a href="/?section=maintenance">Actualiser l’état</a>
     <form method=POST action=/check-update style=margin:0><input type=hidden name=csrf value="{{csrf_token()}}">
       <button class="btn btn-s">Vérifier les mises à jour</button>
     </form>
@@ -1160,6 +1172,10 @@ def index():
     flash = session.pop("flash", None); flash_ok = session.pop("flash_ok", False)
     return render_template_string(
         ADMIN_HTML, section=section, presets=presets, knowledge=all_knowledge(),
+        health={"uptime": system_health.uptime(), "disk": system_health.disk(PROJ_DIR),
+                "wifi": system_health.wifi(), "tailscale": system_health.tailscale()},
+        deployment=system_health.deployment(DEPLOYMENT_STATUS), runtime_branch=runtime_branch(),
+        update_status=session.get("update_status", "non vérifiées dans cette session"),
         title_fonts=TITLE_FONTS, title_art_max=TITLE_ART_MAX_WORDS,
         active_key=data["active"], services=services, ip=ip_address(),
         log_chatgpt=log_tail("chatgpt"),
@@ -1169,7 +1185,7 @@ def index():
         linkup_key_masked=mask_key(linkup_key()), linkup_depth=linkup_depth(),
         mistral_models=MISTRAL_MODELS, claude_models=CLAUDE_MODELS,
         linkup_depths=LINKUP_DEPTHS,
-        version=current_version(), update_log=session.pop("update_log", None),
+        version=current_version(), update_log=session.get("update_log"),
         flash=flash, flash_ok=flash_ok)
 
 def parse_title_art_form():
@@ -1444,6 +1460,8 @@ def restart():
 @require_login
 def check_update_route():
     res = check_update()
+    session["update_status"] = (f"{res['behind']} mise(s) à jour disponible(s)" if res.get("ok")
+                                else "dernière vérification en échec")
     if not res["ok"]:
         session["flash"] = res["msg"]; session["flash_ok"] = False
     elif res["behind"] == 0:
@@ -1460,6 +1478,7 @@ def check_update_route():
 def update_route():
     ok, msg = do_update()
     session.pop("update_log", None)
+    session.pop("update_status", None)
     session["flash"] = msg if ok else "Échec de la mise à jour : " + msg
     session["flash_ok"] = ok
     return redirect(url_for("index", section="maintenance"))
@@ -1468,6 +1487,8 @@ def update_route():
 @require_login
 def rollback_route():
     ok, msg = do_rollback()
+    session.pop("update_log", None)
+    session.pop("update_status", None)
     session["flash"] = msg if ok else "Échec : " + msg
     session["flash_ok"] = ok
     return redirect(url_for("index", section="maintenance"))
