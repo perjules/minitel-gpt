@@ -40,6 +40,7 @@ try:
         io_limits,
         memory_session,
         mistral_answers,
+        model_catalogue,
         pronote,
         pronote_answers,
         storage_health,
@@ -52,6 +53,7 @@ except ImportError:
     import io_limits
     import memory_session
     import mistral_answers
+    import model_catalogue
     import pronote
     import pronote_answers
     import storage_health
@@ -363,35 +365,12 @@ def mask_key(k):
         return "(absente)"
     return (k[:6] + "..." + k[-4:]) if len(k) > 12 else "(définie)"
 
-# Modèles proposés (id, libellé avec coût + pertinence). Le terminal n'affiche
-# que 40 colonnes et répond court → un modèle léger suffit largement.
-MISTRAL_MODELS = [
-    ("ministral-8b-latest",  "Ministral 8B - le moins cher, très rapide (~0,10 $/M)"),
-    ("mistral-small-latest", "Mistral Small - bon équilibre, recommandé (~0,20 $/M)"),
-    ("mistral-medium-latest","Mistral Medium - plus pertinent (~0,40 $/M entrée)"),
-    ("mistral-large-latest", "Mistral Large - le plus pertinent (~2 $/M entrée)"),
-]
-CLAUDE_MODELS = [
-    ("claude-haiku-4-5",  "Claude Haiku 4.5 - le moins cher, le plus rapide, recommandé (1 $ / 5 $ par M)"),
-    ("claude-sonnet-5-5", "Claude Sonnet 5.5 - équilibre vitesse/intelligence (2 $ / 10 $ par M)"),
-    ("claude-opus-5-5",   "Claude Opus 5.5 - le plus pertinent, plus lent (4 $ / 20 $ par M)"),
-]
-
 def claude_options(model):
     """Paramètres propres au modèle : les Claude 5.x réfléchissent par défaut
     (thinking adaptatif) ; effort bas = réponse rapide et courte, adaptée au
     Minitel. Haiku 4.5 ne connaît pas ce paramètre (erreur 400)."""
     return {} if model.startswith("claude-haiku") else {"output_config": {"effort": "low"}}
-# Linkup n'est pas un LLM generatif mais un moteur de recherche web : la
-# "profondeur" remplace le modele. Tarifs : ~0,005 $ (fast/standard) ou
-# ~0,006 $ (deep) par recherche.
-LINKUP_DEPTHS = [
-    ("fast",     "Fast - reponse quasi instantanee, sans interpretation (~0,005 $/recherche)"),
-    ("standard", "Standard - recherche agentique iterative, recommande (~0,005 $/recherche)"),
-    ("deep",     "Deep - chainage multi-iterations, le plus pertinent, 5-30s (~0,006 $/recherche)"),
-]
-MISTRAL_MODEL_IDS = {m[0] for m in MISTRAL_MODELS}
-CLAUDE_MODEL_IDS = {m[0] for m in CLAUDE_MODELS}
+LINKUP_DEPTHS = [("fast", "Fast"), ("standard", "Standard"), ("deep", "Deep")]
 LINKUP_DEPTH_IDS = {m[0] for m in LINKUP_DEPTHS}
 
 # ── Auth ─────────────────────────────────────────────────────────────────
@@ -803,11 +782,16 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
         <p class=sub style=margin:6px 0 0>Pas encore de clé ?
           <a href="https://admin.mistral.ai/organization/api-keys" target=_blank rel=noopener>Créer une clé API Mistral &#8599;</a></p>
         <label>Modèle Mistral</label>
-        <select name=mistral_model>
+        <select name=mistral_model id=mistralModels>
           {% for mid,desc in mistral_models %}
           <option value="{{mid}}" {{'selected' if mid==mistral_model}}>{{desc}}</option>
           {% endfor %}
         </select>
+        <button class="btn btn-s" type=button onclick="loadModels('mistral',true)">Actualiser les modèles</button>
+        <p class=sub id=mistralModelStatus role=status>Modèle enregistré ; liste chargée à l’ouverture.</p>
+        <details><summary>Identifiant manuel (facultatif)</summary>
+          <input type=text name=mistral_model_custom maxlength=200 placeholder="Identifiant du modèle">
+        </details>
       </details>
 
       <details class=provider-settings data-provider=claude {{'open' if provider=='claude'}}>
@@ -818,11 +802,16 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
         <p class=sub style=margin:6px 0 0>Pas encore de clé ?
           <a href="https://platform.claude.com/" target=_blank rel=noopener>Créer une clé API Claude &#8599;</a></p>
         <label>Modèle Claude</label>
-        <select name=claude_model>
+        <select name=claude_model id=claudeModels>
           {% for cid,desc in claude_models %}
           <option value="{{cid}}" {{'selected' if cid==claude_model}}>{{desc}}</option>
           {% endfor %}
         </select>
+        <button class="btn btn-s" type=button onclick="loadModels('claude',true)">Actualiser les modèles</button>
+        <p class=sub id=claudeModelStatus role=status>Modèle enregistré ; liste chargée à l’ouverture.</p>
+        <details><summary>Identifiant manuel (facultatif)</summary>
+          <input type=text name=claude_model_custom maxlength=200 placeholder="Identifiant du modèle">
+        </details>
       </details>
 
       <details class=provider-settings data-provider=linkup {{'open' if provider=='linkup'}}>
@@ -841,11 +830,12 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       </details>
 
       <hr>
-      <button class="btn btn-p">💾 Enregistrer la configuration</button>
+      <button class="btn btn-p">Enregistrer et appliquer</button>
     </form>
     <p class=sub>Les clés non modifiées sont conservées. Ouvrir un fournisseur pour modifier son modèle et ses options existantes.</p>
   </div>
 
+  <details class=block id=advanced-personality><summary>Configuration avancée — personnalités, consignes et connaissances</summary>
   <div class=block>
     <h2>Personnalité active configurée sur le Minitel</h2>
     <p>Active : <b>{{presets[active_key].label}}</b></p>
@@ -906,7 +896,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       <pre id=titlePreview style="display:none"></pre>
 
       <hr>
-      <button class="btn btn-p">Enregistrer le brouillon</button>
+      <button class="btn btn-p">Enregistrer et appliquer le brouillon</button>
       <button class="btn btn-s" formaction=/apply-preset>Enregistrer et activer</button>
       <button class="btn btn-d" formaction=/delete-preset onclick="return confirm('Supprimer ce preset ?')">Supprimer</button>
     </form>
@@ -930,6 +920,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <button class="btn btn-p" type=button onclick=genPrompt()>Générer les consignes</button>
     <div id=spin>⏳ Génération en cours...</div>
   </div>
+  </details>
   <div class=block>
     <h2>Tester le brouillon de la personnalité sélectionnée</h2>
     <p class=sub>Posez une question comme sur le Minitel, sans le Minitel. Le test
@@ -1026,6 +1017,7 @@ function loadStorage(){
 // Navigation locale : garde les champs édités ; les liens fonctionnent aussi sans JS.
 function showSection(section){
   if(section==='maintenance')loadStorage();
+  if(section==='ai')loadModels(document.getElementById('providerSel').value);
   document.querySelectorAll('nav.tabs a').forEach(a=>{
     const active=a.dataset.tab===section;
     a.classList.toggle('active',active);
@@ -1039,6 +1031,27 @@ document.querySelectorAll('nav.tabs a').forEach(a=>a.addEventListener('click',e=
   history.replaceState(null,'',url);
 }));
 if(document.getElementById('maintenance').classList.contains('active'))loadStorage();
+const modelLists=new Set();
+async function loadModels(provider,force=false){
+  if(!['mistral','claude'].includes(provider)||(!force&&modelLists.has(provider)))return;
+  modelLists.add(provider);
+  const field=provider==='claude'?'anthropic':'mistral';
+  const form=document.getElementById('llmForm'), select=document.getElementById(provider+'Models');
+  const status=document.getElementById(provider+'ModelStatus');
+  const selected=select.value;
+  status.textContent='Chargement…';
+  try{
+    const response=await fetch('/models',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},
+      body:JSON.stringify({provider:provider,key:form.elements[field+'_key'].value,clear:form.elements[field+'_key_clear'].checked})});
+    const data=await response.json();
+    if(!data.ok)throw new Error(data.error);
+    const ids=new Set([selected]);select.replaceChildren(new Option(selected,selected));
+    data.models.forEach(m=>{if(!ids.has(m.id)){select.add(new Option(m.label,m.id));ids.add(m.id);}});
+    select.value=selected;status.textContent=data.models.length+' modèles disponibles. La sélection est conservée.';
+  }catch(error){status.textContent=error.message||'Liste indisponible ; modèle actuel conservé.';modelLists.delete(provider);}
+}
+if(document.getElementById('ai').classList.contains('active'))loadModels(document.getElementById('providerSel').value);
+document.querySelectorAll('.provider-settings').forEach(d=>d.addEventListener('toggle',()=>{if(d.open)loadModels(d.dataset.provider);}));
 // Les brouillons restent en mémoire seulement ; avertir avant de les perdre.
 const editForm=document.getElementById('editForm'), llmForm=document.getElementById('llmForm');
 let editBaseline='', llmBaseline='', selectedPreset=document.getElementById('presetSel').value;
@@ -1193,6 +1206,7 @@ llmBaseline=snapshot(llmForm);
 loadPreset();
 document.getElementById('providerSel').addEventListener('change',function(){
   document.querySelectorAll('.provider-settings').forEach(d=>d.open=d.dataset.provider===this.value);
+  loadModels(this.value);
 });
 // Desactive le champ mot de passe quand "Supprimer la cle existante" est coche
 document.querySelectorAll('.clearkey input[type=checkbox]').forEach(function(cb){
@@ -1267,7 +1281,8 @@ def index():
         mistral_key_masked=mask_key(mistral_key()), mistral_model=mistral_model(),
         claude_key_masked=mask_key(anthropic_key()), claude_model=claude_model(),
         linkup_key_masked=mask_key(linkup_key()), linkup_depth=linkup_depth(),
-        mistral_models=MISTRAL_MODELS, claude_models=CLAUDE_MODELS,
+        mistral_models=[(mistral_model(), mistral_model())],
+        claude_models=[(claude_model(), claude_model())],
         linkup_depths=LINKUP_DEPTHS,
         version=current_version(), update_log=session.get("update_log"),
         flash=flash, flash_ok=flash_ok)
@@ -1450,6 +1465,23 @@ def test_preset_route():
     except Exception as e:  # noqa: BLE001 - Isolate failures of the optional admin test integrations.
         return jsonify(ok=False, error=str(e))
 
+@app.route("/models", methods=["POST"])
+@require_login
+def available_models():
+    data = request.json or {}
+    provider = data.get("provider")
+    if provider not in {"mistral", "claude"}:
+        return jsonify(ok=False, error="Fournisseur invalide"), 400
+    key = data.get("key", "")
+    if not isinstance(key, str) or len(key) > 4096 or data.get("clear"):
+        return jsonify(ok=False, error="Clé API requise"), 400
+    key = key.strip() or {"mistral": mistral_key, "claude": anthropic_key}[provider]()
+    try:
+        return jsonify(ok=True, models=model_catalogue.models(provider, key))
+    except model_catalogue.CatalogueError as error:
+        return jsonify(ok=False, error=str(error)), 502
+
+
 @app.route("/save-llm", methods=["POST"])
 @require_login
 def save_llm():
@@ -1463,12 +1495,15 @@ def save_llm():
             updates[key] = ""
         elif value:
             updates[key] = value
-    for field, key, allowed in (("mistral_model", "MISTRAL_MODEL", MISTRAL_MODEL_IDS),
-                                ("claude_model", "CLAUDE_MODEL", CLAUDE_MODEL_IDS),
-                                ("linkup_depth", "LINKUP_DEPTH", LINKUP_DEPTH_IDS)):
-        value = request.form.get(field, "").strip()
-        if value in allowed:
+    for field, key in (("mistral_model", "MISTRAL_MODEL"), ("claude_model", "CLAUDE_MODEL")):
+        value = request.form.get(field + "_custom", "").strip() or request.form.get(field, "").strip()
+        if value:
+            if not model_catalogue.valid_id(value):
+                abort(400, "Identifiant de modèle invalide")
             updates[key] = value
+    depth = request.form.get("linkup_depth", "").strip()
+    if depth in LINKUP_DEPTH_IDS:
+        updates["LINKUP_DEPTH"] = depth
     config_store.update_env(ENV_FILE, updates)
     saved_feedback("Configuration IA enregistrée.", True)
     selected_key = {"claude": anthropic_key, "linkup": linkup_key, "mistral": mistral_key}[provider]()
