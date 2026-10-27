@@ -436,12 +436,7 @@ def svc_status(name):
 
 
 def ip_address():
-    try:
-        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True,
-                             check=False, timeout=5).stdout
-        return out.split()[0] if out.split() else "indisponible"
-    except (OSError, UnicodeError, subprocess.SubprocessError):
-        return "indisponible"
+    return system_health.local_ip()
 
 
 def log_tail(name, n=40):
@@ -688,6 +683,7 @@ main{max-width:920px;margin:0 auto;padding:0 20px}
 .panel{display:none}.panel.active{display:block}
 .block{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:16px}
 .block:last-child{margin-bottom:0}
+.health-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}.health-grid .block{margin:0 0 16px}.reading{font-size:2em;margin:12px 0}meter{width:100%;height:24px}.warning{color:var(--danger)}a{color:var(--accent)}
 .block,.flash{overflow-wrap:anywhere}
 input[type=file]{max-width:100%}
 h2{color:var(--accent);margin:0 0 6px;font-size:1.1em}
@@ -741,37 +737,38 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 
 <!-- TABLEAU DE BORD -->
 <section class="panel {{'active' if section=='dash'}}" id=dash>
-  <div class=block>
-    <h2>Services de l’appareil</h2>
-    <p class=sub>Mesures à l’ouverture de la page. <a href="/?section=dash">Actualiser</a></p>
-    <p>Durée depuis le démarrage : <b>{{health.uptime}}</b></p>
-    <p class=ipbox>Adresse IP du Pi : <b>{{ip}}</b> · administration : port 8080</p>
-    {% for s,st in services.items() %}
-    <div class=row><span class="dot {{'on' if st=='active' else 'off'}}"></span>{{s}}
-      <span style="margin-left:auto;color:{{'#4ecdc4' if st=='active' else '#667'}}">{{st}}</span></div>
-    {% endfor %}
-    <p class=sub>Dernière demande de redémarrage dans cette session : {{restart_status}}</p>
-    <p class=sub>« inactive » sur wifi/boot = normal (services ponctuels).</p>
+  <p class=sub>Mesures à l’ouverture. <a href="/?section=dash">Actualiser</a></p>
+  <div class=health-grid>
+    <div class=block><h2>🌡️ Température</h2>
+      <p class=reading>{{health.temperature ~ ' °C' if health.temperature is not none else 'Indisponible'}}</p>
+      <p class=sub>Depuis le démarrage : {{health.uptime}}</p>
+    </div>
+    <div class=block><h2>Stockage</h2>
+      {% if health.disk %}
+      <meter min=0 max=100 value="{{health.disk.used_percent}}" low=70 high=90 optimum=0 aria-label="Espace disque utilisé"></meter>
+      <p>{{health.disk.used_percent}} % utilisé · {{health.disk.free_gib}} / {{health.disk.total_gib}} Gio libres</p>
+      {% if health.disk.warning %}<p class=warning>Espace libre faible</p>{% endif %}
+      {% else %}<p>Indisponible</p>{% endif %}
+      <a href="/?section=maintenance#storage">Gérer</a>
+    </div>
   </div>
-
-  <div class=block>
-    <h2>Réseau et logiciel</h2>
-    <p>Wi-Fi : {{health.wifi}}</p>
-    <p>Tailscale : {{health.tailscale}}</p>
-    <p>Stockage : {% if health.disk %}{{health.disk.free_gib}} / {{health.disk.total_gib}} Gio libres · {{health.disk.used_percent}} % utilisé{% if health.disk.warning %} — ATTENTION : espace faible{% endif %}{% else %}indisponible{% endif %}</p>
-    <p>Version : <b>{{version}}</b></p>
-    <p>Dernière vérification des mises à jour (cette session) : {{update_status}}</p>
-    <p>Dernier déploiement : {{deployment.phase}}{% if deployment.error_type %} · {{deployment.error_type}}{% endif %}</p>
-    <p>Personnalité active : <b>{{presets[active_key].label}}</b></p>
-    <p class=sub>Connexion gérée par NetworkManager ; le portail Wi-Fi sert au provisionnement au démarrage.</p>
-    <a href="/?section=ai">Configurer l’IA et la personnalité</a>
+  <div class=block><h2>Services de l’appareil</h2>
+    {% for name,state in services.items() %}<div class=row>
+      <span class="dot {{'on' if state=='active' else 'warn'}}"></span>
+      {{'Service Minitel' if name=='minitel-chatgpt' else 'Administration'}} : {{state}}
+    </div>{% endfor %}
+    <p class=sub>L’état du service ne confirme pas la connexion physique du Minitel.</p>
+    <p>Wi-Fi : {{health.wifi}}</p><p>Adresse locale : {{ip}}</p><p>Tailscale : {{health.tailscale}}</p>
   </div>
-  <div class=block>
-    <h2>Journal récent du Minitel</h2>
+  <div class=block><h2>Logiciel et IA</h2>
+    <p>Version : <b>{{version.split(' · ')[0]}}</b> · <a href="/?section=maintenance#software">Gérer</a></p>
+    {% if deployment.phase=='failed' %}<p class=warning>Le dernier déploiement a échoué. <a href="/?section=maintenance#software">Consulter</a></p>{% endif %}
+    <p>IA configurée : {{provider}} · {{configured_model}} · <a href="/?section=ai">Gérer</a></p>
+  </div>
+  <div class=block><h2>Journal récent du Minitel</h2>
     <pre>{{log_chatgpt.splitlines()[-5:]|join('\n')}}</pre>
-    <a href="/?section=maintenance">Diagnostics, stockage et contrôles dans Maintenance</a>
+    <a href="/?section=maintenance#logs">Voir les journaux</a>
   </div>
-
 </section>
 
 <!-- PERSONNALITES (editeur) -->
@@ -964,7 +961,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       <button class="btn btn-s">↺ Redémarrer le terminal</button></form>
   </div>
   <div class=block>
-    <h2>🔄 Mise à jour de l'application</h2>
+    <h2 id=software>🔄 Mise à jour de l'application</h2>
     <p class=sub>Version installée : <b>{{version}}</b> · branche suivie : {{runtime_branch}}</p>
     <p>Dernière vérification des mises à jour (cette session) : {{update_status}}</p>
     <p>Dernier déploiement : <b>{{deployment.phase}}</b>{% if deployment.error_type %} · {{deployment.error_type}}{% endif %}</p>
@@ -989,11 +986,11 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
   </div>
 
   <div class=block>
-    <h2>Journal du terminal <a href="/?section=maintenance" class=sub>Actualiser</a></h2>
+    <h2 id=logs>Journal du terminal <a href="/?section=maintenance" class=sub>Actualiser</a></h2>
     <pre>{{log_chatgpt}}</pre>
   </div>
   <div class=block>
-    <h2>Stockage</h2>
+    <h2 id=storage>Stockage</h2>
     <p class=sub>Mesures en Mio. Les archives de conversation et anciens journaux restent conservés.</p>
     <pre id=storage-status>Ouvrir Maintenance pour charger les mesures détaillées.</pre>
     <noscript><a href="/storage-status">Consulter les mesures détaillées du stockage</a></noscript>
@@ -1252,13 +1249,13 @@ def index():
     if edit_key not in presets:
         edit_key = data["active"]
     services = {"minitel-chatgpt": svc_status("minitel-chatgpt"),
-                "wifi-manager": svc_status("wifi-manager"),
                 "admin-ui": svc_status("admin-ui")}
     flash = session.pop("flash", None); flash_ok = session.pop("flash_ok", False)
     return render_template_string(
         ADMIN_HTML, section=section, presets=presets, knowledge=all_knowledge(),
         health={"uptime": system_health.uptime(), "disk": system_health.disk(PROJ_DIR),
-                "wifi": system_health.wifi(), "tailscale": system_health.tailscale()},
+                "wifi": system_health.wifi(), "tailscale": system_health.tailscale(),
+                "temperature": system_health.temperature()},
         deployment=system_health.deployment(DEPLOYMENT_STATUS), runtime_branch=runtime_branch(),
         restart_status=session.get("restart_status", "aucune"),
         update_status=session.get("update_status", "non vérifiées dans cette session"),
@@ -1266,6 +1263,7 @@ def index():
         active_key=data["active"], edit_key=edit_key, services=services, ip=ip_address(),
         log_chatgpt=log_tail("chatgpt"),
         provider=llm_provider(),
+        configured_model={"mistral": mistral_model, "claude": claude_model, "linkup": linkup_depth}[llm_provider()](),
         mistral_key_masked=mask_key(mistral_key()), mistral_model=mistral_model(),
         claude_key_masked=mask_key(anthropic_key()), claude_model=claude_model(),
         linkup_key_masked=mask_key(linkup_key()), linkup_depth=linkup_depth(),

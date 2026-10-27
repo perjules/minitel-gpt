@@ -70,3 +70,19 @@ def deployment(path):
     except (OSError, ValueError):
         pass
     return {"phase": "indisponible"}
+
+
+def temperature():
+    try:
+        value = float(Path('/sys/class/thermal/thermal_zone0/temp').read_text()) / 1000
+        return round(value, 1) if -20 <= value <= 150 else None
+    except (OSError, ValueError):
+        return None
+
+
+def local_ip():
+    for line in command('ip', '-o', '-4', 'address', 'show', 'scope', 'global').splitlines():
+        fields = line.split()
+        if len(fields) >= 4 and fields[1].startswith(('wl', 'eth', 'en')):
+            return fields[3].split('/')[0]
+    return UNAVAILABLE
