@@ -714,7 +714,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 
 <nav class=tabs>
   {% for key,label in [('dash','Tableau de bord'),('ai','Configuration IA'),('services','Services'),('maintenance','Maintenance')] %}
-  <a href="{{url_for('index', section=key)}}" data-tab="{{key}}" class="{{'active' if section==key}}" {{'aria-current=page' if section==key}}>{{label}}</a>
+  <a href="{{url_for('index', section=key, preset=edit_key)}}" data-tab="{{key}}" class="{{'active' if section==key}}" {{'aria-current=page' if section==key}}>{{label}}</a>
   {% endfor %}
 </nav>
 <main><div class=tabwrap>
@@ -827,8 +827,9 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
   </div>
 
   <div class=block>
-    <h2>Personnalités disponibles</h2>
-    <p class=sub>La personnalité active est celle utilisée par le Minitel.</p>
+    <h2>Personnalité active sur le Minitel</h2>
+    <p>Active : <b>{{presets[active_key].label}}</b></p>
+    <p class=sub>Activer ici utilise la version déjà enregistrée et redémarre le service Minitel. Choisir une personnalité dans l’éditeur ne l’active pas.</p>
     <ul class=plist>
       {% for k,p in presets.items() %}
       <li>
@@ -837,7 +838,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
         {% else %}
         <form method=POST action=/apply-preset style=margin:0><input type=hidden name=csrf value="{{csrf_token()}}">
           <input type=hidden name=preset_key value="{{k}}">
-          <button class="btn btn-s" style=margin:0;padding:6px 12px>Activer</button>
+          <button class="btn btn-s" style=margin:0;padding:6px 12px>Activer la version enregistrée</button>
         </form>
         {% endif %}
       </li>
@@ -845,14 +846,19 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     </ul>
   </div>
   <div class=block>
-    <h2>Éditeur de personnalités</h2>
+    <h2>Créer une personnalité</h2>
+    <p class=sub>Crée un preset indépendant sans changer la personnalité active.</p>
+    <button class="btn btn-s" type=button onclick=newPreset()>+ Nouvelle personnalité</button>
+  </div>
+  <div class=block>
+    <h2>Modifier une personnalité</h2>
+    <label for=presetSel>Personnalité à modifier, prévisualiser ou tester</label>
     <div class=toolbar>
       <select id=presetSel onchange=loadPreset()>
         {% for k,p in presets.items() %}
-        <option value="{{k}}" {{'selected' if k==active_key}}>{{p.label}}{{' (active)' if k==active_key else ''}}</option>
+        <option value="{{k}}" {{'selected' if k==edit_key}}>{{p.label}}{{' (active)' if k==active_key else ''}}</option>
         {% endfor %}
       </select>
-      <button class="btn btn-s" type=button onclick=newPreset() style=margin:0>+ Nouveau</button>
     </div>
     <p class=sub id=activeInfo></p>
     <form method=POST action=/save-prompt id=editForm><input type=hidden name=csrf value="{{csrf_token()}}">
@@ -879,12 +885,12 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 
       <hr>
       <button class="btn btn-p">💾 Enregistrer</button>
-      <button class="btn btn-s" formaction=/apply-preset>✓ Activer</button>
+      <button class="btn btn-s" formaction=/apply-preset>Enregistrer et activer</button>
       <button class="btn btn-d" formaction=/delete-preset onclick="return confirm('Supprimer ce preset ?')">Supprimer</button>
     </form>
   </div>
   <div class=block>
-    <h2>✨ Générer un prompt par IA</h2>
+    <h2>Générer un brouillon de prompt par IA</h2>
     <p class=sub>Décrivez le projet : l'IA rédige les consignes, qui rempliront le champ « Prompt système » ci-dessus (éditable avant d'enregistrer).</p>
     <textarea id=desc rows=4 placeholder="Ex: Un assistant qui ne parle que de cuisine italienne, ton chaleureux, refuse tout autre sujet..."></textarea>
     <button class="btn btn-p" type=button onclick=genPrompt()>Générer les consignes</button>
@@ -901,7 +907,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     </form>
   </div>
   <div class=block>
-    <h2>🧪 Tester la personnalité</h2>
+    <h2>Tester le brouillon de la personnalité sélectionnée</h2>
     <p class=sub>Posez une question comme sur le Minitel, sans le Minitel. Le test
       utilise le prompt système ci-dessus (même non enregistré), les fichiers de
       connaissance, et le fournisseur d'IA configuré. La réponse est convertie en
@@ -1049,6 +1055,10 @@ async function previewTitle(){
 }
 function loadPreset(){
   const k=document.getElementById('presetSel').value, p=PRESETS[k]; if(!p)return;
+  const url=new URL(location.href);url.searchParams.set('preset',k);history.replaceState(null,'',url);
+  ++testSequence;
+  document.getElementById('testOut').style.display='none';
+  document.getElementById('testSpin').style.display='none';
   fkey.value=k; flabel.value=p.label||''; ftitle.value=p.title_msg||'';
   fquestion.value=p.question_msg||''; floading.value=p.loading_msg||''; fsystem.value=p.system||'';
   document.getElementById('activeInfo').textContent=
@@ -1179,6 +1189,9 @@ def index():
         section = "dash"
     data = load_prompts()
     presets = normalized_presets(data)
+    edit_key = request.args.get("preset", data["active"])
+    if edit_key not in presets:
+        edit_key = data["active"]
     services = {"minitel-chatgpt": svc_status("minitel-chatgpt"),
                 "wifi-manager": svc_status("wifi-manager"),
                 "admin-ui": svc_status("admin-ui")}
@@ -1190,7 +1203,7 @@ def index():
         deployment=system_health.deployment(DEPLOYMENT_STATUS), runtime_branch=runtime_branch(),
         update_status=session.get("update_status", "non vérifiées dans cette session"),
         title_fonts=TITLE_FONTS, title_art_max=TITLE_ART_MAX_WORDS,
-        active_key=data["active"], services=services, ip=ip_address(),
+        active_key=data["active"], edit_key=edit_key, services=services, ip=ip_address(),
         log_chatgpt=log_tail("chatgpt"),
         provider=llm_provider(),
         mistral_key_masked=mask_key(mistral_key()), mistral_model=mistral_model(),
@@ -1239,7 +1252,7 @@ def save_prompt():
         restart_terminal()
     session["flash"] = f"Personnalité '{p['label']}' enregistrée."
     session["flash_ok"] = True
-    return redirect(url_for("index"))
+    return redirect(url_for("index", section="ai", preset=k))
 
 @app.route("/apply-preset", methods=["POST"])
 @require_login
@@ -1262,7 +1275,7 @@ def apply_preset():
         restart_terminal()
         session["flash"] = f"Personnalité '{p.get('label', k)}' activée."
         session["flash_ok"] = True
-    return redirect(url_for("index"))
+    return redirect(url_for("index", section="ai", preset=k))
 
 @app.route("/preview-title", methods=["POST"])
 @require_login
@@ -1292,7 +1305,7 @@ def new_preset():
         save_prompts(data)
         session["flash"] = f"Personnalité '{label}' créée. Éditez-la puis Activez-la."
         session["flash_ok"] = True
-    return redirect(url_for("index"))
+    return redirect(url_for("index", section="ai", preset=key))
 
 @app.route("/delete-preset", methods=["POST"])
 @require_login
@@ -1310,7 +1323,7 @@ def delete_preset():
         else:
             save_prompts(data)
         session["flash"] = "Personnalité supprimée."; session["flash_ok"] = True
-    return redirect(url_for("index"))
+    return redirect(url_for("index", section="ai"))
 
 @app.route("/generate-prompt", methods=["POST"])
 @require_login
