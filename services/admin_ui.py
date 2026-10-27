@@ -439,9 +439,9 @@ def ip_address():
     try:
         out = subprocess.run(["hostname", "-I"], capture_output=True, text=True,
                              check=False, timeout=5).stdout
-        return out.split()[0] if out.split() else "?"
+        return out.split()[0] if out.split() else "indisponible"
     except (OSError, UnicodeError, subprocess.SubprocessError):
-        return "?"
+        return "indisponible"
 
 
 def log_tail(name, n=40):
@@ -501,9 +501,13 @@ def check_update():
     if rc != 0:
         return {"ok": False, "msg": "Échec de la vérification (Internet ?) : " + err}
     rc, behind, _ = git("rev-list", "--count", f"HEAD..origin/{branch}")
-    n = int(behind) if behind.isdigit() else 0
-    _, log, _ = git("log", "--format=%h  %s", f"HEAD..origin/{branch}")
-    return {"ok": True, "behind": n, "log": log}
+    if rc != 0 or not behind.isdigit():
+        return {"ok": False, "msg": "Comparaison des versions indisponible ; réessayer la vérification."}
+    n = int(behind)
+    rc, changes, _ = git("log", "--format=%h  %s", f"HEAD..origin/{branch}")
+    if rc != 0:
+        return {"ok": False, "msg": "Liste des mises à jour indisponible ; réessayer la vérification."}
+    return {"ok": True, "behind": n, "log": changes}
 
 def do_update():
     return queue_deployment("update")
@@ -684,6 +688,8 @@ main{max-width:920px;margin:0 auto;padding:0 20px}
 .panel{display:none}.panel.active{display:block}
 .block{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:16px}
 .block:last-child{margin-bottom:0}
+.block,.flash{overflow-wrap:anywhere}
+input[type=file]{max-width:100%}
 h2{color:var(--accent);margin:0 0 6px;font-size:1.1em}
 details.provider-settings{border-left:3px solid var(--accent);padding:10px 12px;margin-top:12px}summary{cursor:pointer;color:var(--accent);padding:6px 0}
 h3{color:var(--accent);font-size:1em;margin:14px 0 6px}
@@ -715,7 +721,7 @@ pre{background:var(--bg);padding:10px;border-radius:6px;font-size:.72em;max-heig
 .fok{background:#10302b;color:var(--accent);border:1px solid var(--accent)}
 .ferr{background:#301414;color:var(--danger);border:1px solid var(--danger)}
 #spin{display:none;color:var(--muted);margin-top:8px}
-@media(max-width:600px){nav.tabs{padding:0 10px}nav.tabs a{flex:1 1 45%;text-align:center;padding:12px 8px}main{padding:0 10px}.tabwrap{padding:12px}.brand{gap:6px}.brand b{font-size:.9em}.row,.plist li{flex-wrap:wrap}input,select,textarea{min-width:0}}
+@media(max-width:600px){.topbar{flex-wrap:wrap;gap:8px}nav.tabs{padding:0 10px}nav.tabs a{flex:1 1 45%;text-align:center;padding:12px 8px}main{padding:0 10px}.tabwrap{padding:12px}.brand{gap:6px}.brand b{font-size:.9em}.row,.plist li{flex-wrap:wrap}input,select,textarea{min-width:0}}
 hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 .ipbox{font-size:.9em;color:var(--muted)}.ipbox b{color:var(--accent)}
 </style></head><body>
@@ -739,7 +745,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <h2>Services de l’appareil</h2>
     <p class=sub>Mesures à l’ouverture de la page. <a href="/?section=dash">Actualiser</a></p>
     <p>Durée depuis le démarrage : <b>{{health.uptime}}</b></p>
-    <p class=ipbox>Adresse : <b>http://{{ip}}:8080</b></p>
+    <p class=ipbox>Adresse IP du Pi : <b>{{ip}}</b> · administration : port 8080</p>
     {% for s,st in services.items() %}
     <div class=row><span class="dot {{'on' if st=='active' else 'off'}}"></span>{{s}}
       <span style="margin-left:auto;color:{{'#4ecdc4' if st=='active' else '#667'}}">{{st}}</span></div>
@@ -754,7 +760,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <p>Tailscale : {{health.tailscale}}</p>
     <p>Stockage : {% if health.disk %}{{health.disk.free_gib}} / {{health.disk.total_gib}} Gio libres · {{health.disk.used_percent}} % utilisé{% if health.disk.warning %} — ATTENTION : espace faible{% endif %}{% else %}indisponible{% endif %}</p>
     <p>Version : <b>{{version}}</b></p>
-    <p>Mises à jour : {{update_status}}</p>
+    <p>Dernière vérification des mises à jour (cette session) : {{update_status}}</p>
     <p>Dernier déploiement : {{deployment.phase}}{% if deployment.error_type %} · {{deployment.error_type}}{% endif %}</p>
     <p>Personnalité active : <b>{{presets[active_key].label}}</b></p>
     <p class=sub>Connexion gérée par NetworkManager ; le portail Wi-Fi sert au provisionnement au démarrage.</p>
@@ -844,7 +850,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
   </div>
 
   <div class=block>
-    <h2>Personnalité active sur le Minitel</h2>
+    <h2>Personnalité active configurée sur le Minitel</h2>
     <p>Active : <b>{{presets[active_key].label}}</b></p>
     <p class=sub>Activer ici utilise la version déjà enregistrée et redémarre le service Minitel. Choisir une personnalité dans l’éditeur ne l’active pas.</p>
     <ul class=plist>
@@ -960,7 +966,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
   <div class=block>
     <h2>🔄 Mise à jour de l'application</h2>
     <p class=sub>Version installée : <b>{{version}}</b> · branche suivie : {{runtime_branch}}</p>
-    <p>Mises à jour : {{update_status}}</p>
+    <p>Dernière vérification des mises à jour (cette session) : {{update_status}}</p>
     <p>Dernier déploiement : <b>{{deployment.phase}}</b>{% if deployment.error_type %} · {{deployment.error_type}}{% endif %}</p>
     <a href="/?section=maintenance">Actualiser l’état</a>
     <form method=POST action=/check-update style=margin:0><input type=hidden name=csrf value="{{csrf_token()}}">
@@ -1107,7 +1113,7 @@ function loadPreset(){
   fkey.value=k; flabel.value=p.label||''; ftitle.value=p.title_msg||'';
   fquestion.value=p.question_msg||''; floading.value=p.loading_msg||''; fsystem.value=p.system||'';
   document.getElementById('activeInfo').textContent=
-    (k===ACTIVE)?'● Personnalité actuellement active sur le Minitel.'
+    (k===ACTIVE)?'● Personnalité configurée comme active sur le Minitel.'
                 :'Personnalité inactive. Cliquez « Activer » pour l\\'utiliser.';
   // Animation d'accueil (titre ASCII)
   document.getElementById('titleArtRows').innerHTML='';
@@ -1145,12 +1151,16 @@ function newPreset(){
 async function genPrompt(){
   const d=document.getElementById('desc').value.trim();
   if(!d){alert('Décrivez le projet d abord');return;}
+  const key=selectedPreset, previous=fsystem.value;
   spin.style.display='block';
   try{const r=await fetch('/generate-prompt',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},body:JSON.stringify({description:d})});
     const j=await r.json();
-    if(j.ok){fsystem.value=j.prompt;updateDirty();fsystem.scrollIntoView({behavior:'smooth'});}else alert('Erreur: '+j.error);
+    if(j.ok){
+      if(key!==selectedPreset||fsystem.value!==previous){alert('Le brouillon a changé pendant la génération. Relancez pour cette personnalité.');return;}
+      fsystem.value=j.prompt;updateDirty();fsystem.scrollIntoView({behavior:'smooth'});
+    }else alert('Erreur: '+j.error);
   }catch(e){alert('Erreur: '+e);}
-  spin.style.display='none';
+  finally{spin.style.display='none';}
 }
 let testSequence=0;
 async function testPreset(reset=false){
@@ -1282,6 +1292,16 @@ def parse_title_art_form():
             break
     return segments
 
+def update_prompt_from_form(preset, key):
+    preset["label"] = request.form.get("label", key).strip() or key
+    for field in ("title_msg", "question_msg", "loading_msg"):
+        preset[field] = to_minitel_ascii(request.form.get(field, DEFAULTS[field]))[:40]
+    preset["title_art"] = parse_title_art_form() or TITLE_ART_DEFAULT
+    system = request.form.get("system_prompt", "").strip()
+    if system:
+        preset["system"] = system
+
+
 @app.route("/save-prompt", methods=["POST"])
 @require_login
 @prompt_transaction
@@ -1289,14 +1309,7 @@ def save_prompt():
     data = load_prompts()
     k = request.form.get("preset_key", "").strip() or data["active"]
     p = data["presets"].setdefault(k, {})
-    p["label"] = request.form.get("label", k).strip() or k
-    p["title_msg"] = to_minitel_ascii(request.form.get("title_msg", DEFAULTS["title_msg"]))[:40]
-    p["question_msg"] = to_minitel_ascii(request.form.get("question_msg", DEFAULTS["question_msg"]))[:40]
-    p["loading_msg"] = to_minitel_ascii(request.form.get("loading_msg", DEFAULTS["loading_msg"]))[:40]
-    p["title_art"] = parse_title_art_form() or TITLE_ART_DEFAULT
-    sp = request.form.get("system_prompt", "").strip()
-    if sp:
-        p["system"] = sp
+    update_prompt_from_form(p, k)
     save_prompts(data)
     saved_feedback(f"Personnalité '{p['label']}' enregistrée.", k == data["active"])
     return redirect(url_for("index", section="ai", preset=k))
@@ -1309,14 +1322,8 @@ def apply_preset():
     k = request.form.get("preset_key", "")
     if k in data["presets"]:
         p = data["presets"][k]
-        if request.form.get("label"):
-            p["label"] = request.form.get("label").strip()
-            p["title_msg"] = to_minitel_ascii(request.form.get("title_msg", DEFAULTS["title_msg"]))[:40]
-            p["question_msg"] = to_minitel_ascii(request.form.get("question_msg", DEFAULTS["question_msg"]))[:40]
-            p["loading_msg"] = to_minitel_ascii(request.form.get("loading_msg", DEFAULTS["loading_msg"]))[:40]
-            p["title_art"] = parse_title_art_form() or TITLE_ART_DEFAULT
-            if request.form.get("system_prompt", "").strip():
-                p["system"] = request.form.get("system_prompt").strip()
+        if "label" in request.form or "system_prompt" in request.form:
+            update_prompt_from_form(p, k)
         data["active"] = k
         save_prompts(data)
         saved_feedback(f"Personnalité '{p.get('label', k)}' enregistrée et sélectionnée comme active.", True)
@@ -1537,6 +1544,7 @@ def check_update_route():
     session["update_status"] = (f"{res['behind']} mise(s) à jour disponible(s)" if res.get("ok")
                                 else "dernière vérification en échec")
     if not res["ok"]:
+        session.pop("update_log", None)
         session["flash"] = res["msg"]; session["flash_ok"] = False
     elif res["behind"] == 0:
         session["flash"] = "L'application est à jour."; session["flash_ok"] = True
