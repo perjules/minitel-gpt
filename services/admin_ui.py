@@ -689,6 +689,7 @@ select,input[type=text],input[type=password],textarea{width:100%;padding:10px;ba
 select:focus,input:focus,textarea:focus{outline:none;border-color:var(--accent)}
 textarea{resize:vertical;font-size:.85em;line-height:1.5}
 .btn{padding:10px 18px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:.9em;font-family:monospace;margin:8px 8px 0 0}
+#services .btn{display:inline-block}
 .btn-p{background:var(--accent);color:#06201d}.btn-p:hover{background:var(--accent-d)}
 .btn-s{background:transparent;color:var(--accent);border:1px solid var(--accent)}.btn-s:hover{background:#16302e}
 .btn-d{background:transparent;color:var(--danger);border:1px solid var(--danger)}.btn-d:hover{background:#2a1414}
