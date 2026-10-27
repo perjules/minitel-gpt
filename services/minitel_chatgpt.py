@@ -1045,6 +1045,31 @@ def run_session(t):
             if action in ('sommaire', 'timeout'):
                 break
 
+            # Local maintenance commands: never send them to an LLM.
+            maintenance = (question or "").strip().lower()
+            if maintenance in ("mainframe --shutdown", "mainframe --reboot"):
+                operation = "poweroff" if maintenance.endswith("--shutdown") else "reboot"
+                t.line("MAINFRAME: " + operation.upper())
+                t.line("Confirmer: taper OUI puis ENVOI")
+                confirmation, confirm_action = read_question(t)
+                if confirm_action == "envoi" and (confirmation or "").strip().upper() == "OUI":
+                    t.line("Arret du systeme..." if operation == "poweroff"
+                           else "Redemarrage du systeme...")
+                    t.line("Veuillez patienter.")
+                    try:
+                        subprocess.Popen(["sudo", "-n", "/usr/bin/systemctl", operation],
+                                         stdin=subprocess.DEVNULL,
+                                         stdout=subprocess.DEVNULL,
+                                         stderr=subprocess.DEVNULL,
+                                         start_new_session=True)
+                    except OSError:
+                        log.exception("Maintenance command failed to start")
+                        t.line("Commande indisponible")
+                    return
+                t.line("Commande annulee.")
+                show_question_prompt(t, question_msg)
+                continue
+
             rose_test = rose.test_entry(question)
             rose_alias = "" if rose_test else rose.entry(question)
             if (rose_alias is not None and not calc.mode and not school_mode.mode
