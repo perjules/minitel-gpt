@@ -390,13 +390,15 @@ def branch_installation(manager, tmp_path, monkeypatch):
     command('init', '-b', 'develop')
     command('config', 'user.name', 'Fixture')
     command('config', 'user.email', 'fixture@example.invalid')
-    (manager.project / '.gitignore').write_text('.env\nconfig/rose-local.json\n')
+    (manager.project / '.gitignore').write_text('.env\nconfig/rose-local.json\n*.local\n')
     (manager.project / 'source.txt').write_text('develop')
     command('add', '.')
     command('commit', '-m', 'develop fixture')
     before_commit = command('rev-parse', 'HEAD')
     command('switch', '-c', 'main')
     (manager.project / 'source.txt').write_text('main')
+    (manager.project / 'operator.local').write_text('tracked target fixture')
+    command('add', '-f', 'operator.local')
     command('commit', '-am', 'main fixture')
     target = command('rev-parse', 'HEAD')
     command('switch', 'develop')
@@ -485,3 +487,23 @@ def test_branch_queue_validates_arguments_and_power_waits_for_deployment(branch_
     manager.status('ready')
     manager.power('poweroff')
     assert manager.command.call_args.args[0][-2:] == ['/usr/bin/systemctl', 'poweroff']
+
+
+def test_selecting_already_deployed_branch_does_not_rebuild_or_restart(branch_installation):
+    manager, _, before = branch_installation
+    manager.switch_branch('develop', before)
+    manager.prepare.assert_not_called()
+    manager.command.assert_not_called()
+
+
+def test_branch_switch_refuses_ignored_local_file_collisions(branch_installation):
+    manager, target, before = branch_installation
+    local = manager.project / 'operator.local'
+    local.write_text('owner data must survive')
+    with pytest.raises(RuntimeError, match='local data'):
+        manager.switch_branch('main', target)
+    assert local.read_text() == 'owner data must survive'
+    assert manager.git('rev-parse', 'HEAD') == before
+    assert manager.read()['branch'] == 'develop'
+    manager.prepare.assert_not_called()
+    manager.command.assert_not_called()

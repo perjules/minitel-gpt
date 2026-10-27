@@ -1,88 +1,162 @@
-# Administration de l’appareil
+# Console d’administration 3615 IA
 
-L’interface conserve quatre sections : Tableau de bord, Configuration IA,
-Services, Maintenance. Les routes historiques et les protections de session/CSRF
-restent en place. Les liens directs utilisent `/?section=...` ; la navigation
-locale conserve les champs saisis. Gmail et PRONOTE restent des pages séparées.
+Quatre sections : **Tableau de bord**, **Configuration IA**, **Services**,
+**Maintenance**. Interface Flask/HTML/CSS/JavaScript, sans dépendance ajoutée,
+sans framework ni nouvelle surveillance permanente. Les mesures sont prises
+à l’ouverture/actualisation et les vérifications réseau sur demande explicite.
 
-Le tableau de bord est en lecture seule. Les mesures système sont prises à
-l’ouverture/actualisation de la page, avec des délais bornés pour les commandes.
-Une mesure indisponible ne bloque pas la page. Les mesures détaillées du stockage
-ne sont chargées qu’à l’ouverture de Maintenance. Aucun suivi périodique n’est
-ajouté. La vérification Git reste une action explicite ; son résultat est celui
-de la dernière vérification dans la session du navigateur.
+## Tableau de bord
 
-Les boutons de Maintenance utilisent les mécanismes existants. Un déploiement
-planifié n’est pas un succès confirmé : actualiser Maintenance pour lire sa phase.
-Le redémarrage concerne le service Minitel, pas le Pi. NetworkManager et le portail
-de provisionnement restent responsables du Wi-Fi.
+Température CPU (capteur système), jauge native de disque et espace libre,
+uptime, état du service Minitel et de l’administration, Wi-Fi, IP locale et
+Tailscale. Une mesure indisponible reste indiquée sans bloquer la page.
+Un processus actif ne prouve pas la présence du Minitel physique.
+Version compacte, fournisseur/modèle configurés et cinq lignes récentes du
+journal. Les liens Gérer ouvrent directement le bon bloc de configuration ou
+de maintenance. La personnalité active n’est pas affichée ici.
 
-## Constat de sécurité à examiner lors de la revue des fonctionnalités
+## Configuration IA et tests
 
-`services/admin_ui.py` utilise encore `ADMIN_PASSWORD=mistral` si la variable
-est absente. `config/admin-ui.service` charge un fichier `.env` facultatif et
-n’exige pas cette variable. Le dépôt ne permet pas de connaître le mot de passe
-réellement configuré sur le Pi. La valeur par défaut reste inchangée pendant la
-réorganisation pour éviter de modifier les règles d’accès sans décision produit.
+Mistral reste le chemin normal ; Claude et Linkup restent disponibles. Les
+modèles Mistral/Claude sont chargés côté serveur à l’ouverture de leurs réglages,
+avec la clé enregistrée ou une nouvelle clé saisie sans la sauvegarder. Aucun
+appel de catalogue depuis le tableau de bord. Actualisation explicite possible,
+filtrage des modèles Mistral non conversationnels, pagination Claude bornée.
+La sélection est conservée en cas d’erreur ; identifiant manuel disponible.
+Les identifiants sont validés sans liste statique qui bloquerait les nouveautés.
+Linkup conserve les profondeurs existantes. Aucun prix figé n’est affiché.
 
-Correction proposée : exiger une valeur explicite non vide dans `.env`, refuser
-les connexions si elle manque, et vérifier ce prérequis à l’installation.
-Conserver l’authentification actuelle et les protections CSRF/session ; aucun
-système de comptes supplémentaire n’est nécessaire.
+Les outils de personnalité, consignes, accueil, connaissances et génération de
+prompt sont dans une zone avancée fermée. Les fichiers et le schéma général
+restent identiques. Les brouillons sont signalés et la navigation locale les
+conserve. Un avertissement précède leur abandon. Enregistrer un preset actif,
+changer les réglages IA ou ses connaissances conserve le redémarrage automatique
+existant. Le message distingue sauvegarde réussie et redémarrage non confirmé.
+Un prompt système vide conserve les consignes précédentes, comme auparavant.
 
-## Validation physique encore nécessaire
+La console `/test` propose Conversation et Gmail. Elle partage le contexte
+utilisateur de mémoire/journal ; ce nom n’est pas une authentification ni un
+sélecteur de boîte mail. Le bouton avancé Tester ce brouillon ouvre une fenêtre
+séparée, sans sauvegarde ni activation. Les effets de calcul et l’annulation des
+réponses tardives sont conservés. Les requêtes sont réelles quand un opérateur
+utilise la console ; les tests automatisés utilisent des réponses simulées.
 
-Vérifier sur le Pi l’état des services, les permissions des journaux, nmcli,
-Tailscale, les adresses réseau et les phases de déploiement. Tester un redémarrage
-du terminal avec une session Minitel réelle. Mise à jour/rollback, redémarrage et
-arrêt du Pi ne sont pas exécutés sur le poste de développement.
+## Services
 
-Une erreur de syntaxe déjà présente dans `develop` à `9f09808` (séquence littérale
-`\n` dans `wifi_manager.main`) a été corrigée sans changer le provisionnement.
+Cartes uniformes avec état d’activation, contrôle et page Configurer. Actif signifie
+activé dans la configuration, pas connexion distante vérifiée.
 
-## Configuration IA
+- Gmail : `/services/gmail`, compte unique partagé, contrôle d’activation et
+  vérification explicite en lecture seule. L’enrôlement chiffré existant reste
+  utilisé. Le changement d’activation est enregistré dans `.env`, appliqué au
+  processus admin et demande le redémarrage du service Minitel. Les identifiants
+  déjà livrés à admin-ui restent nécessaires ; le guide d’enrôlement explique
+  l’activation des deux services. `/gmail` reste compatible avec le test existant.
+- PRONOTE : `/pronote`, comptes parents existants, enrôlement QR replié, table
+  Alias / Compte / Nom exact, éditeur JSON avancé conservé. Aucun enfant autorisé
+  automatiquement. Activation et changements sont pris en compte aux prochaines
+  requêtes selon le backend existant.
+- Alexa, Imprimante, Maison connectée : administration inactive, contrôle désactivé,
+  pages En construction. Le code d’impression du terminal n’est pas désactivé.
 
-Les réglages de fournisseur/modèle/clé sont regroupés avant les personnalités.
-Les réglages des fournisseurs non sélectionnés restent accessibles et conservent
-leurs clés. Seules les options existantes sont exposées ; le schéma est inchangé.
+Les associations par utilisateur sont des champs désactivés réservés à une
+évolution future. Gmail reste mono-compte ; PRONOTE conserve ses comptes parents
+multiples. Aucun nouveau stockage de comptes ni routage utilisateur n’est simulé.
+Les tickets de revue, la pagination, la modification et l’envoi explicite Gmail
+restent gérés par le backend existant. Aucune vérification de connexion n’envoie
+un mail ni ne marque un message comme lu.
 
-Créer un preset ne l’active pas. L’éditeur, les connaissances et le test suivent
-la personnalité sélectionnée, conservée dans l’URL. Enregistrer un preset inactif
-ne redémarre pas le Minitel. Enregistrer le preset actif, activer un preset, changer
-les réglages IA ou modifier les connaissances actives conserve le redémarrage
-automatique existant. Un redémarrage refusé ne fait plus passer l’enregistrement
-pour un échec de sauvegarde ni pour une application confirmée : le message indique
-les deux résultats séparément. La personnalité « active » désigne la configuration,
-pas une preuve de ce qui est actuellement chargé dans le processus du terminal.
+## Atelier privé
 
-Les modifications non enregistrées sont signalées. La navigation entre sections
-les conserve ; changer de preset ou quitter la page déclenche un avertissement.
-Les brouillons ne sont pas sauvegardés automatiquement. Les tests utilisent le
-prompt édité et les réglages IA enregistrés, sans activer le preset. La génération
-d’un prompt ne remplace plus un autre brouillon modifié pendant la requête.
-Un prompt système vide conserve les consignes existantes, comme auparavant.
+Adresse directe **`/admin/rose`**, absente des cartes et liens ordinaires. Session
+admin puis mot de passe Rose existant ; valeur absente/vide = accès refusé.
+Déverrouillage de vingt minutes d’inactivité, bouton Verrouiller et fermeture à
+la déconnexion. Toutes les opérations, lectures privées et écritures restent
+protégées ; les textes ne sont pas intégrés aux pages ordinaires.
 
-## Vérifications hors Pi (27 octobre 2026)
+Catalogues normal/test, édition et ajout de profils, prompt commun et banque
+E1–E5/S1–S5. Les sauvegardes utilisent `config/rose-local.json`, ignoré par Git,
+privé (0600), verrouillé et remplacé atomiquement. Les fichiers éditoriaux suivis
+restent les défauts intacts. Les profils sont relus au début d’une nouvelle
+session ; prompt commun et niveaux partagés aux requêtes suivantes. Les profils
+historiques sans niveaux explicites conservent leur comportement original.
 
-- `uv sync --locked --all-extras` : effectué ; aucun manifeste/verrou modifié.
-- Suite ciblée : 117 tests et 22 sous-tests passent (navigation, administration,
-  configuration/CSRF, fichiers de connaissance, bornes d’opérations, Gmail,
-  réponses PRONOTE, journaux/stockage et déploiement simulé).
-- `uv run --locked --all-extras ruff check .` : passe.
-- `uv run --locked --all-extras python scripts/export_requirements.py --check` : passe.
-- HTML rendu dans les quatre sections : balises équilibrées, identifiants uniques,
-  aucun formulaire imbriqué. Tous les scripts intégrés passent `node --check`.
-- Validation visuelle et interaction dans un navigateur : non effectuées. Chromium
-  n’était pas installé ; la tentative de téléchargement du binaire a échoué.
-- La suite Wi-Fi existante a quatre échecs hérités : trois tests attendent la classe
-  `Monitor`, un attend `monitor_loop`, supprimés par le provisionnement au démarrage.
-  Ces tests n’ont pas été modifiés et la surveillance périodique n’a pas été rétablie.
+La séparation des niveaux reproduit exactement la voix des 60 profils actuels.
+Les variantes rédigées différemment sont conservées dans les paramètres avancés
+`e_prompt_override` / `s_prompt_override`. Les vider fait suivre la définition
+partagée ; changer le niveau d’un profil abandonne sa variante de cet axe.
+La sauvegarde de la banque migre les références des deux catalogues dans la
+même écriture atomique. Aucun texte n’est modifié en ouvrant l’atelier.
 
-## Prochaine revue produit
+Les fichiers dans `logs/rose` sont consultables uniquement après déverrouillage :
+liste bornée et derniers 64 Kio du fichier choisi, sans lien symbolique ni fichier
+spécial. Aucune suppression. Le stockage ordinaire expose seulement des totaux
+génériques. Les références incidentes dans les journaux techniques ordinaires
+ne sont pas filtrées.
 
-Passer section par section avec les classifications KEEP / MODIFY / MOVE / REMOVE
-et ADD. Examiner notamment le mot de passe par défaut, les diagnostics utiles,
-la fiabilité/mise en évidence des mises à jour et les contrôles de personnalité.
-Gmail, PRONOTE, Alexa, sauvegarde/restauration et accès distant attendent des décisions
-explicites avant toute évolution. Aucun nouveau contrôle de puissance ou de Wi-Fi
-n’a été ajouté. Les commandes cachées `mainframe` restent inchangées.
+## Maintenance et déploiement
+
+Blocs système, logiciel (`#software`), journaux (`#logs`), stockage (`#storage`).
+Journaux Terminal / Administration / Wi-Fi / Déploiement, 40/100/200 lignes,
+actualisation manuelle. Rapport `/diagnostics.txt` : versions, états et mesures,
+sans contenu des conversations, clé API ou configuration privée.
+
+La vérification Git reste explicite, datée et propre à la session du navigateur.
+L’historique proposé est borné. Une vérification échouée retire la liste périmée.
+L’état du déploiement vient du fichier géré par le helper. Planifié ne signifie
+pas terminé. La version précédente indique sa branche et sa disponibilité.
+
+Le changement de branche comporte une prévisualisation puis confirmation du
+commit exact sur origin. Il vérifie une copie propre, le commit réellement
+installé, les commits locaux, la branche distante et les collisions avec des
+fichiers privés et avec les fichiers locaux non suivis ou ignorés. L’environnement est préparé avant changement des services et
+de la branche. Un échec d’activation restaure branche, code, environnement et
+configuration système. Le rollback retient aussi la branche précédente. Choisir
+la branche et le commit déjà installés ne reconstruit ni ne redémarre rien.
+Les branches cibles doivent contenir les fichiers du runtime partagé ; une
+branche incompatible échoue pendant la préparation, avant activation.
+
+Les commandes privilégiées restent fixes. Le changement de branche reçoit un
+petit document JSON sur stdin ; nom de branche et SHA sont validés dans le
+helper root. Aucune commande shell arbitraire ni URL de dépôt fournie par le web.
+Les actions Pi reboot/poweroff sont des travaux systemd différés de trois secondes,
+refusés pendant un déploiement. Les commandes Minitel cachées restent inchangées.
+
+## Première installation de ces contrôles sur le Pi
+
+Après publication autorisée et sélection d’une branche contenant ces changements :
+
+1. Définir une valeur explicite non vide pour `ADMIN_PASSWORD` dans `.env` avant
+   de redémarrer l’administration. Il n’existe plus de mot de passe de secours.
+   Une connexion avec variable absente/vide est refusée avec une page de setup.
+2. Depuis cette branche propre, relancer `sudo bash install.sh` avec `--branch`
+   correspondant à la branche courante. Cette exécution manuelle installe les
+   nouvelles règles sudo et les copies root des helpers, notamment la sélection
+   du journal de déploiement et les opérations de branche/puissance. Un simple
+   remplacement de `admin_ui.py` ne suffit pas.
+3. Vérifier sur le Pi les permissions de journaux, les températures/adresses,
+   les cartes et activations, le Minitel et l’interface sur téléphone. Tester
+   ensuite une préparation refusée, un changement de branche et un rollback.
+   Tester les commandes de puissance uniquement en présence de l’appareil.
+
+L’installateur n’affiche plus de mot de passe par défaut et protège `.env` en 0600.
+Ces étapes ne sont pas exécutées sur le poste de développement.
+
+## Validation hors Pi — 27 octobre 2026
+
+- Synchronisation uv verrouillée, sans changement de dépendances.
+- Suite complète : **601 tests et 402 sous-tests** passent. Comptes synthétiques,
+  API simulées, Git réel dans des dépôts temporaires locaux et opérations système
+  simulées ; aucun envoi, impression ni changement réseau/puissance réel.
+- Ruff sur le dépôt, exports requirements, `git diff --check`, `bash -n install.sh`.
+- Treize états de pages rendus : HTML équilibré, identifiants uniques, aucun
+  formulaire imbriqué. Scripts et attributs d’événements vérifiés avec Node.
+- Test JavaScript exécuté pour les réponses tardives et les animations du calcul.
+- Les quatre tests Wi-Fi obsolètes portent maintenant sur le provisionnement au
+  démarrage et l’attente du serveur HTTP ; aucune surveillance périodique rétablie.
+- Validation visuelle dans un navigateur et validation physique **non effectuées**.
+  Chromium était absent et son téléchargement a échoué dans cet environnement.
+  Les catalogues fournisseurs n’ont pas été interrogés avec des clés réelles.
+
+Sauvegarde/restauration, nettoyage manuel, routage multi-compte et intégrations des
+placeholders restent différés. Aucun push ni merge effectué pendant ces travaux.

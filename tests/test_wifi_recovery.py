@@ -66,36 +66,38 @@ def test_successful_candidate_only_enables_its_own_autoconnect(control, monkeypa
     assert calls[-1] == ["nmcli", "con", "modify", "uuid", "candidate", "connection.autoconnect", "yes"]
 
 
-def test_monitor_returns_from_hotspot_without_manual_configuration(control, monkeypatch):
-    connected = [False]
-    monkeypatch.setattr(wifi, "client_connected", lambda: "home-uuid" if connected[0] else None)
-    monkeypatch.setattr(wifi, "hotspot_active", lambda: True)
-    def recover():
-        connected[0] = True
-    retry = Mock(side_effect=recover)
+def test_connected_boot_leaves_recovery_to_networkmanager(control, monkeypatch):
+    monkeypatch.setattr(wifi, "client_connected", lambda: "home-uuid")
+    monkeypatch.setattr(wifi, "is_connected", lambda: "10.0.0.2")
+    hotspot, retry = Mock(), Mock()
+    monkeypatch.setattr(wifi, "create_hotspot", hotspot)
     monkeypatch.setattr(wifi, "try_known_networks", retry)
-    monitor = wifi.Monitor()
-    monitor.step(300)
-    monitor.step(330)
-    retry.assert_called_once()
-    assert monitor.disconnected == 0
-
-
-def test_failed_retry_keeps_a_five_minute_provisioning_window(control, monkeypatch):
-    monkeypatch.setattr(wifi, "client_connected", lambda: None)
-    monkeypatch.setattr(wifi, "hotspot_active", lambda: True)
-    retry = Mock(return_value=False)
-    monkeypatch.setattr(wifi, "try_known_networks", retry)
-    monitor = wifi.Monitor()
-    for now in (0, 30, 299, 300):
-        monitor.step(now)
-    assert retry.call_count == 2
-
-
-def test_monitor_cannot_interfere_with_an_in_progress_setup(control):
-    with wifi.NETWORK_LOCK:
-        wifi.Monitor().step()
+    wifi.startup_provisioning(timeout=1)
+    hotspot.assert_not_called()
+    retry.assert_not_called()
     wifi.run.assert_not_called()
+
+
+def test_disconnected_boot_enables_hotspot_once_after_grace(control, monkeypatch):
+    monkeypatch.setattr(wifi.time, "monotonic", Mock(side_effect=[0, 0, 3, 6]))
+    monkeypatch.setattr(wifi.time, "sleep", Mock())
+    monkeypatch.setattr(wifi, "client_connected", lambda: None)
+    hotspot = Mock()
+    monkeypatch.setattr(wifi, "create_hotspot", hotspot)
+    wifi.startup_provisioning(timeout=6, poll=3)
+    hotspot.assert_called_once()
+    assert wifi.time.sleep.call_count == 2
+
+
+def test_connection_during_boot_grace_prevents_hotspot(control, monkeypatch):
+    monkeypatch.setattr(wifi.time, "monotonic", Mock(side_effect=[0, 0, 3]))
+    monkeypatch.setattr(wifi.time, "sleep", Mock())
+    monkeypatch.setattr(wifi, "client_connected", Mock(side_effect=[None, "home-uuid"]))
+    monkeypatch.setattr(wifi, "is_connected", lambda: "10.0.0.2")
+    hotspot = Mock()
+    monkeypatch.setattr(wifi, "create_hotspot", hotspot)
+    wifi.startup_provisioning(timeout=6, poll=3)
+    hotspot.assert_not_called()
 
 
 def test_normal_lan_and_forged_host_cannot_mutate_network(control, monkeypatch):
@@ -138,9 +140,14 @@ def test_http_reports_queued_and_worker_holds_network_lock(control, monkeypatch)
     connect.assert_called_once_with("Home", "  secret  ")
 
 
-def test_server_failure_is_not_reported_as_a_healthy_monitor(control):
-    with pytest.raises(RuntimeError, match="HTTP server"):
-        wifi.monitor_loop(SimpleNamespace(is_alive=lambda: False))
+def test_main_provisions_once_then_waits_for_http_server(control, monkeypatch):
+    server, provision = Mock(), Mock()
+    monkeypatch.setattr(wifi.threading, "Thread", Mock(return_value=server))
+    monkeypatch.setattr(wifi, "startup_provisioning", provision)
+    wifi.main()
+    server.start.assert_called_once()
+    provision.assert_called_once_with()
+    server.join.assert_called_once()
 
 
 def test_known_profile_retry_uses_uuid_and_preserves_disabled_profiles(control, monkeypatch):

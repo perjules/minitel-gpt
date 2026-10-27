@@ -113,10 +113,11 @@ class Runtime:
 
     def git(self, *args):
         # Keep Git credentials/config and checkout ownership with the original user.
-        return self.command(
+        output = self.command(
             ["runuser", "-u", "minitel", "--", "git", "-C", self.project, *args],
             capture_output=True, text=True, timeout=120 if args[0] == "fetch" else 30,
-        ).stdout.strip()
+        ).stdout
+        return output if "-z" in args else output.strip()
 
     def read(self):
         path = self.state / "runtime.json"
@@ -322,6 +323,8 @@ PrivateMounts=yes
         raise RuntimeError("Service readiness deadline exceeded")
 
     def switch(self, candidate, old, *, branch, target=None, checkout_branch=None):
+        if checkout_branch and target:
+            self.protect_untracked(target)
         running = self.running()
         old_commit = old.get("active", {}).get("commit") or self.git("rev-parse", "HEAD")
         paths = [self.system_path(f"/etc/systemd/system/{service}.service") for service in SERVICES]
@@ -474,6 +477,16 @@ PrivateMounts=yes
         self.status("ready", commit=previous["commit"])
         self.maintain()
 
+    def protect_untracked(self, target):
+        tracked = [p for p in self.git("ls-tree", "-r", "--name-only", "-z", target).split("\0") if p]
+        for ignored in (False, True):
+            options = ["--ignored"] if ignored else []
+            local = self.git("ls-files", "--others", "--directory", "--exclude-standard", "-z", *options)
+            for path in filter(None, local.split("\0")):
+                path = path.rstrip("/")
+                if any(p == path or p.startswith(path + "/") or path.startswith(p + "/") for p in tracked):
+                    raise RuntimeError("Target conflicts with untracked or ignored local data")
+
     def valid_branch(self, branch):
         if not isinstance(branch, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}", branch):
             raise RuntimeError("Invalid branch name")
@@ -509,6 +522,9 @@ PrivateMounts=yes
         target = self.git("rev-parse", "refs/remotes/origin/" + branch)
         if target != expected_commit:
             raise RuntimeError("Remote branch changed; preview and confirm again")
+        if branch == old["branch"] and target == old["active"]["commit"]:
+            self.status("ready", commit=target, branch=branch)
+            return
         try:
             local = self.git("show-ref", "--verify", "--hash", "refs/heads/" + branch)
         except subprocess.CalledProcessError as error:
@@ -521,6 +537,7 @@ PrivateMounts=yes
                            "config/knowledge", "config/pronote", "config/rose-local.json", "config/rose-password.txt", "config/admin-session.key", "logs")
         if private:
             raise RuntimeError("Target branch tracks private installation data")
+        self.protect_untracked(target)
         with tempfile.TemporaryDirectory(prefix="minitel-branch-") as directory:
             source = Path(directory)
             self.snapshot(target, source)

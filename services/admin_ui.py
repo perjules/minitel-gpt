@@ -911,6 +911,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 
       <hr>
       <button class="btn btn-p">Enregistrer et appliquer le brouillon</button>
+      <button class="btn btn-s" formaction="/test?mode=conversation" formtarget=_blank>Tester ce brouillon</button>
       <button class="btn btn-s" formaction=/apply-preset>Enregistrer et activer</button>
       <button class="btn btn-d" formaction=/delete-preset onclick="return confirm('Supprimer ce preset ?')">Supprimer</button>
     </form>
@@ -991,7 +992,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <p>La branche et sa version seront déployées ensemble. Une copie locale modifiée ou des commits non publiés bloquent le changement.</p>
     <form method=post action=/branch-preview><input type=hidden name=csrf value="{{csrf_token()}}">
       <label>Branche sur origin<input type=text name=branch maxlength=128 list=branchChoices value="{{runtime_branch}}" required></label>
-      <datalist id=branchChoices><option value=main><option value=develop></datalist><button class="btn btn-s">Prévisualiser la version cible</button>
+      <datalist id=branchChoices><option value=main></option><option value=develop></option></datalist><button class="btn btn-s">Prévisualiser la version cible</button>
     </form>
     {% if branch_preview %}<p>Cible : <b>{{branch_preview.branch}}</b> · {{branch_preview.commit}}</p>
     <form method=post action=/switch-branch onsubmit="return confirm('Déployer cette branche et redémarrer les services ?')"><input type=hidden name=csrf value="{{csrf_token()}}"><button class="btn btn-p">Confirmer le changement de branche</button></form>{% endif %}
@@ -1096,6 +1097,7 @@ function updateDirty(){
 window.addEventListener('beforeunload',e=>{if(!allowUnload&&(editDirty()||llmDirty())){e.preventDefault();e.returnValue='';}});
 document.addEventListener('submit',e=>{
   if(e.defaultPrevented)return;
+  if(e.submitter&&e.submitter.formTarget==='_blank')return;
   const losesEdit=e.target!==editForm&&editDirty();
   const losesLlm=e.target!==llmForm&&llmDirty();
   if((losesEdit||losesLlm)&&!confirm('Abandonner les modifications non enregistrées avant cette opération ?')){e.preventDefault();return;}
@@ -1777,7 +1779,7 @@ def service_configuration(feature):
                 message = "Connexion Gmail vérifiée. Aucun message envoyé ni marqué comme lu."
             except gmail_auth.GmailError:
                 message = "Connexion non confirmée ; vérifier l’activation et l’enrôlement."
-        context = {"account": account, "enabled": gmail_enabled()}
+        context = {"account": account, "enabled": gmail_enabled(), "single_account": True}
     return render_template_string(admin_service_pages.HEAD + body + "</html>",
                                   title=titles[feature], message=message, **context)
 
@@ -1924,7 +1926,7 @@ Intégration : {{'active' if status.enabled else 'inactive'}}. État local, sans
 {% if children %}<p>Enfants disponibles : {{children|join(', ')}}</p>{% endif %}
 <details><summary>Connecter ou reconnecter un compte parent</summary>
 <form method=post autocomplete=off><input type=hidden name=csrf value="{{csrf}}">
-<label>Nom local du compte<input name=account required pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,39}" maxlength=40></label>
+<label>Nom local du compte<input name=account required pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,39}" maxlength=40 autocapitalize="none" autocorrect="off" spellcheck="false"></label>
 <label>Données du QR parent (JSON : url, login, jeton)<textarea name=qr required rows=5 maxlength=12000></textarea></label>
 <label>Code QR<input name=pin type=password required inputmode=numeric pattern="[0-9]{4}"></label>
 <label>Code de sécurité du compte si demandé<input name=account_pin type=password></label>
@@ -1937,7 +1939,7 @@ Intégration : {{'active' if status.enabled else 'inactive'}}. État local, sans
 <label><input type=checkbox name=enabled {{'checked' if status.enabled}}> Activer l’intégration</label>
 <button name=action value=configure>Enregistrer</button></form></section>
 <template id=childRow><tr><td><input name=alias maxlength=40 placeholder=Alias></td><td><input name=child_account maxlength=40 placeholder=Compte></td><td><input name=child_name maxlength=160 placeholder="Nom PRONOTE exact"></td><td><button type=button onclick="this.closest('tr').remove()">Retirer</button></td></tr></template>
-<form method=post><input type=hidden name=csrf value="{{csrf}}"><label>Compte à vérifier<input name=account required></label><button name=action value=children>Vérifier la connexion et relire les enfants</button></form>
+<form method=post><input type=hidden name=csrf value="{{csrf}}"><label>Compte à vérifier<input name=account required autocapitalize="none" autocorrect="off" spellcheck="false"></label><button name=action value=children>Vérifier la connexion et relire les enfants</button></form>
 <details><summary>Configuration JSON avancée</summary><form method=post><input type=hidden name=csrf value="{{csrf}}">
 <textarea name=children rows=8 required>{{mapping}}</textarea><label><input type=checkbox name=enabled {{'checked' if status.enabled}}> Activer</label><button name=action value=configure>Enregistrer le JSON</button></form></details>
 """ + admin_service_pages.FUTURE + "</html>"
@@ -2133,11 +2135,18 @@ def test_console():
     mode = request.args.get("mode", "conversation")
     if mode == "gmail":
         return gmail_admin()
-    if mode != "conversation" or request.method != "GET":
+    if mode != "conversation":
         abort(400)
+    data = load_prompts()
+    preset, draft = data["active"], None
+    if request.method == "POST":
+        preset = request.form.get("preset_key", "")
+        if preset not in data["presets"]:
+            abort(400)
+        draft = request.form.get("system_prompt", "")
     return render_template_string(admin_service_pages.HEAD + admin_service_pages.TEST_NAV +
                                   admin_service_pages.CHAT_TEST + "</html>",
-                                  title="Tester le Minitel", message="", preset=load_prompts()["active"])
+                                  title="Tester le Minitel", message="Brouillon non enregistré ; aucune sauvegarde ni activation." if draft is not None else "", preset=preset, draft=draft, username=memory_entry().username)
 
 
 @app.route("/gmail", methods=["GET", "POST"])

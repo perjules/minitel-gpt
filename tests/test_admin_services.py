@@ -67,7 +67,19 @@ def test_shared_test_entry_and_direct_gmail_user_selection(console, tmp_path):
     result = client.post('/test?mode=gmail', data={'csrf': 'test-token', 'action': 'user',
                                                 'username': 'Synthetic user'}, headers=headers)
     assert result.status_code == 200 and 'Synthetic user' in result.text
+    assert 'value="Synthetic user"' in client.get('/test').text
     with client.session_transaction() as state:
         assert admin.MAIL_SESSIONS[state['gmail_session']]['mail'].username == 'Synthetic user'
         admin.discard_mail(state['gmail_session'])
         admin.discard_memory(state['memory_session'])
+
+
+def test_advanced_draft_testing_does_not_save_or_activate(console):
+    client, headers, prompts = console
+    original = prompts.read_bytes()
+    result = client.post('/test?mode=conversation', data={'preset_key': 'other',
+        'system_prompt': '</script><script>private draft</script>'}, headers=headers)
+    assert result.status_code == 200 and 'Brouillon non enregistré' in result.text
+    assert '<script>private draft</script>' not in result.text
+    assert prompts.read_bytes() == original
+    admin.restart_terminal.assert_not_called()

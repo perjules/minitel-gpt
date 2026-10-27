@@ -442,9 +442,9 @@ class AdminAndUARTTests(unittest.TestCase):
         node = shutil.which("node")
         if not node:
             self.skipTest("Optional Node runtime unavailable for browser-code test")
-        source = admin.ADMIN_HTML
+        source = admin.admin_service_pages.CHAT_TEST
         start = source.index("let testSequence=0;")
-        end = source.index("\nloadPreset();", start)
+        end = source.index("</script>", start)
         result = subprocess.run(
             [node, str(Path(__file__).with_name("calculator_preview.js"))],
             input=json.dumps({"script": source[start:end]}),

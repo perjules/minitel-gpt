@@ -21,7 +21,7 @@ def uptime():
         minutes = int(seconds) // 60
         days, hours = divmod(minutes // 60, 24)
         return f"{days} j {hours} h {minutes % 60} min"
-    except (OSError, ValueError, IndexError):
+    except (OSError, ValueError, OverflowError, IndexError):
         return UNAVAILABLE
 
 

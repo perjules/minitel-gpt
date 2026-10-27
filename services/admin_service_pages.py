@@ -10,9 +10,9 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}summary{cursor:pointer}input:dis
 </style><a href="/?section=services">Retour aux services</a><h1>{{title}}</h1>
 {% if message %}<p role=status>{{message}}</p>{% endif %}'''
 FUTURE = '''<details><summary>Associations utilisateurs — à venir</summary>
-<p>Les associations et comptes supplémentaires ne sont pas encore disponibles.</p>
+<p>Les associations utilisateurs ne sont pas encore disponibles.{% if single_account %} Le compte Gmail reste partagé ; les comptes supplémentaires seront ajoutés ultérieurement.{% endif %}</p>
 <label>Utilisateur<input disabled placeholder="À venir"></label><label>Compte associé<select disabled><option>À venir</option></select></label>
-<button disabled>Ajouter un compte</button></details>'''
+<button disabled>Associer un utilisateur</button>{% if single_account %}<button disabled>Ajouter un compte</button>{% endif %}</details>'''
 GMAIL = '''<section><h2>Compte actuel</h2><p>{{account}}</p>
 <p>Intégration : {{'active' if enabled else 'inactive'}}. La configuration locale ne confirme pas la connexion.</p>
 <form method=post action=/services/gmail/toggle><input type=hidden name=csrf value="{{csrf_token()}}">
@@ -29,22 +29,32 @@ sudo bash scripts/install_gmail.sh --activate</pre>
 PLACEHOLDER = '''<section><h2>En construction</h2><p>Administration inactive. Aucun réglage n’est appliqué depuis cette page.</p></section>'''
 
 TEST_NAV = '''<nav><a href="/test?mode=conversation">Conversation</a> · <a href="/test?mode=gmail">Gmail</a></nav>'''
-CHAT_TEST = '''<p>Test de l’IA actuellement configurée. Les requêtes sont réelles et la conversation est journalisée dans la mémoire choisie.</p>
-<label>Utilisateur (vide = mémoire commune)<input id=user maxlength=60></label>
-<textarea id=question rows=4 placeholder="Votre question"></textarea>
-<button id=send type=button onclick="ask(false)">Envoyer</button><button type=button onclick="ask(true)">SOMMAIRE / nouvelle session</button>
-<pre id=answer role=status></pre>
+CHAT_TEST = r'''<p>Test de l’IA configurée. Les requêtes sont réelles et la conversation est journalisée dans la mémoire choisie.</p>
+<label>Utilisateur (vide = mémoire commune)<input id=memoryUser maxlength=60 value="{{username}}" onchange="++testSequence;document.getElementById('testOut').textContent='';document.getElementById('testSpin').style.display='none'"></label>
+<textarea id=testMsg rows=4 placeholder="Votre question"></textarea>
+<button type=button onclick="testPreset(false)">Envoyer</button><button type=button onclick="testPreset(true)">SOMMAIRE / nouvelle session</button>
+<span id=testSpin style="display:none">Consultation…</span><pre id=testOut role=status></pre>
 <script>
-const csrf={{csrf_token()|tojson}}, preset={{preset|tojson}};
-let sequence=0;
-async function ask(reset){
- const message=document.getElementById('question').value.trim();if(!reset&&!message)return;
- const current=++sequence, out=document.getElementById('answer');out.textContent='Consultation…';
+const CSRF_TOKEN={{csrf_token()|tojson}}, PRESET={{preset|tojson}}, DRAFT_SYSTEM={{draft|tojson}};
+let testSequence=0;
+async function testPreset(reset=false){
+ const msg=document.getElementById('testMsg').value.trim();
+ if(!msg&&!reset)return;
+ const sequence=++testSequence, spin=document.getElementById('testSpin'), out=document.getElementById('testOut');
+ spin.style.display='block';out.textContent='Consultation…';
  try{
-  const response=await fetch('/test-preset',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},
-   body:JSON.stringify({preset_key:preset,message:message,memory_user:document.getElementById('user').value,reset:reset})});
-  const data=await response.json();if(current!==sequence)return;
-  out.textContent=data.ok?(data.answer||'(réponse vide)'):('Erreur : '+data.error);
- }catch(error){if(current===sequence)out.textContent='Requête indisponible. Réessayez.';}
+  const response=await fetch('/test-preset',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},
+   body:JSON.stringify({preset_key:PRESET,system:DRAFT_SYSTEM,message:msg,memory_user:document.getElementById('memoryUser').value,reset:reset})});
+  const data=await response.json();if(sequence!==testSequence)return;
+  if(data.ok&&data.scene){
+   out.textContent='';const started=performance.now();
+   for(const line of data.scene){
+    if(sequence!==testSequence)return;
+    if(performance.now()-started>90000)break;
+    out.textContent+=line+'\n';await new Promise(resolve=>setTimeout(resolve,220));
+   }
+  }else out.textContent=data.ok?(data.answer||'(réponse vide)'):('Erreur : '+data.error);
+ }catch(error){if(sequence===testSequence)out.textContent='Requête indisponible. Réessayez.';}
+ if(sequence===testSequence)spin.style.display='none';
 }
 </script>'''
