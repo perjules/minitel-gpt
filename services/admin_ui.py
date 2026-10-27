@@ -506,7 +506,7 @@ def queue_deployment(operation):
         return False, "Gestionnaire uv indisponible ; relancer sudo bash install.sh."
     if result.returncode:
         return False, "Opération refusée ; consulter le journal minitel-deploy."
-    return True, "Opération planifiée ; suivre /deployment-status ou journalctl -u minitel-deploy."
+    return True, "Opération planifiée ; actualiser Maintenance pour suivre le résultat."
 
 # ── Génération de prompt par IA ──────────────────────────────────────────
 def generate_prompt(description):
@@ -725,8 +725,6 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <div class=row><span class="dot {{'on' if st=='active' else 'off'}}"></span>{{s}}
       <span style="margin-left:auto;color:{{'#4ecdc4' if st=='active' else '#667'}}">{{st}}</span></div>
     {% endfor %}
-    <form method=POST action=/restart style=margin-top:10px><input type=hidden name=csrf value="{{csrf_token()}}">
-      <button class="btn btn-s">↺ Redémarrer le terminal</button></form>
     <p class=sub>« inactive » sur wifi/boot = normal (services ponctuels).</p>
   </div>
 
@@ -906,6 +904,20 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     </form>
     <p class=sub style=margin-top:10px>Adresse de l'admin : consultable sur le Minitel via la touche <b>Guide</b>.</p>
   </div>
+
+</section>
+
+<section class="panel {{'active' if section=='services'}}" id=services>
+  <div class=block><h2>Gmail</h2><p><a href="/gmail">Lire, répondre et écrire depuis le Minitel</a></p></div>
+  <div class=block><h2>PRONOTE</h2><p><a href="/pronote">Connexion parent et enfants autorisés</a></p></div>
+</section>
+<section class="panel {{'active' if section=='maintenance'}}" id=maintenance>
+  <div class=block>
+    <h2>Redémarrer le service Minitel</h2>
+    <p class=sub>Interrompt la conversation en cours. Ne redémarre pas le Pi.</p>
+    <form method=POST action=/restart onsubmit="return confirm('Redémarrer le service Minitel et interrompre la session en cours ?')"><input type=hidden name=csrf value="{{csrf_token()}}">
+      <button class="btn btn-s">↺ Redémarrer le terminal</button></form>
+  </div>
   <div class=block>
     <h2>🔄 Mise à jour de l'application</h2>
     <p class=sub>Version installée : <b>{{version}}</b></p>
@@ -924,16 +936,10 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <form method=POST action=/rollback onsubmit="return confirm('Revenir à la version précédente ?')" style=margin:0><input type=hidden name=csrf value="{{csrf_token()}}">
       <button class="btn btn-d">↶ Revenir à la version précédente</button>
     </form>
+    <p class=sub>Une opération planifiée n’est pas encore appliquée. <a href="/deployment-status">État du déploiement</a> (lecture seule).</p>
     <p class=sub style=margin-top:8px>La mise à jour récupère le code depuis GitHub. Tes personnalités, clés et fichiers de connaissance ne sont pas touchés.</p>
   </div>
 
-</section>
-
-<section class="panel {{'active' if section=='services'}}" id=services>
-  <div class=block><h2>Gmail</h2><p><a href="/gmail">Lire, répondre et écrire depuis le Minitel</a></p></div>
-  <div class=block><h2>PRONOTE</h2><p><a href="/pronote">Connexion parent et enfants autorisés</a></p></div>
-</section>
-<section class="panel {{'active' if section=='maintenance'}}" id=maintenance>
   <div class=block>
     <h2>Journal du terminal <a href="/?section=maintenance" class=sub>Actualiser</a></h2>
     <pre>{{log_chatgpt}}</pre>
@@ -1432,7 +1438,7 @@ def restart():
     ok = restart_terminal()
     session["flash"] = "Terminal redémarré." if ok else "Échec (sudo requis)."
     session["flash_ok"] = ok
-    return redirect(url_for("index"))
+    return redirect(url_for("index", section="maintenance"))
 
 @app.route("/check-update", methods=["POST"])
 @require_login
@@ -1447,7 +1453,7 @@ def check_update_route():
         session["update_log"] = res["log"]
         session["flash"] = f"{res['behind']} mise(s) à jour disponible(s)."
         session["flash_ok"] = True
-    return redirect(url_for("index"))
+    return redirect(url_for("index", section="maintenance"))
 
 @app.route("/update", methods=["POST"])
 @require_login
@@ -1456,7 +1462,7 @@ def update_route():
     session.pop("update_log", None)
     session["flash"] = msg if ok else "Échec de la mise à jour : " + msg
     session["flash_ok"] = ok
-    return redirect(url_for("index"))
+    return redirect(url_for("index", section="maintenance"))
 
 @app.route("/rollback", methods=["POST"])
 @require_login
@@ -1464,7 +1470,7 @@ def rollback_route():
     ok, msg = do_rollback()
     session["flash"] = msg if ok else "Échec : " + msg
     session["flash_ok"] = ok
-    return redirect(url_for("index"))
+    return redirect(url_for("index", section="maintenance"))
 
 
 @app.route("/storage-status")
