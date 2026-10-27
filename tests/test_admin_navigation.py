@@ -50,7 +50,7 @@ def test_four_sections_and_dashboard_are_read_only(console):
         assert "line 34" not in dashboard and "line 35" in dashboard
         for route in ("/restart", "/check-update", "/rollback"):
             assert f"action={route}" in maintenance
-        assert 'href="/gmail"' in services and 'href="/pronote"' in services
+        assert 'href="/services/gmail"' in services and 'href="/pronote"' in services
     admin.restart_terminal.assert_not_called()
 
 

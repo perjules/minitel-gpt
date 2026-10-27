@@ -34,8 +34,11 @@ from werkzeug.utils import secure_filename
 
 try:
     from . import (
+        admin_service_pages,
         calculator,
         config_store,
+        gmail_auth,
+        gmail_client,
         gmail_mail,
         io_limits,
         memory_session,
@@ -47,8 +50,11 @@ try:
         system_health,
     )
 except ImportError:
+    import admin_service_pages
     import calculator
     import config_store
+    import gmail_auth
+    import gmail_client
     import gmail_mail
     import io_limits
     import memory_session
@@ -941,8 +947,15 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 </section>
 
 <section class="panel {{'active' if section=='services'}}" id=services>
-  <div class=block><h2>Gmail</h2><p><a href="/gmail">Lire, répondre et écrire depuis le Minitel</a></p></div>
-  <div class=block><h2>PRONOTE</h2><p><a href="/pronote">Connexion parent et enfants autorisés</a></p></div>
+  <div class=health-grid>{% for service in service_cards %}<div class=block>
+    <h2>{{service.label}}</h2><p><span class="dot {{'on' if service.enabled else 'off'}}"></span>{{'Active' if service.enabled else 'Inactive'}}</p>
+    {% if service.placeholder %}<p class=sub>Administration en construction</p>
+    <label><input type=checkbox disabled aria-label="Activer {{service.label}}"> Activer</label>
+    {% else %}<form method=post action="/services/{{service.key}}/toggle"><input type=hidden name=csrf value="{{csrf_token()}}">
+      <label><input type=checkbox name=enabled value=1 {{'checked' if service.enabled}}> Activer</label><button class="btn btn-s">Appliquer</button>
+    </form>{% endif %}
+    <a class="btn btn-s" href="{{service.url}}">Configurer</a>
+  </div>{% endfor %}</div>
 </section>
 <section class="panel {{'active' if section=='maintenance'}}" id=maintenance>
   <div class=block>
@@ -1266,7 +1279,7 @@ def index():
                 "admin-ui": svc_status("admin-ui")}
     flash = session.pop("flash", None); flash_ok = session.pop("flash_ok", False)
     return render_template_string(
-        ADMIN_HTML, section=section, presets=presets, knowledge=all_knowledge(),
+        ADMIN_HTML, service_cards=service_cards(), section=section, presets=presets, knowledge=all_knowledge(),
         health={"uptime": system_health.uptime(), "disk": system_health.disk(PROJ_DIR),
                 "wifi": system_health.wifi(), "tailscale": system_health.tailscale(),
                 "temperature": system_health.temperature()},
@@ -1627,42 +1640,101 @@ def deployment_status():
         return jsonify({"phase": "not_installed"})
 
 
-PRONOTE_HTML = """<!doctype html><html lang="fr"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>PRONOTE — 3615 IA</title><style>
-body{font:16px system-ui;max-width:800px;margin:24px auto;padding:16px;background:#111;color:#eee}
-a{color:#7cf}input,textarea,select,button{box-sizing:border-box;width:100%;padding:10px;margin:6px 0 16px}
-input[type=checkbox]{width:auto}label{display:block}fieldset{margin:24px 0}pre{white-space:pre-wrap}
-</style><a href="/?section=services">Retour aux services</a><h1>PRONOTE</h1>
-<p>Lecture seule : devoirs et notes. Les identifiants restent sur ce Pi.
-Les résultats scolaires minimaux sont transmis à Mistral pour répondre.</p>
-<p>Dépendance installée : {{ 'oui' if status.dependency_ready else 'non — installer scripts/install_pronote.sh' }}.
-Intégration : {{ 'active' if status.enabled else 'désactivée' }}.</p>
-{% if message %}<p role="status">{{ message }}</p>{% endif %}
-{% if children %}<p>Enfants de ce compte (administration uniquement) :</p><ul>
-{% for child in children %}<li>{{ child }}</li>{% endfor %}</ul>{% endif %}
-<form method="post" autocomplete="off"><input type="hidden" name="csrf" value="{{ csrf }}">
-<fieldset><legend>Connecter un compte parent</legend>
-<label>Nom local du compte (ex. famille)<input name="account" required pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,39}" maxlength="40" autocapitalize="none" autocorrect="off" spellcheck="false"></label>
-<label>Données du QR PRONOTE parent (JSON : url, login, jeton)
-<textarea name="qr" required rows="5" maxlength="12000"></textarea></label>
-<label>Code QR à 4 chiffres<input name="pin" type="password" required inputmode="numeric" pattern="[0-9]{4}"></label>
-<label>Code de sécurité du compte si demandé (distinct du code QR)
-<input name="account_pin" type="password"></label>
-<button name="action" value="enroll">Connecter et vérifier le jeton</button>
-</fieldset></form>
-<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}">
-<fieldset><legend>Autoriser les enfants</legend>
-<p>Un alias utilisé sur le Minitel → un compte et le nom PRONOTE exact.
-Aucun enfant n'est autorisé automatiquement. Les alias seuls sont envoyés à Mistral.</p>
-<label>Configuration JSON<textarea name="children" rows="8" required>{{ mapping }}</textarea></label>
-<label><input name="enabled" type="checkbox" {% if status.enabled %}checked{% endif %}> Activer pour Mistral Conversations</label>
-<button name="action" value="configure">Enregistrer</button></fieldset></form>
-<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}">
-<label>Nom local du compte<input name="account" required autocapitalize="none" autocorrect="off" spellcheck="false"></label>
-<button name="action" value="children">Relire les noms des enfants</button></form>
-<p>Exemple de configuration : <code>{"Alex":{"account":"famille","name":"NOM Prénom"}}</code>.</p>
-</html>"""
+def gmail_enabled():
+    return read_env().get("GMAIL_ENABLED", os.getenv("GMAIL_ENABLED", "0")).casefold() in {"1", "true", "yes"}
+
+
+def service_cards():
+    try:
+        school_enabled = pronote.backend().config()["enabled"]
+    except pronote.PronoteError:
+        school_enabled = False
+    return [
+        {"key": "gmail", "label": "Gmail", "enabled": gmail_enabled(), "placeholder": False, "url": "/services/gmail"},
+        {"key": "pronote", "label": "PRONOTE", "enabled": school_enabled, "placeholder": False, "url": "/pronote"},
+        *({"key": key, "label": label, "enabled": False, "placeholder": True, "url": "/services/" + key}
+          for key, label in (("alexa", "Alexa"), ("printer", "Imprimante"), ("smart-home", "Maison connectée"))),
+    ]
+
+
+@app.route("/services/<feature>/toggle", methods=["POST"])
+@require_login
+def toggle_service(feature):
+    enabled = request.form.get("enabled") == "1"
+    if feature == "gmail":
+        value = "1" if enabled else "0"
+        config_store.update_env(ENV_FILE, {"GMAIL_ENABLED": value})
+        os.environ["GMAIL_ENABLED"] = value
+        discard_mail(session.get("gmail_session"))
+        saved_feedback("Activation Gmail enregistrée.", True)
+    elif feature == "pronote":
+        local = pronote.backend()
+        local.configure(enabled, local.config()["children"])
+        session["flash"] = "Activation PRONOTE enregistrée ; appliquée aux prochaines requêtes."
+        session["flash_ok"] = True
+    else:
+        abort(404)
+    return redirect(url_for("index", section="services"))
+
+
+@app.route("/services/<feature>", methods=["GET", "POST"])
+@require_login
+def service_configuration(feature):
+    message = ""
+    titles = {"gmail": "Gmail", "alexa": "Alexa", "printer": "Imprimante", "smart-home": "Maison connectée"}
+    if feature not in titles:
+        abort(404)
+    if feature != "gmail":
+        if request.method == "POST":
+            abort(405)
+        body = admin_service_pages.PLACEHOLDER
+        context = {}
+    else:
+        body = admin_service_pages.GMAIL + admin_service_pages.FUTURE
+        account = "Compte partagé — enrôlement à vérifier sur le Pi."
+        try:
+            account = gmail_auth.TokenSource().delivered_info()["email_address"]
+        except gmail_auth.GmailError:
+            pass
+        if request.method == "POST":
+            if request.form.get("action") != "check":
+                abort(400)
+            try:
+                if not gmail_enabled():
+                    raise gmail_auth.GmailError("disabled")
+                gmail_client.GmailClient().list("", time.monotonic() + 20)
+                message = "Connexion Gmail vérifiée. Aucun message envoyé ni marqué comme lu."
+            except gmail_auth.GmailError:
+                message = "Connexion non confirmée ; vérifier l’activation et l’enrôlement."
+        context = {"account": account, "enabled": gmail_enabled()}
+    return render_template_string(admin_service_pages.HEAD + body + "</html>",
+                                  title=titles[feature], message=message, **context)
+
+
+PRONOTE_HTML = admin_service_pages.HEAD + """
+<p>Lecture seule. Dépendance : {{'installée' if status.dependency_ready else 'indisponible'}}.
+Intégration : {{'active' if status.enabled else 'inactive'}}. État local, sans vérification réseau automatique.</p>
+<section><h2>Comptes parents</h2><ul>{% for account in accounts %}<li>{{account}}</li>{% else %}<li>Aucun compte détecté</li>{% endfor %}</ul></section>
+{% if children %}<p>Enfants disponibles : {{children|join(', ')}}</p>{% endif %}
+<details><summary>Connecter ou reconnecter un compte parent</summary>
+<form method=post autocomplete=off><input type=hidden name=csrf value="{{csrf}}">
+<label>Nom local du compte<input name=account required pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,39}" maxlength=40></label>
+<label>Données du QR parent (JSON : url, login, jeton)<textarea name=qr required rows=5 maxlength=12000></textarea></label>
+<label>Code QR<input name=pin type=password required inputmode=numeric pattern="[0-9]{4}"></label>
+<label>Code de sécurité du compte si demandé<input name=account_pin type=password></label>
+<button name=action value=enroll>Connecter et vérifier</button></form></details>
+<section><h2>Enfants autorisés</h2><p>Chaque alias est explicitement associé à un compte et au nom PRONOTE exact.</p>
+<form method=post><input type=hidden name=csrf value="{{csrf}}">
+<table><thead><tr><th>Alias Minitel</th><th>Compte</th><th>Nom PRONOTE</th><th></th></tr></thead><tbody id=childRows>
+{% for alias,child in child_mapping.items() %}<tr><td><input name=alias value="{{alias}}" maxlength=40></td><td><input name=child_account value="{{child.account}}" maxlength=40></td><td><input name=child_name value="{{child.name}}" maxlength=160></td><td><button type=button onclick="this.closest('tr').remove()">Retirer</button></td></tr>{% endfor %}
+</tbody></table><button type=button onclick="document.getElementById('childRows').insertAdjacentHTML('beforeend',document.getElementById('childRow').innerHTML)">Ajouter un enfant</button>
+<label><input type=checkbox name=enabled {{'checked' if status.enabled}}> Activer l’intégration</label>
+<button name=action value=configure>Enregistrer</button></form></section>
+<template id=childRow><tr><td><input name=alias maxlength=40 placeholder=Alias></td><td><input name=child_account maxlength=40 placeholder=Compte></td><td><input name=child_name maxlength=160 placeholder="Nom PRONOTE exact"></td><td><button type=button onclick="this.closest('tr').remove()">Retirer</button></td></tr></template>
+<form method=post><input type=hidden name=csrf value="{{csrf}}"><label>Compte à vérifier<input name=account required></label><button name=action value=children>Vérifier la connexion et relire les enfants</button></form>
+<details><summary>Configuration JSON avancée</summary><form method=post><input type=hidden name=csrf value="{{csrf}}">
+<textarea name=children rows=8 required>{{mapping}}</textarea><label><input type=checkbox name=enabled {{'checked' if status.enabled}}> Activer</label><button name=action value=configure>Enregistrer le JSON</button></form></details>
+""" + admin_service_pages.FUTURE + "</html>"
 
 
 @app.route("/pronote", methods=["GET", "POST"])
@@ -1689,10 +1761,22 @@ def pronote_admin():
             elif action == "children":
                 children = local.admin_children(request.form.get("account", ""))
             elif action == "configure":
-                mapping_text = request.form.get("children", "{}")
-                if len(mapping_text) > 16000:
-                    raise pronote.PronoteError("configuration_error")
-                local.configure("enabled" in request.form, json.loads(mapping_text))
+                if "children" in request.form:
+                    mapping_text = request.form["children"]
+                    if len(mapping_text) > 16000:
+                        raise pronote.PronoteError("configuration_error")
+                    mapping = json.loads(mapping_text)
+                else:
+                    mapping = {}
+                    rows = zip(request.form.getlist("alias"), request.form.getlist("child_account"), request.form.getlist("child_name"), strict=True)
+                    for alias, account, name in rows:
+                        alias, account, name = alias.strip(), account.strip(), name.strip()
+                        if not any((alias, account, name)):
+                            continue
+                        if not all((alias, account, name)) or alias in mapping:
+                            raise pronote.PronoteError("configuration_error")
+                        mapping[alias] = {"account": account, "name": name}
+                local.configure("enabled" in request.form, mapping)
                 message = "Configuration enregistrée."
             else:
                 return "Action inconnue", 400
@@ -1706,7 +1790,9 @@ def pronote_admin():
         config = {"enabled": False, "children": {}}
         status = {"enabled": False, "dependency_ready": False}
     response = app.make_response(render_template_string(
-        PRONOTE_HTML, csrf=session["pronote_csrf"], message=message, children=children,
+        PRONOTE_HTML, title="PRONOTE", accounts=sorted({m["account"] for m in config["children"].values()} |
+            {p.name.removesuffix(".credentials.json") for p in local.directory.glob("*.credentials.json") if p.is_file() and not p.is_symlink()}),
+        child_mapping=config["children"], csrf=session["pronote_csrf"], message=message, children=children,
         status=status, mapping=json.dumps(config["children"], ensure_ascii=False, indent=2)))
     response.headers["Cache-Control"] = "no-store"
     response.headers["Referrer-Policy"] = "no-referrer"
