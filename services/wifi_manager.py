@@ -24,7 +24,7 @@ from flask import Flask, jsonify, render_template_string, request, session
 AP_SSID = "MinitelGPT-Setup"
 AP_IP = "192.168.4.1"
 AP_CON_NAME = "MinitelGPT-AP"
-CONNECT_TIMEOUT = 30  # secondes pour rejoindre un réseau connu
+CONNECT_TIMEOUT = 30  # legacy manual connection timeout
 FLASK_PORT = 80
 
 logging.basicConfig(
@@ -40,7 +40,6 @@ app = Flask(__name__)
 app.secret_key = secrets.token_bytes(32)
 app.config.update(MAX_CONTENT_LENGTH=4096, SESSION_COOKIE_SAMESITE="Strict")
 NETWORK_LOCK = threading.Lock()
-RETRY_INTERVAL = 300
 COMMAND_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "HOME": "/root", "LC_ALL": "C.UTF-8"}
 EXECUTABLES = {"nmcli": "/usr/bin/nmcli", "ip": "/usr/sbin/ip", "systemctl": "/usr/bin/systemctl"}
 
@@ -386,47 +385,19 @@ CHECK_INTERVAL = 30        # secondes entre deux vérifications
 GRACE_CYCLES = 4           # cycles déconnectés avant hotspot (~2 min)
 
 
-class Monitor:
-    def __init__(self):
-        self.disconnected = 0
-        self.next_retry = 0
-        self.failed = False
-
-    def step(self, now=None):
-        now = time.monotonic() if now is None else now
-        if not NETWORK_LOCK.acquire(blocking=False):
+def startup_provisioning(timeout=90, poll=3):
+    """One boot-time decision. Never seize wlan0 after a successful client boot."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if client_connected() and is_connected():
+            log.info("WiFi connected at startup; NetworkManager owns recovery")
             return
-        try:
-            if client_connected() and is_connected():
-                self.disconnected = 0
-                self.next_retry = now + RETRY_INTERVAL
-            elif hotspot_active():
-                self.disconnected = 0
-                if now >= self.next_retry:
-                    self.next_retry = now + RETRY_INTERVAL
-                    try_known_networks()
-            else:
-                self.disconnected += 1
-                if self.disconnected >= GRACE_CYCLES:
-                    create_hotspot()
-                    self.disconnected = 0
-                    self.next_retry = now + RETRY_INTERVAL
-            self.failed = False
-        except (OSError, subprocess.SubprocessError, RuntimeError) as error:
-            if not self.failed:
-                log.warning("WiFi monitoring temporarily unavailable (%s)", type(error).__name__)
-            self.failed = True
-        finally:
-            NETWORK_LOCK.release()
+        time.sleep(poll)
+    if client_connected() and is_connected():
+        return
+    log.info("No WiFi at startup; enabling provisioning hotspot")
+    create_hotspot()
 
-
-def monitor_loop(server=None):
-    monitor = Monitor()
-    while True:
-        if server is not None and not server.is_alive():
-            raise RuntimeError("WiFi HTTP server stopped")
-        monitor.step()
-        time.sleep(CHECK_INTERVAL)
 
 
 def main():
@@ -438,7 +409,7 @@ def main():
         daemon=True,
     )
     server.start()
-    monitor_loop(server)
+    startup_provisioning()\n    server.join()
 
 
 if __name__ == "__main__":
