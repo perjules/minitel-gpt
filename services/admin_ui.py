@@ -927,21 +927,9 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <div id=spin>⏳ Génération en cours...</div>
   </div>
   </details>
-  <div class=block>
-    <h2>Tester le brouillon de la personnalité sélectionnée</h2>
-    <p class=sub>Posez une question comme sur le Minitel, sans le Minitel. Le test
-      utilise le prompt système ci-dessus (même non enregistré), les fichiers de
-      connaissance, et le fournisseur d'IA configuré. La réponse est convertie en
-      ASCII, telle qu'elle s'afficherait à l'écran.</p>
-    <label>Nom pour mémoire (vide = commune, sans mot de passe)</label>
-    <input type=text id=memoryUser maxlength=60 placeholder="Nom ou vide">
-    <button class="btn btn-s" type=button onclick="testPreset(true)">SOMMAIRE / nouvelle session</button>
-    <p class=sub>Les demandes et réponses visibles sont journalisées sur le Pi. MEMOIRE rappelle les éléments délibérément enregistrés.</p>
-    <input type=text id=testMsg placeholder="Votre question..."
-      onkeydown="if(event.key==='Enter'){event.preventDefault();testPreset()}">
-    <button class="btn btn-p" type=button onclick=testPreset()>Envoyer</button>
-    <div id=testSpin style="display:none;color:var(--muted);margin-top:8px">⏳ Réponse en cours...</div>
-    <pre id=testOut style="display:none;margin-top:12px"></pre>
+  <div class=block><h2>Tester le Minitel</h2>
+    <p class=sub>Conversation et Gmail utilisent leurs réglages enregistrés. Les requêtes sont réelles.</p>
+    <a class="btn btn-s" href=/test>Ouvrir la console de test</a>
   </div>
 
 </section>
@@ -1130,9 +1118,6 @@ function loadPreset(){
   selectedPreset=k;
   document.getElementById('llmPreset').value=k;
   const url=new URL(location.href);url.searchParams.set('preset',k);history.replaceState(null,'',url);
-  ++testSequence;
-  document.getElementById('testOut').style.display='none';
-  document.getElementById('testSpin').style.display='none';
   fkey.value=k; flabel.value=p.label||''; ftitle.value=p.title_msg||'';
   fquestion.value=p.question_msg||''; floading.value=p.loading_msg||''; fsystem.value=p.system||'';
   document.getElementById('activeInfo').textContent=
@@ -1184,36 +1169,6 @@ async function genPrompt(){
     }else alert('Erreur: '+j.error);
   }catch(e){alert('Erreur: '+e);}
   finally{spin.style.display='none';}
-}
-let testSequence=0;
-async function testPreset(reset=false){
-  const msg=document.getElementById('testMsg').value.trim();
-  if(!msg&&!reset){alert('Saisissez une question');return;}
-  const sequence=++testSequence;
-  const key=document.getElementById('presetSel').value;
-  const system=document.getElementById('fsystem').value;
-  const spin=document.getElementById('testSpin'), out=document.getElementById('testOut');
-  spin.style.display='block'; out.style.display='none';
-  try{
-    const r=await fetch('/test-preset',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},
-      body:JSON.stringify({preset_key:key,message:msg,system:system,memory_user:document.getElementById('memoryUser').value,reset:reset})});
-    const j=await r.json();
-    if(sequence!==testSequence)return;
-    out.style.display='block';
-    if(j.ok&&j.scene){
-      out.textContent='';
-      const started=performance.now();
-      for(const line of j.scene){
-        if(sequence!==testSequence)return;
-        if(performance.now()-started>90000)break;
-        out.textContent+=line+'\\n';
-        await new Promise(resolve=>setTimeout(resolve,220));
-      }
-    }else{
-      out.textContent = j.ok ? (j.answer||'(réponse vide)') : ('Erreur : '+j.error);
-    }
-  }catch(e){if(sequence===testSequence){out.style.display='block';out.textContent='Erreur : '+e;}}
-  if(sequence===testSequence)spin.style.display='none';
 }
 llmBaseline=snapshot(llmForm);
 loadPreset();
@@ -1899,9 +1854,13 @@ GMAIL_HTML = """<!doctype html><html lang="fr"><meta charset="utf-8">
 <style>body{background:#101820;color:#eee;font:16px system-ui;max-width:700px;margin:2em auto;padding:1em}
 pre{font:16px monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:#000;color:#7fffa0;padding:1em}
 input,button{font:inherit;padding:.5em;margin:.2em} input[type=text]{width:90%}</style>
-<a href="/?section=services">Retour aux services</a><h1>Gmail</h1>
-<p>Destination mémoire/journal : {{ memory_label }}. Le nom se choisit dans le test de personnalité.</p>
-<p>Brouillons temporaires; commandes et réponses visibles journalisées dans la mémoire sélectionnée au test de personnalité. Lecture sans marquer comme lu. Le modèle ne peut pas envoyer.</p>
+<a href="/?section=services">Retour aux services</a><h1>Tester le Minitel — Gmail</h1>
+<nav><a href="/test?mode=conversation">Conversation</a> · <a href="/test?mode=gmail">Gmail</a> · <a href="/services/gmail">Configurer Gmail</a></nav>
+<form method=post><input type=hidden name=csrf value="{{csrf}}">
+<label>Utilisateur (vide = mémoire commune)<input type=text name=username maxlength=60 value="{{username}}"></label>
+<button name=action value=user>Choisir l’utilisateur</button></form>
+<p>Compte Gmail partagé. Destination mémoire/journal : {{ memory_label }}.</p>
+<p>Brouillons temporaires; commandes et réponses visibles journalisées dans la mémoire sélectionnée ici. Lecture sans marquer comme lu. Le modèle ne peut pas envoyer.</p>
 {% if not enabled %}<p>Gmail désactivé. Suivre docs/GMAIL.md pour la connexion sur ordinateur.</p>{% endif %}
 <pre>{{ page }}</pre><p>Page {{ position }} / {{ count }}</p>
 <form method="post" autocomplete="off"><input type="hidden" name="csrf" value="{{ csrf }}">
@@ -1917,6 +1876,19 @@ input,button{font:inherit;padding:.5em;margin:.2em} input[type=text]{width:90%}<
 Les dates de la liste sont affichées en Europe/Paris.</p></html>"""
 
 
+@app.route("/test", methods=["GET", "POST"])
+@require_login
+def test_console():
+    mode = request.args.get("mode", "conversation")
+    if mode == "gmail":
+        return gmail_admin()
+    if mode != "conversation" or request.method != "GET":
+        abort(400)
+    return render_template_string(admin_service_pages.HEAD + admin_service_pages.TEST_NAV +
+                                  admin_service_pages.CHAT_TEST + "</html>",
+                                  title="Tester le Minitel", message="", preset=load_prompts()["active"])
+
+
 @app.route("/gmail", methods=["GET", "POST"])
 @require_login
 def gmail_admin():
@@ -1925,7 +1897,8 @@ def gmail_admin():
         request.form.get("csrf", "").encode(), session["gmail_csrf"].encode()
     ):
         return "Requête refusée", 403
-    selected = memory_entry()
+    user_change = request.method == "POST" and request.form.get("action") == "user"
+    selected = memory_entry(request.form.get("username", "") if user_change else None)
     item = mail_entry(selected.username)
     cancelling = request.method == "POST" and (
         request.form.get("action") in ("cancel", "reset")
@@ -1942,7 +1915,7 @@ def gmail_admin():
             else ("Gmail: busy", 409)
         )
     try:
-        if request.method == "POST":
+        if request.method == "POST" and not user_change:
             action = request.form.get("action", "")
             if action in ("next", "previous"):
                 item["page"] = max(
@@ -1986,7 +1959,7 @@ def gmail_admin():
             render_template_string(
                 GMAIL_HTML,
                 enabled=gmail_mail.enabled(),
-                memory_label=selected.label,
+                memory_label=selected.label, username=selected.username,
                 csrf=session["gmail_csrf"],
                 page=item["pages"][item["page"]],
                 position=item["page"] + 1,

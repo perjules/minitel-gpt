@@ -58,3 +58,17 @@ def test_pronote_table_preserves_schema_and_rejects_duplicate_aliases(console, t
     assert local.config_path.read_bytes() == before
     client.post('/services/pronote/toggle', headers=headers)
     assert not local.config()['enabled'] and local.config()['children']['Alex']['account'] == 'family'
+
+
+def test_shared_test_entry_and_direct_gmail_user_selection(console, tmp_path):
+    client, headers, _ = console
+    admin.config_store.update_env(admin.ENV_FILE, {'MINITEL_MEMORY_DIR': str(tmp_path / 'memory')})
+    assert 'Conversation' in client.get('/test').text
+    assert 'Gmail' in client.get('/test?mode=gmail').text
+    result = client.post('/test?mode=gmail', data={'csrf': 'test-token', 'action': 'user',
+                                                'username': 'Synthetic user'}, headers=headers)
+    assert result.status_code == 200 and 'Synthetic user' in result.text
+    with client.session_transaction() as state:
+        assert admin.MAIL_SESSIONS[state['gmail_session']]['mail'].username == 'Synthetic user'
+        admin.discard_mail(state['gmail_session'])
+        admin.discard_memory(state['memory_session'])

@@ -27,3 +27,24 @@ sudo /opt/minitel-gpt/venv/bin/python scripts/gmail_enroll.py /etc/minitel-gmail
 sudo bash scripts/install_gmail.sh --activate</pre>
 <p>La procédure complète (préparation Google et tunnel de rappel) est décrite dans docs/GMAIL.md. Une désactivation conserve les identifiants.</p></details>'''
 PLACEHOLDER = '''<section><h2>En construction</h2><p>Administration inactive. Aucun réglage n’est appliqué depuis cette page.</p></section>'''
+
+TEST_NAV = '''<nav><a href="/test?mode=conversation">Conversation</a> · <a href="/test?mode=gmail">Gmail</a></nav>'''
+CHAT_TEST = '''<p>Test de l’IA actuellement configurée. Les requêtes sont réelles et la conversation est journalisée dans la mémoire choisie.</p>
+<label>Utilisateur (vide = mémoire commune)<input id=user maxlength=60></label>
+<textarea id=question rows=4 placeholder="Votre question"></textarea>
+<button id=send type=button onclick="ask(false)">Envoyer</button><button type=button onclick="ask(true)">SOMMAIRE / nouvelle session</button>
+<pre id=answer role=status></pre>
+<script>
+const csrf={{csrf_token()|tojson}}, preset={{preset|tojson}};
+let sequence=0;
+async function ask(reset){
+ const message=document.getElementById('question').value.trim();if(!reset&&!message)return;
+ const current=++sequence, out=document.getElementById('answer');out.textContent='Consultation…';
+ try{
+  const response=await fetch('/test-preset',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},
+   body:JSON.stringify({preset_key:preset,message:message,memory_user:document.getElementById('user').value,reset:reset})});
+  const data=await response.json();if(current!==sequence)return;
+  out.textContent=data.ok?(data.answer||'(réponse vide)'):('Erreur : '+data.error);
+ }catch(error){if(current===sequence)out.textContent='Requête indisponible. Réessayez.';}
+}
+</script>'''
