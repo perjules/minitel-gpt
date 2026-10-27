@@ -413,6 +413,20 @@ def restart_terminal():
         return False
 
 
+def saved_feedback(message, restart_required=False):
+    session["flash"] = message
+    session["flash_ok"] = True
+    if restart_required:
+        restarted = restart_terminal()
+        status = ("Redémarrage du service Minitel confirmé." if restarted else
+                  "Redémarrage non confirmé : configuration enregistrée ; réessayer dans Maintenance.")
+        session["restart_status"] = status
+        session["flash"] += " " + status
+        session["flash_ok"] = restarted
+    else:
+        session["flash"] += " Le Minitel reste sur la personnalité active ; activer celle-ci pour l’appliquer."
+
+
 def svc_status(name):
     try:
         return subprocess.run(["systemctl", "is-active", name], capture_output=True,
@@ -710,7 +724,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
   <form method=POST action=/logout><input type=hidden name=csrf value="{{csrf_token()}}"><button class=logout>Déconnexion</button></form>
 </div>
 
-{% if flash %}<div class="flash {{'fok' if flash_ok else 'ferr'}}">{{flash}}</div>{% endif %}
+{% if flash %}<div role=status class="flash {{'fok' if flash_ok else 'ferr'}}">{{flash}}</div>{% endif %}
 
 <nav class=tabs>
   {% for key,label in [('dash','Tableau de bord'),('ai','Configuration IA'),('services','Services'),('maintenance','Maintenance')] %}
@@ -730,6 +744,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <div class=row><span class="dot {{'on' if st=='active' else 'off'}}"></span>{{s}}
       <span style="margin-left:auto;color:{{'#4ecdc4' if st=='active' else '#667'}}">{{st}}</span></div>
     {% endfor %}
+    <p class=sub>Dernière demande de redémarrage dans cette session : {{restart_status}}</p>
     <p class=sub>« inactive » sur wifi/boot = normal (services ponctuels).</p>
   </div>
 
@@ -761,7 +776,9 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <p class=sub>Choisissez le moteur d'IA et son modèle. Le terminal et la génération
       de prompts utilisent le fournisseur sélectionné. La clé de chaque fournisseur
       est conservée indépendamment - vous pouvez basculer sans la ressaisir.</p>
-    <form method=POST action=/save-llm id=llmForm><input type=hidden name=csrf value="{{csrf_token()}}">
+    <p class=sub>Enregistrer sauvegarde les réglages et redémarre automatiquement le service Minitel. Les tests et la génération utilisent les réglages enregistrés.</p>
+    <p class=sub id=llmState role=status>Configuration enregistrée.</p>
+    <form method=POST action=/save-llm id=llmForm><input type=hidden name=context_preset id=llmPreset value="{{edit_key}}"><input type=hidden name=csrf value="{{csrf_token()}}">
       <label>Fournisseur utilisé</label>
       <select name=llm_provider id=providerSel>
         <option value=mistral {{'selected' if provider=='mistral'}}>Mistral</option>
@@ -861,6 +878,8 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       </select>
     </div>
     <p class=sub id=activeInfo></p>
+    <p class=sub id=editState role=status>Version enregistrée.</p>
+    <p class=sub>Enregistrer sauvegarde le brouillon ; si cette personnalité est active, le service Minitel redémarre automatiquement. « Enregistrer et activer » sauvegarde, sélectionne et redémarre le service.</p>
     <form method=POST action=/save-prompt id=editForm><input type=hidden name=csrf value="{{csrf_token()}}">
       <input type=hidden name=preset_key id=fkey>
       <label>Nom affiché</label>
@@ -884,7 +903,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       <pre id=titlePreview style="display:none"></pre>
 
       <hr>
-      <button class="btn btn-p">💾 Enregistrer</button>
+      <button class="btn btn-p">Enregistrer le brouillon</button>
       <button class="btn btn-s" formaction=/apply-preset>Enregistrer et activer</button>
       <button class="btn btn-d" formaction=/delete-preset onclick="return confirm('Supprimer ce preset ?')">Supprimer</button>
     </form>
@@ -1017,6 +1036,26 @@ document.querySelectorAll('nav.tabs a').forEach(a=>a.addEventListener('click',e=
   history.replaceState(null,'',url);
 }));
 if(document.getElementById('maintenance').classList.contains('active'))loadStorage();
+// Les brouillons restent en mémoire seulement ; avertir avant de les perdre.
+const editForm=document.getElementById('editForm'), llmForm=document.getElementById('llmForm');
+let editBaseline='', llmBaseline='', selectedPreset=document.getElementById('presetSel').value;
+let allowUnload=false;
+function snapshot(form){return JSON.stringify(Array.from(new FormData(form).entries()).filter(([key])=>key!=='context_preset'));}
+function editDirty(){return editBaseline!==''&&snapshot(editForm)!==editBaseline;}
+function llmDirty(){return llmBaseline!==''&&snapshot(llmForm)!==llmBaseline;}
+function updateDirty(){
+  document.getElementById('editState').textContent=editDirty()?'Modifications non enregistrées.':'Version enregistrée — aucun brouillon modifié.';
+  document.getElementById('llmState').textContent=llmDirty()?'Réglages modifiés, non enregistrés.':'Configuration enregistrée.';
+}
+[editForm,llmForm].forEach(f=>['input','change'].forEach(name=>f.addEventListener(name,updateDirty)));
+window.addEventListener('beforeunload',e=>{if(!allowUnload&&(editDirty()||llmDirty())){e.preventDefault();e.returnValue='';}});
+document.addEventListener('submit',e=>{
+  if(e.defaultPrevented)return;
+  const losesEdit=e.target!==editForm&&editDirty();
+  const losesLlm=e.target!==llmForm&&llmDirty();
+  if((losesEdit||losesLlm)&&!confirm('Abandonner les modifications non enregistrées avant cette opération ?')){e.preventDefault();return;}
+  allowUnload=true;
+});
 // Editeur
 function titleRowHtml(text, font){
   var opts='';
@@ -1027,7 +1066,7 @@ function titleRowHtml(text, font){
   return '<div class="row tarow" style="gap:8px">'
     + '<input type=text name=tat_text value="'+esc+'" maxlength=16 style="flex:1" placeholder="Mot...">'
     + '<select name=tat_font style="flex:1">'+opts+'</select>'
-    + '<button class="btn btn-d" type=button onclick="this.parentElement.remove()" style="margin:0;padding:6px 12px">✕</button>'
+    + '<button class="btn btn-d" type=button onclick="this.parentElement.remove();updateDirty()" style="margin:0;padding:6px 12px">✕</button>'
     + '</div>';
 }
 function addTitleRow(text, font){
@@ -1035,6 +1074,7 @@ function addTitleRow(text, font){
   const wrap=document.getElementById('titleArtRows');
   if(wrap.querySelectorAll('.tarow').length>=TITLE_ART_MAX){alert('Maximum '+TITLE_ART_MAX+' mots.');return;}
   wrap.insertAdjacentHTML('beforeend', titleRowHtml(text, font));
+  updateDirty();
 }
 async function previewTitle(){
   const rows=document.querySelectorAll('#titleArtRows .tarow');
@@ -1056,7 +1096,10 @@ async function previewTitle(){
   }catch(e){pre.textContent='Erreur : '+e;}
 }
 function loadPreset(){
-  const k=document.getElementById('presetSel').value, p=PRESETS[k]; if(!p)return;
+  const sel=document.getElementById('presetSel'), k=sel.value, p=PRESETS[k]; if(!p)return;
+  if(editDirty()&&!confirm('Abandonner le brouillon non enregistré pour changer de personnalité ?')){sel.value=selectedPreset;return;}
+  selectedPreset=k;
+  document.getElementById('llmPreset').value=k;
   const url=new URL(location.href);url.searchParams.set('preset',k);history.replaceState(null,'',url);
   ++testSequence;
   document.getElementById('testOut').style.display='none';
@@ -1089,13 +1132,15 @@ function loadPreset(){
     f.addEventListener('submit',e=>{if(!confirm('Supprimer ce fichier de connaissance ?'))e.preventDefault();});
     li.appendChild(span);li.appendChild(f);ul.appendChild(li);
   });
+  editBaseline=snapshot(editForm);updateDirty();
 }
 function newPreset(){
+  if((editDirty()||llmDirty())&&!confirm('Abandonner les modifications non enregistrées pour créer une personnalité ?'))return;
   const label=prompt("Nom de la nouvelle personnalité :"); if(!label)return;
   const f=document.createElement('form');f.method='POST';f.action='/new-preset';
   const a=document.createElement('input');a.name='label';a.value=label;f.appendChild(a);
   const b=document.createElement('input');b.name='key';b.value=label.toLowerCase().replace(/[^a-z0-9]+/g,'_');f.appendChild(b);
-  addCsrf(f);document.body.appendChild(f);f.submit();
+  addCsrf(f);document.body.appendChild(f);allowUnload=true;f.submit();
 }
 async function genPrompt(){
   const d=document.getElementById('desc').value.trim();
@@ -1103,7 +1148,7 @@ async function genPrompt(){
   spin.style.display='block';
   try{const r=await fetch('/generate-prompt',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},body:JSON.stringify({description:d})});
     const j=await r.json();
-    if(j.ok){fsystem.value=j.prompt;fsystem.scrollIntoView({behavior:'smooth'});}else alert('Erreur: '+j.error);
+    if(j.ok){fsystem.value=j.prompt;updateDirty();fsystem.scrollIntoView({behavior:'smooth'});}else alert('Erreur: '+j.error);
   }catch(e){alert('Erreur: '+e);}
   spin.style.display='none';
 }
@@ -1137,6 +1182,7 @@ async function testPreset(reset=false){
   }catch(e){if(sequence===testSequence){out.style.display='block';out.textContent='Erreur : '+e;}}
   if(sequence===testSequence)spin.style.display='none';
 }
+llmBaseline=snapshot(llmForm);
 loadPreset();
 document.getElementById('providerSel').addEventListener('change',function(){
   document.querySelectorAll('.provider-settings').forEach(d=>d.open=d.dataset.provider===this.value);
@@ -1204,6 +1250,7 @@ def index():
         health={"uptime": system_health.uptime(), "disk": system_health.disk(PROJ_DIR),
                 "wifi": system_health.wifi(), "tailscale": system_health.tailscale()},
         deployment=system_health.deployment(DEPLOYMENT_STATUS), runtime_branch=runtime_branch(),
+        restart_status=session.get("restart_status", "aucune"),
         update_status=session.get("update_status", "non vérifiées dans cette session"),
         title_fonts=TITLE_FONTS, title_art_max=TITLE_ART_MAX_WORDS,
         active_key=data["active"], edit_key=edit_key, services=services, ip=ip_address(),
@@ -1251,10 +1298,7 @@ def save_prompt():
     if sp:
         p["system"] = sp
     save_prompts(data)
-    if k == data["active"]:
-        restart_terminal()
-    session["flash"] = f"Personnalité '{p['label']}' enregistrée."
-    session["flash_ok"] = True
+    saved_feedback(f"Personnalité '{p['label']}' enregistrée.", k == data["active"])
     return redirect(url_for("index", section="ai", preset=k))
 
 @app.route("/apply-preset", methods=["POST"])
@@ -1275,9 +1319,10 @@ def apply_preset():
                 p["system"] = request.form.get("system_prompt").strip()
         data["active"] = k
         save_prompts(data)
-        restart_terminal()
-        session["flash"] = f"Personnalité '{p.get('label', k)}' activée."
-        session["flash_ok"] = True
+        saved_feedback(f"Personnalité '{p.get('label', k)}' enregistrée et sélectionnée comme active.", True)
+    else:
+        session["flash"] = "Personnalité inconnue."
+        session["flash_ok"] = False
     return redirect(url_for("index", section="ai", preset=k))
 
 @app.route("/preview-title", methods=["POST"])
@@ -1322,10 +1367,12 @@ def delete_preset():
         del data["presets"][k]
         if data["active"] == k:
             data["active"] = next(iter(data["presets"]))
-            save_prompts(data); restart_terminal()
+            save_prompts(data)
+            saved_feedback("Personnalité supprimée ; une autre personnalité a été sélectionnée comme active.", True)
         else:
             save_prompts(data)
-        session["flash"] = "Personnalité supprimée."; session["flash_ok"] = True
+            session["flash"] = "Personnalité inactive supprimée."
+            session["flash_ok"] = True
     return redirect(url_for("index", section="ai"))
 
 @app.route("/generate-prompt", methods=["POST"])
@@ -1418,15 +1465,12 @@ def save_llm():
         if value in allowed:
             updates[key] = value
     config_store.update_env(ENV_FILE, updates)
-    restarted = restart_terminal()
-    session["flash"] = ("Configuration enregistrée ; terminal redémarré." if restarted
-                        else "Configuration enregistrée ; redémarrage non confirmé, vérifiez le service.")
-    session["flash_ok"] = restarted
+    saved_feedback("Configuration IA enregistrée.", True)
     selected_key = {"claude": anthropic_key, "linkup": linkup_key, "mistral": mistral_key}[provider]()
     if not is_real_key(selected_key):
         session["flash"] += " Aucune clé API n'est définie pour ce fournisseur."
         session["flash_ok"] = False
-    return redirect(url_for("index"))
+    return redirect(url_for("index", section="ai", preset=request.form.get("context_preset", "")))
 
 
 @app.route("/upload-knowledge", methods=["POST"])
@@ -1455,10 +1499,12 @@ def upload_knowledge():
     for name, content in uploads:
         config_store.atomic_write(knowledge_target(folder, name), content)
     n = len(uploads)
-    if key == data["active"]:
-        restart_terminal()
-    session["flash"] = f"{n} fichier(s) ajouté(s) à « {data['presets'][key].get('label', key)} »." if n else "Aucun fichier .txt valide."
-    session["flash_ok"] = bool(n)
+    if n:
+        saved_feedback(f"{n} fichier(s) ajouté(s) à « {data['presets'][key].get('label', key)} ».",
+                       key == data["active"])
+    else:
+        session["flash"] = "Aucun fichier .txt valide."
+        session["flash_ok"] = False
     return redirect(url_for("index", section="ai", preset=key))
 
 @app.route("/delete-knowledge", methods=["POST"])
@@ -1470,9 +1516,7 @@ def delete_knowledge():
     target = knowledge_target(knowledge_folder(key), fn)
     if fn and target.is_file():
         target.unlink()
-        if key == load_prompts()["active"]:
-            restart_terminal()
-        session["flash"] = f"Fichier {fn} supprimé."; session["flash_ok"] = True
+        saved_feedback(f"Fichier {fn} supprimé.", key == load_prompts()["active"])
     else:
         session["flash"] = "Fichier introuvable."; session["flash_ok"] = False
     return redirect(url_for("index", section="ai", preset=key))
@@ -1483,6 +1527,7 @@ def restart():
     ok = restart_terminal()
     session["flash"] = "Terminal redémarré." if ok else "Échec (sudo requis)."
     session["flash_ok"] = ok
+    session["restart_status"] = session["flash"]
     return redirect(url_for("index", section="maintenance"))
 
 @app.route("/check-update", methods=["POST"])

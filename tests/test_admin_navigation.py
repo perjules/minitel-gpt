@@ -95,3 +95,38 @@ def test_health_parsing_and_malformed_optional_state(tmp_path, monkeypatch):
         assert system_health.deployment(state) == {"phase": "indisponible"}
     state.write_text('{"phase":"failed","error_type":"OSError"}')
     assert system_health.deployment(state)["error_type"] == "OSError"
+
+
+@pytest.mark.parametrize("route,form", [
+    ("/save-prompt", {"preset_key": "main", "system_prompt": "saved draft"}),
+    ("/apply-preset", {"preset_key": "other"}),
+    ("/save-llm", {"llm_provider": "mistral", "mistral_key": "synthetic-api-key"}),
+])
+def test_saved_configuration_is_distinct_from_restart_failure(console, route, form):
+    client, headers, prompts = console
+    admin.restart_terminal.return_value = False
+    response = client.post(route, data=form, headers=headers)
+    assert response.status_code == 302 and "section=ai" in response.location
+    with client.session_transaction() as session:
+        assert session["flash_ok"] is False
+        assert "enregistrée" in session["flash"]
+        assert "Redémarrage non confirmé" in session["flash"]
+    data = config_store.read_prompts(prompts)
+    if route == "/save-prompt":
+        assert data["presets"]["main"]["system"] == "saved draft"
+    elif route == "/apply-preset":
+        assert data["active"] == "other"
+    else:
+        assert admin.read_env()["MISTRAL_KEY"] == "synthetic-api-key"
+
+
+def test_inactive_edit_stays_inactive_and_keeps_editor_context(console):
+    client, headers, prompts = console
+    response = client.post("/save-prompt", data={"preset_key": "other", "system_prompt": "new draft"},
+                           headers=headers)
+    assert "section=ai" in response.location and "preset=other" in response.location
+    data = config_store.read_prompts(prompts)
+    assert data["active"] == "main" and data["presets"]["other"]["system"] == "new draft"
+    admin.restart_terminal.assert_not_called()
+    with client.session_transaction() as session:
+        assert session["flash_ok"] and "activer celle-ci" in session["flash"]
