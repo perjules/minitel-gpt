@@ -409,15 +409,15 @@ def restart_terminal():
         r = subprocess.run(["sudo", "-n", "systemctl", "restart", "minitel-chatgpt"],
                            capture_output=True, text=True, check=False, timeout=15)
         return r.returncode == 0
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, UnicodeError, subprocess.SubprocessError):
         return False
 
 
 def svc_status(name):
     try:
         return subprocess.run(["systemctl", "is-active", name], capture_output=True,
-                              text=True, check=False, timeout=5).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
+                              text=True, check=False, timeout=5).stdout.strip() or "indisponible"
+    except (OSError, UnicodeError, subprocess.SubprocessError):
         return "unavailable"
 
 
@@ -426,7 +426,7 @@ def ip_address():
         out = subprocess.run(["hostname", "-I"], capture_output=True, text=True,
                              check=False, timeout=5).stdout
         return out.split()[0] if out.split() else "?"
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, UnicodeError, subprocess.SubprocessError):
         return "?"
 
 
@@ -739,7 +739,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <p>Stockage : {% if health.disk %}{{health.disk.free_gib}} / {{health.disk.total_gib}} Gio libres · {{health.disk.used_percent}} % utilisé{% if health.disk.warning %} — ATTENTION : espace faible{% endif %}{% else %}indisponible{% endif %}</p>
     <p>Version : <b>{{version}}</b></p>
     <p>Mises à jour : {{update_status}}</p>
-    <p>Dernier déploiement : {{deployment.phase}}{% if deployment.error %} · {{deployment.error}}{% endif %}</p>
+    <p>Dernier déploiement : {{deployment.phase}}{% if deployment.error_type %} · {{deployment.error_type}}{% endif %}</p>
     <p>Personnalité active : <b>{{presets[active_key].label}}</b></p>
     <p class=sub>Connexion gérée par NetworkManager ; le portail Wi-Fi sert au provisionnement au démarrage.</p>
     <a href="/?section=ai">Configurer l’IA et la personnalité</a>
@@ -931,7 +931,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <h2>🔄 Mise à jour de l'application</h2>
     <p class=sub>Version installée : <b>{{version}}</b> · branche suivie : {{runtime_branch}}</p>
     <p>Mises à jour : {{update_status}}</p>
-    <p>Dernier déploiement : <b>{{deployment.phase}}</b>{% if deployment.error %} · {{deployment.error}}{% endif %}</p>
+    <p>Dernier déploiement : <b>{{deployment.phase}}</b>{% if deployment.error_type %} · {{deployment.error_type}}{% endif %}</p>
     <a href="/?section=maintenance">Actualiser l’état</a>
     <form method=POST action=/check-update style=margin:0><input type=hidden name=csrf value="{{csrf_token()}}">
       <button class="btn btn-s">Vérifier les mises à jour</button>
@@ -959,19 +959,9 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
   <div class=block>
     <h2>Stockage</h2>
     <p class=sub>Mesures en Mio. Les archives de conversation et anciens journaux restent conservés.</p>
-    <pre id=storage-status>Chargement…</pre>
-    <script>
-    fetch('/storage-status').then(r => r.json()).then(s => {
-      const mib = n => (n / 1048576).toFixed(1);
-      const size = x => mib(x.bytes) + (x.partial ? ' (mesure partielle)' : '');
-      document.getElementById('storage-status').textContent = s.error ? 'Stockage indisponible' :
-        (s.warning ? 'ATTENTION : espace libre faible\\n' : '') +
-        'Libre : ' + mib(s.free_bytes) + ' Mio\\n' +
-        'Anciens logs + Rose : ' + size(s.legacy_logs_and_rose) + ' Mio\\n' +
-        'Dont transcriptions Rose : ' + size(s.rose_transcripts) + ' Mio\\n' +
-        'Mémoire + conversations : ' + size(s.memory_and_conversations) + ' Mio';
-    }).catch(() => { document.getElementById('storage-status').textContent = 'Stockage indisponible'; });
-    </script>
+    <pre id=storage-status>Ouvrir Maintenance pour charger les mesures détaillées.</pre>
+    <noscript><a href="/storage-status">Consulter les mesures détaillées du stockage</a></noscript>
+
   </div>
 </section>
 
@@ -985,8 +975,24 @@ const ACTIVE = {{active_key|tojson}};
 const KNOWLEDGE = {{knowledge|tojson}};
 const TITLE_FONTS = {{title_fonts|tojson}};
 const TITLE_ART_MAX = {{title_art_max}};
+let storageLoaded=false;
+function loadStorage(){
+  if(storageLoaded)return;
+  storageLoaded=true;
+    fetch('/storage-status').then(r => r.json()).then(s => {
+      const mib = n => (n / 1048576).toFixed(1);
+      const size = x => mib(x.bytes) + (x.partial ? ' (mesure partielle)' : '');
+      document.getElementById('storage-status').textContent = s.error ? 'Stockage indisponible' :
+        (s.warning ? 'ATTENTION : espace libre faible\\n' : '') +
+        'Libre : ' + mib(s.free_bytes) + ' Mio\\n' +
+        'Anciens logs + Rose : ' + size(s.legacy_logs_and_rose) + ' Mio\\n' +
+        'Dont transcriptions Rose : ' + size(s.rose_transcripts) + ' Mio\\n' +
+        'Mémoire + conversations : ' + size(s.memory_and_conversations) + ' Mio';
+    }).catch(() => { document.getElementById('storage-status').textContent = 'Stockage indisponible'; });
+}
 // Navigation locale : garde les champs édités ; les liens fonctionnent aussi sans JS.
 function showSection(section){
+  if(section==='maintenance')loadStorage();
   document.querySelectorAll('nav.tabs a').forEach(a=>{
     const active=a.dataset.tab===section;
     a.classList.toggle('active',active);
@@ -999,6 +1005,7 @@ document.querySelectorAll('nav.tabs a').forEach(a=>a.addEventListener('click',e=
   const url=new URL(location.href);url.searchParams.set('section',a.dataset.tab);
   history.replaceState(null,'',url);
 }));
+if(document.getElementById('maintenance').classList.contains('active'))loadStorage();
 // Editeur
 function titleRowHtml(text, font){
   var opts='';
@@ -1698,7 +1705,7 @@ GMAIL_HTML = """<!doctype html><html lang="fr"><meta charset="utf-8">
 <style>body{background:#101820;color:#eee;font:16px system-ui;max-width:700px;margin:2em auto;padding:1em}
 pre{font:16px monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:#000;color:#7fffa0;padding:1em}
 input,button{font:inherit;padding:.5em;margin:.2em} input[type=text]{width:90%}</style>
-<a href="/">Administration</a><h1>Gmail</h1>
+<a href="/?section=services">Retour aux services</a><h1>Gmail</h1>
 <p>Destination mémoire/journal : {{ memory_label }}. Le nom se choisit dans le test de personnalité.</p>
 <p>Brouillons temporaires; commandes et réponses visibles journalisées dans la mémoire sélectionnée au test de personnalité. Lecture sans marquer comme lu. Le modèle ne peut pas envoyer.</p>
 {% if not enabled %}<p>Gmail désactivé. Suivre docs/GMAIL.md pour la connexion sur ordinateur.</p>{% endif %}
