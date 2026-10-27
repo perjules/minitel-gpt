@@ -719,7 +719,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 <!-- TABLEAU DE BORD -->
 <section class="panel {{'active' if section=='dash'}}" id=dash>
   <div class=block>
-    <h2>État du Pi</h2>
+    <h2>Services de l’appareil</h2>
     <p class=ipbox>Adresse : <b>http://{{ip}}:8080</b></p>
     {% for s,st in services.items() %}
     <div class=row><span class="dot {{'on' if st=='active' else 'off'}}"></span>{{s}}
@@ -729,6 +729,24 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       <button class="btn btn-s">↺ Redémarrer le terminal</button></form>
     <p class=sub>« inactive » sur wifi/boot = normal (services ponctuels).</p>
   </div>
+
+  <div class=block>
+    <h2>Réseau et logiciel</h2>
+    <p>Version : <b>{{version}}</b></p>
+    <p>Personnalité active : <b>{{presets[active_key].label}}</b></p>
+    <p class=sub>Connexion gérée par NetworkManager ; le portail Wi-Fi sert au provisionnement au démarrage.</p>
+    <a href="/?section=ai">Configurer l’IA et la personnalité</a>
+  </div>
+  <div class=block>
+    <h2>Journal récent du Minitel</h2>
+    <pre>{{log_chatgpt.splitlines()[-5:]|join('\n')}}</pre>
+    <a href="/?section=maintenance">Diagnostics, stockage et contrôles dans Maintenance</a>
+  </div>
+
+</section>
+
+<!-- PERSONNALITES (editeur) -->
+<section class="panel {{'active' if section=='ai'}}" id=ai>
   <div class=block>
     <h2>Personnalités disponibles</h2>
     <p class=sub>La personnalité active est celle utilisée par le Minitel.</p>
@@ -747,10 +765,6 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       {% endfor %}
     </ul>
   </div>
-</section>
-
-<!-- PERSONNALITES (editeur) -->
-<section class="panel {{'active' if section=='ai'}}" id=ai>
   <div class=block>
     <h2>Éditeur de personnalités</h2>
     <div class=toolbar>
@@ -912,8 +926,16 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     </form>
     <p class=sub style=margin-top:8px>La mise à jour récupère le code depuis GitHub. Tes personnalités, clés et fichiers de connaissance ne sont pas touchés.</p>
   </div>
+
+</section>
+
+<section class="panel {{'active' if section=='services'}}" id=services>
+  <div class=block><h2>Gmail</h2><p><a href="/gmail">Lire, répondre et écrire depuis le Minitel</a></p></div>
+  <div class=block><h2>PRONOTE</h2><p><a href="/pronote">Connexion parent et enfants autorisés</a></p></div>
+</section>
+<section class="panel {{'active' if section=='maintenance'}}" id=maintenance>
   <div class=block>
-    <h2>Logs du terminal <a href=/ class=sub style=margin-left:8px>rafraîchir</a></h2>
+    <h2>Journal du terminal <a href="/?section=maintenance" class=sub>Actualiser</a></h2>
     <pre>{{log_chatgpt}}</pre>
   </div>
   <div class=block>
@@ -933,14 +955,6 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     }).catch(() => { document.getElementById('storage-status').textContent = 'Stockage indisponible'; });
     </script>
   </div>
-</section>
-
-<section class="panel {{'active' if section=='services'}}" id=services>
-  <div class=block><h2>Gmail</h2><p><a href="/gmail">Lire, répondre et écrire depuis le Minitel</a></p></div>
-  <div class=block><h2>PRONOTE</h2><p><a href="/pronote">Connexion parent et enfants autorisés</a></p></div>
-</section>
-<section class="panel {{'active' if section=='maintenance'}}" id=maintenance>
-  <div class=block><h2>Maintenance</h2><p class=sub>Les contrôles opérationnels seront regroupés ici.</p></div>
 </section>
 
 </div></main>
