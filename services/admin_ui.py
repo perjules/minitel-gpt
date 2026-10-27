@@ -671,6 +671,7 @@ main{max-width:920px;margin:0 auto;padding:0 20px}
 .block{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:16px}
 .block:last-child{margin-bottom:0}
 h2{color:var(--accent);margin:0 0 6px;font-size:1.1em}
+details.provider-settings{border-left:3px solid var(--accent);padding:10px 12px;margin-top:12px}summary{cursor:pointer;color:var(--accent);padding:6px 0}
 h3{color:var(--accent);font-size:1em;margin:14px 0 6px}
 .sub{color:var(--muted);font-size:.8em;margin:0 0 12px}
 label{color:#b8b8c0;font-size:.85em;display:block;margin:10px 0 4px}
@@ -754,6 +755,77 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 
 <!-- PERSONNALITES (editeur) -->
 <section class="panel {{'active' if section=='ai'}}" id=ai>
+  <div class=block>
+    <h2>Fournisseur, modèle et clés API</h2>
+    <p>Fournisseur enregistré : <b>{{provider}}</b></p>
+    <p class=sub>Choisissez le moteur d'IA et son modèle. Le terminal et la génération
+      de prompts utilisent le fournisseur sélectionné. La clé de chaque fournisseur
+      est conservée indépendamment - vous pouvez basculer sans la ressaisir.</p>
+    <form method=POST action=/save-llm id=llmForm><input type=hidden name=csrf value="{{csrf_token()}}">
+      <label>Fournisseur utilisé</label>
+      <select name=llm_provider id=providerSel>
+        <option value=mistral {{'selected' if provider=='mistral'}}>Mistral</option>
+        <option value=claude {{'selected' if provider=='claude'}}>Claude (Anthropic)</option>
+        <option value=linkup {{'selected' if provider=='linkup'}}>Linkup (recherche web)</option>
+      </select>
+      {% if provider=='linkup' %}
+      <p class=sub style="margin-top:8px;color:#e0b84a">⚠ Linkup est un moteur de recherche web,
+        pas un générateur de texte : la personnalité (prompt système) et l'historique de
+        conversation ne s'appliquent pas. Chaque question devient une recherche web isolée,
+        dont la réponse sourcée sert de réponse du terminal.</p>
+      {% endif %}
+
+      <details class=provider-settings data-provider=mistral {{'open' if provider=='mistral'}}>
+        <summary>Mistral</summary>
+        <label>Clé API Mistral <span class="dot {{'off' if mistral_key_masked=='(absente)' else 'on'}}"></span><span class="keystat" style="color:{{'var(--danger)' if mistral_key_masked=='(absente)' else 'var(--accent)'}}">{{mistral_key_masked}}</span></label>
+        <input type=password name=mistral_key placeholder="clé Mistral... (vide = conserver l'actuelle)">
+        <label class=clearkey><input type=checkbox name=mistral_key_clear> Supprimer la clé existante</label>
+        <p class=sub style=margin:6px 0 0>Pas encore de clé ?
+          <a href="https://admin.mistral.ai/organization/api-keys" target=_blank rel=noopener>Créer une clé API Mistral &#8599;</a></p>
+        <label>Modèle Mistral</label>
+        <select name=mistral_model>
+          {% for mid,desc in mistral_models %}
+          <option value="{{mid}}" {{'selected' if mid==mistral_model}}>{{desc}}</option>
+          {% endfor %}
+        </select>
+      </details>
+
+      <details class=provider-settings data-provider=claude {{'open' if provider=='claude'}}>
+        <summary>Claude (Anthropic)</summary>
+        <label>Clé API Claude <span class="dot {{'off' if claude_key_masked=='(absente)' else 'on'}}"></span><span class="keystat" style="color:{{'var(--danger)' if claude_key_masked=='(absente)' else 'var(--accent)'}}">{{claude_key_masked}}</span></label>
+        <input type=password name=anthropic_key placeholder="clé Anthropic sk-ant-... (vide = conserver l'actuelle)">
+        <label class=clearkey><input type=checkbox name=anthropic_key_clear> Supprimer la clé existante</label>
+        <p class=sub style=margin:6px 0 0>Pas encore de clé ?
+          <a href="https://platform.claude.com/" target=_blank rel=noopener>Créer une clé API Claude &#8599;</a></p>
+        <label>Modèle Claude</label>
+        <select name=claude_model>
+          {% for cid,desc in claude_models %}
+          <option value="{{cid}}" {{'selected' if cid==claude_model}}>{{desc}}</option>
+          {% endfor %}
+        </select>
+      </details>
+
+      <details class=provider-settings data-provider=linkup {{'open' if provider=='linkup'}}>
+        <summary>Linkup (recherche web)</summary>
+        <label>Clé API Linkup <span class="dot {{'off' if linkup_key_masked=='(absente)' else 'on'}}"></span><span class="keystat" style="color:{{'var(--danger)' if linkup_key_masked=='(absente)' else 'var(--accent)'}}">{{linkup_key_masked}}</span></label>
+        <input type=password name=linkup_key placeholder="clé Linkup... (vide = conserver l'actuelle)">
+        <label class=clearkey><input type=checkbox name=linkup_key_clear> Supprimer la clé existante</label>
+        <p class=sub style=margin:6px 0 0>Pas encore de clé ?
+          <a href="https://app.linkup.so" target=_blank rel=noopener>Créer une clé API Linkup &#8599;</a></p>
+        <label>Profondeur de recherche</label>
+        <select name=linkup_depth>
+          {% for did,desc in linkup_depths %}
+          <option value="{{did}}" {{'selected' if did==linkup_depth}}>{{desc}}</option>
+          {% endfor %}
+        </select>
+      </details>
+
+      <hr>
+      <button class="btn btn-p">💾 Enregistrer la configuration</button>
+    </form>
+    <p class=sub>Les clés non modifiées sont conservées. Ouvrir un fournisseur pour modifier son modèle et ses options existantes.</p>
+  </div>
+
   <div class=block>
     <h2>Personnalités disponibles</h2>
     <p class=sub>La personnalité active est celle utilisée par le Minitel.</p>
@@ -843,75 +915,6 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <button class="btn btn-p" type=button onclick=testPreset()>Envoyer</button>
     <div id=testSpin style="display:none;color:var(--muted);margin-top:8px">⏳ Réponse en cours...</div>
     <pre id=testOut style="display:none;margin-top:12px"></pre>
-  </div>
-  <div class=block>
-    <h2>Fournisseur d'IA (LLM)</h2>
-    <p class=sub>Choisissez le moteur d'IA et son modèle. Le terminal et la génération
-      de prompts utilisent le fournisseur sélectionné. La clé de chaque fournisseur
-      est conservée indépendamment - vous pouvez basculer sans la ressaisir.</p>
-    <form method=POST action=/save-llm><input type=hidden name=csrf value="{{csrf_token()}}">
-      <label>Fournisseur utilisé</label>
-      <select name=llm_provider>
-        <option value=mistral {{'selected' if provider=='mistral'}}>Mistral</option>
-        <option value=claude {{'selected' if provider=='claude'}}>Claude (Anthropic)</option>
-        <option value=linkup {{'selected' if provider=='linkup'}}>Linkup (recherche web)</option>
-      </select>
-      {% if provider=='linkup' %}
-      <p class=sub style="margin-top:8px;color:#e0b84a">⚠ Linkup est un moteur de recherche web,
-        pas un générateur de texte : la personnalité (prompt système) et l'historique de
-        conversation ne s'appliquent pas. Chaque question devient une recherche web isolée,
-        dont la réponse sourcée sert de réponse du terminal.</p>
-      {% endif %}
-
-      <div style="border-left:3px solid var(--accent);padding-left:12px;margin-top:16px">
-        <h3 style=margin-top:4px>Mistral</h3>
-        <label>Clé API Mistral <span class="dot {{'off' if mistral_key_masked=='(absente)' else 'on'}}"></span><span class="keystat" style="color:{{'var(--danger)' if mistral_key_masked=='(absente)' else 'var(--accent)'}}">{{mistral_key_masked}}</span></label>
-        <input type=password name=mistral_key placeholder="clé Mistral... (vide = conserver l'actuelle)">
-        <label class=clearkey><input type=checkbox name=mistral_key_clear> Supprimer la clé existante</label>
-        <p class=sub style=margin:6px 0 0>Pas encore de clé ?
-          <a href="https://admin.mistral.ai/organization/api-keys" target=_blank rel=noopener>Créer une clé API Mistral &#8599;</a></p>
-        <label>Modèle Mistral</label>
-        <select name=mistral_model>
-          {% for mid,desc in mistral_models %}
-          <option value="{{mid}}" {{'selected' if mid==mistral_model}}>{{desc}}</option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div style="border-left:3px solid var(--accent);padding-left:12px;margin-top:16px">
-        <h3 style=margin-top:4px>Claude (Anthropic)</h3>
-        <label>Clé API Claude <span class="dot {{'off' if claude_key_masked=='(absente)' else 'on'}}"></span><span class="keystat" style="color:{{'var(--danger)' if claude_key_masked=='(absente)' else 'var(--accent)'}}">{{claude_key_masked}}</span></label>
-        <input type=password name=anthropic_key placeholder="clé Anthropic sk-ant-... (vide = conserver l'actuelle)">
-        <label class=clearkey><input type=checkbox name=anthropic_key_clear> Supprimer la clé existante</label>
-        <p class=sub style=margin:6px 0 0>Pas encore de clé ?
-          <a href="https://platform.claude.com/" target=_blank rel=noopener>Créer une clé API Claude &#8599;</a></p>
-        <label>Modèle Claude</label>
-        <select name=claude_model>
-          {% for cid,desc in claude_models %}
-          <option value="{{cid}}" {{'selected' if cid==claude_model}}>{{desc}}</option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div style="border-left:3px solid var(--accent);padding-left:12px;margin-top:16px">
-        <h3 style=margin-top:4px>Linkup (recherche web)</h3>
-        <label>Clé API Linkup <span class="dot {{'off' if linkup_key_masked=='(absente)' else 'on'}}"></span><span class="keystat" style="color:{{'var(--danger)' if linkup_key_masked=='(absente)' else 'var(--accent)'}}">{{linkup_key_masked}}</span></label>
-        <input type=password name=linkup_key placeholder="clé Linkup... (vide = conserver l'actuelle)">
-        <label class=clearkey><input type=checkbox name=linkup_key_clear> Supprimer la clé existante</label>
-        <p class=sub style=margin:6px 0 0>Pas encore de clé ?
-          <a href="https://app.linkup.so" target=_blank rel=noopener>Créer une clé API Linkup &#8599;</a></p>
-        <label>Profondeur de recherche</label>
-        <select name=linkup_depth>
-          {% for did,desc in linkup_depths %}
-          <option value="{{did}}" {{'selected' if did==linkup_depth}}>{{desc}}</option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <hr>
-      <button class="btn btn-p">💾 Enregistrer la configuration</button>
-    </form>
-    <p class=sub style=margin-top:10px>Adresse de l'admin : consultable sur le Minitel via la touche <b>Guide</b>.</p>
   </div>
 
 </section>
@@ -1122,6 +1125,9 @@ async function testPreset(reset=false){
   if(sequence===testSequence)spin.style.display='none';
 }
 loadPreset();
+document.getElementById('providerSel').addEventListener('change',function(){
+  document.querySelectorAll('.provider-settings').forEach(d=>d.open=d.dataset.provider===this.value);
+});
 // Desactive le champ mot de passe quand "Supprimer la cle existante" est coche
 document.querySelectorAll('.clearkey input[type=checkbox]').forEach(function(cb){
   cb.addEventListener('change', function(){
