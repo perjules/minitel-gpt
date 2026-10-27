@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Interface d'administration MINITEL GPT - http://<ip>:8080  (mot de passe 13100)
-Navigation par onglets : Tableau de bord · Personnalités · Paramètres.
+Interface d'administration MINITEL GPT - http://<ip>:8080.
+Navigation : Tableau de bord · Configuration IA · Services · Maintenance.
 """
 import hmac
 import io
@@ -660,9 +660,9 @@ body{background:var(--bg);color:var(--text);font-family:'Courier New',monospace;
 .brand b{font-size:1.05em;color:var(--text)}
 .logout{color:var(--muted);text-decoration:none;font-size:.85em}.logout:hover{color:var(--danger)}
 nav.tabs{display:flex;gap:4px;max-width:920px;margin:18px auto 0;padding:0 20px;flex-wrap:wrap}
-nav.tabs button{background:transparent;border:1px solid var(--border);border-bottom:none;
-  color:var(--muted);padding:11px 20px;border-radius:8px 8px 0 0;cursor:pointer;font-family:inherit;font-size:.95em}
-nav.tabs button.active{background:var(--card);color:var(--accent);border-color:var(--border);font-weight:bold}
+nav.tabs a{background:transparent;border:1px solid var(--border);border-bottom:none;
+  color:var(--muted);padding:11px 20px;border-radius:8px 8px 0 0;cursor:pointer;font-family:inherit;font-size:.95em;text-decoration:none}
+nav.tabs a.active{background:var(--card);color:var(--accent);border-color:var(--border);font-weight:bold}
 main{max-width:920px;margin:0 auto;padding:0 20px}
 .tabwrap{background:var(--card);border:1px solid var(--border);border-radius:0 10px 10px 10px;padding:20px}
 .panel{display:none}.panel.active{display:block}
@@ -698,6 +698,7 @@ pre{background:var(--bg);padding:10px;border-radius:6px;font-size:.72em;max-heig
 .fok{background:#10302b;color:var(--accent);border:1px solid var(--accent)}
 .ferr{background:#301414;color:var(--danger);border:1px solid var(--danger)}
 #spin{display:none;color:var(--muted);margin-top:8px}
+@media(max-width:600px){nav.tabs{padding:0 10px}nav.tabs a{flex:1 1 45%;text-align:center;padding:12px 8px}main{padding:0 10px}.tabwrap{padding:12px}.brand{gap:6px}.brand b{font-size:.9em}.row,.plist li{flex-wrap:wrap}input,select,textarea{min-width:0}}
 hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 .ipbox{font-size:.9em;color:var(--muted)}.ipbox b{color:var(--accent)}
 </style></head><body>
@@ -709,14 +710,14 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 {% if flash %}<div class="flash {{'fok' if flash_ok else 'ferr'}}">{{flash}}</div>{% endif %}
 
 <nav class=tabs>
-  <button data-tab=dash class=active>Tableau de bord</button>
-  <button data-tab=perso>Personnalités</button>
-  <button data-tab=params>Paramètres</button>
+  {% for key,label in [('dash','Tableau de bord'),('ai','Configuration IA'),('services','Services'),('maintenance','Maintenance')] %}
+  <a href="{{url_for('index', section=key)}}" data-tab="{{key}}" class="{{'active' if section==key}}" {{'aria-current=page' if section==key}}>{{label}}</a>
+  {% endfor %}
 </nav>
 <main><div class=tabwrap>
 
 <!-- TABLEAU DE BORD -->
-<section class="panel active" id=dash>
+<section class="panel {{'active' if section=='dash'}}" id=dash>
   <div class=block>
     <h2>État du Pi</h2>
     <p class=ipbox>Adresse : <b>http://{{ip}}:8080</b></p>
@@ -749,7 +750,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 </section>
 
 <!-- PERSONNALITES (editeur) -->
-<section class=panel id=perso>
+<section class="panel {{'active' if section=='ai'}}" id=ai>
   <div class=block>
     <h2>Éditeur de personnalités</h2>
     <div class=toolbar>
@@ -822,12 +823,6 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <div id=testSpin style="display:none;color:var(--muted);margin-top:8px">⏳ Réponse en cours...</div>
     <pre id=testOut style="display:none;margin-top:12px"></pre>
   </div>
-</section>
-
-<!-- PARAMETRES -->
-<section class=panel id=params>
-  <div class=block><h2>Gmail</h2><p><a href="/gmail">Lire, répondre et écrire depuis le Minitel</a></p></div>
-  <div class=block><h2>PRONOTE</h2><p><a href="/pronote">Connexion parent et enfants autorisés</a></p></div>
   <div class=block>
     <h2>Fournisseur d'IA (LLM)</h2>
     <p class=sub>Choisissez le moteur d'IA et son modèle. Le terminal et la génération
@@ -940,6 +935,14 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
   </div>
 </section>
 
+<section class="panel {{'active' if section=='services'}}" id=services>
+  <div class=block><h2>Gmail</h2><p><a href="/gmail">Lire, répondre et écrire depuis le Minitel</a></p></div>
+  <div class=block><h2>PRONOTE</h2><p><a href="/pronote">Connexion parent et enfants autorisés</a></p></div>
+</section>
+<section class="panel {{'active' if section=='maintenance'}}" id=maintenance>
+  <div class=block><h2>Maintenance</h2><p class=sub>Les contrôles opérationnels seront regroupés ici.</p></div>
+</section>
+
 </div></main>
 
 <script>
@@ -950,21 +953,20 @@ const ACTIVE = {{active_key|tojson}};
 const KNOWLEDGE = {{knowledge|tojson}};
 const TITLE_FONTS = {{title_fonts|tojson}};
 const TITLE_ART_MAX = {{title_art_max}};
-// Onglets
-document.querySelectorAll('nav.tabs button').forEach(b=>{
-  b.onclick=()=>{
-    document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.remove('active'));
-    document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
-    b.classList.add('active');
-    document.getElementById(b.dataset.tab).classList.add('active');
-    localStorage.setItem('mgptTab', b.dataset.tab);
-  };
-});
-(function(){const t=localStorage.getItem('mgptTab');
-  if(t&&document.getElementById(t)){
-    document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.toggle('active',x.dataset.tab===t));
-    document.querySelectorAll('.panel').forEach(x=>x.classList.toggle('active',x.id===t));
-  }})();
+// Navigation locale : garde les champs édités ; les liens fonctionnent aussi sans JS.
+function showSection(section){
+  document.querySelectorAll('nav.tabs a').forEach(a=>{
+    const active=a.dataset.tab===section;
+    a.classList.toggle('active',active);
+    if(active)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');
+  });
+  document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id===section));
+}
+document.querySelectorAll('nav.tabs a').forEach(a=>a.addEventListener('click',e=>{
+  e.preventDefault();showSection(a.dataset.tab);
+  const url=new URL(location.href);url.searchParams.set('section',a.dataset.tab);
+  history.replaceState(null,'',url);
+}));
 // Editeur
 function titleRowHtml(text, font){
   var opts='';
@@ -1038,7 +1040,7 @@ function newPreset(){
   const f=document.createElement('form');f.method='POST';f.action='/new-preset';
   const a=document.createElement('input');a.name='label';a.value=label;f.appendChild(a);
   const b=document.createElement('input');b.name='key';b.value=label.toLowerCase().replace(/[^a-z0-9]+/g,'_');f.appendChild(b);
-  addCsrf(f);document.body.appendChild(f);localStorage.setItem('mgptTab','perso');f.submit();
+  addCsrf(f);document.body.appendChild(f);f.submit();
 }
 async function genPrompt(){
   const d=document.getElementById('desc').value.trim();
@@ -1127,6 +1129,9 @@ def logout():
 @app.route("/")
 @require_login
 def index():
+    section = request.args.get("section", "dash")
+    if section not in {"dash", "ai", "services", "maintenance"}:
+        section = "dash"
     data = load_prompts()
     presets = normalized_presets(data)
     services = {"minitel-chatgpt": svc_status("minitel-chatgpt"),
@@ -1134,7 +1139,7 @@ def index():
                 "admin-ui": svc_status("admin-ui")}
     flash = session.pop("flash", None); flash_ok = session.pop("flash_ok", False)
     return render_template_string(
-        ADMIN_HTML, presets=presets, knowledge=all_knowledge(),
+        ADMIN_HTML, section=section, presets=presets, knowledge=all_knowledge(),
         title_fonts=TITLE_FONTS, title_art_max=TITLE_ART_MAX_WORDS,
         active_key=data["active"], services=services, ip=ip_address(),
         log_chatgpt=log_tail("chatgpt"),
@@ -1472,7 +1477,7 @@ PRONOTE_HTML = """<!doctype html><html lang="fr"><meta charset="utf-8">
 body{font:16px system-ui;max-width:800px;margin:24px auto;padding:16px;background:#111;color:#eee}
 a{color:#7cf}input,textarea,select,button{box-sizing:border-box;width:100%;padding:10px;margin:6px 0 16px}
 input[type=checkbox]{width:auto}label{display:block}fieldset{margin:24px 0}pre{white-space:pre-wrap}
-</style><a href="/">Retour administration</a><h1>PRONOTE</h1>
+</style><a href="/?section=services">Retour aux services</a><h1>PRONOTE</h1>
 <p>Lecture seule : devoirs et notes. Les identifiants restent sur ce Pi.
 Les résultats scolaires minimaux sont transmis à Mistral pour répondre.</p>
 <p>Dépendance installée : {{ 'oui' if status.dependency_ready else 'non — installer scripts/install_pronote.sh' }}.
