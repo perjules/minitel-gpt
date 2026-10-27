@@ -65,8 +65,10 @@ fi
 if [ ! -f "$PROJ_DIR/.env" ] && [ -f "$PROJ_DIR/config/env.example" ]; then
   cp "$PROJ_DIR/config/env.example" "$PROJ_DIR/.env"
   chown minitel:minitel "$PROJ_DIR/.env"
-  echo "      .env créé depuis env.example (renseigner la clé via l'admin)"
+  echo "      .env créé depuis env.example (définir ADMIN_PASSWORD avant de se connecter)"
 fi
+
+chmod 600 "$PROJ_DIR/.env"
 
 # ── Règle sudo (l'admin web redémarre les services sans mot de passe) ───────
 echo "[6/7] Règle sudo..."
@@ -87,12 +89,12 @@ echo "   wifi-manager touche au reseau et peut couper la session SSH) :"
 echo "     sudo reboot"
 echo "   (ou, sans reboot : sudo systemctl start admin-ui minitel-chatgpt wifi-manager)"
 echo ""
-echo "2. Renseigner la cle API depuis l'admin web (aucun .env a editer a la main) :"
-echo "   un .env par defaut a ete cree. Choisir le fournisseur (Mistral ou Claude)"
-echo "   et coller la cle dans l'onglet Parametres."
+echo "2. Definir ADMIN_PASSWORD dans .env puis redemarrer admin-ui."
+echo "   Ensuite choisir le fournisseur (Mistral ou Claude)"
+echo "   et coller la cle dans l'onglet Configuration IA."
 echo ""
-echo "3. Admin web : http://<ip-du-pi>:8080   (mot de passe : mistral)"
-echo "   - onglet Parametres > Mise a jour : met a jour le code depuis GitHub"
+echo "3. Admin web : http://<ip-du-pi>:8080 (ADMIN_PASSWORD requis, aucun mot de passe par defaut)"
+echo "   - onglet Maintenance > Mise a jour : met a jour le code depuis GitHub"
 echo "   - l'IP s'affiche aussi sur le Minitel via la touche GUIDE"
 echo ""
 echo "Cablage DIN : seules 3 broches (1=Rx, 2=GND, 3=Tx) ; 4 et 5 LIBRES."

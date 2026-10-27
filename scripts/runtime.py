@@ -321,7 +321,7 @@ PrivateMounts=yes
             time.sleep(min(1, max(0, deadline - time.monotonic())))
         raise RuntimeError("Service readiness deadline exceeded")
 
-    def switch(self, candidate, old, *, branch, target=None):
+    def switch(self, candidate, old, *, branch, target=None, checkout_branch=None):
         running = self.running()
         old_commit = old.get("active", {}).get("commit") or self.git("rev-parse", "HEAD")
         paths = [self.system_path(f"/etc/systemd/system/{service}.service") for service in SERVICES]
@@ -337,6 +337,8 @@ PrivateMounts=yes
         try:
             if running:
                 self.command(["systemctl", "stop", *running])
+            if checkout_branch:
+                self.checkout(checkout_branch)
             if target:
                 self.git("reset", "--hard", target)
             self.activate(candidate)
@@ -352,8 +354,11 @@ PrivateMounts=yes
                 self.wait_ready(running, healthchecks=bool(candidate.get("healthcheck")))
             atomic_json(self.state / "runtime.json", {
                 "version": 1, "branch": branch, "active": candidate, "previous": old.get("active"),
+                "previous_branch": old.get("branch", branch),
             })
         except Exception:
+            if checkout_branch:
+                self.git("switch", old["branch"])
             if target or old.get("active"):
                 self.git("reset", "--hard", old_commit)
             if previous_pointer:
@@ -463,9 +468,76 @@ PrivateMounts=yes
             raise RuntimeError("No retained code/environment pair to restore")
         if self.git("status", "--porcelain", "--untracked-files=no"):
             raise RuntimeError("Commit or stash tracked changes before rolling back")
-        self.switch(previous, old, branch=old["branch"], target=previous["commit"])
+        branch = old.get("previous_branch", old["branch"])
+        options = {"checkout_branch": branch} if branch != old["branch"] else {}
+        self.switch(previous, old, branch=branch, target=previous["commit"], **options)
         self.status("ready", commit=previous["commit"])
         self.maintain()
+
+    def valid_branch(self, branch):
+        if not isinstance(branch, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}", branch):
+            raise RuntimeError("Invalid branch name")
+        self.git("check-ref-format", "--branch", branch)
+
+    def checkout(self, branch):
+        self.valid_branch(branch)
+        try:
+            self.git("show-ref", "--verify", "refs/heads/" + branch)
+        except subprocess.CalledProcessError as error:
+            if error.returncode != 1:
+                raise
+            self.git("switch", "--create", branch, "--track", "origin/" + branch)
+        else:
+            self.git("switch", branch)
+
+    def switch_branch(self, branch, expected_commit):
+        self.valid_branch(branch)
+        if not re.fullmatch(r"[0-9a-f]{40}", expected_commit or ""):
+            raise RuntimeError("A confirmed commit is required")
+        old = self.read()
+        if not old.get("active"):
+            raise RuntimeError("Run install.sh first")
+        if self.git("branch", "--show-current") != old["branch"]:
+            raise RuntimeError("Checkout differs from installed branch")
+        if self.git("status", "--porcelain", "--untracked-files=no"):
+            raise RuntimeError("Commit or stash tracked changes before switching")
+        if self.git("rev-parse", "HEAD") != old["active"]["commit"]:
+            raise RuntimeError("Checkout differs from deployed commit; update or resolve it first")
+        self.git("fetch", "origin", old["branch"])
+        self.git("merge-base", "--is-ancestor", "HEAD", "refs/remotes/origin/" + old["branch"])
+        self.git("fetch", "origin", "+refs/heads/" + branch + ":refs/remotes/origin/" + branch)
+        target = self.git("rev-parse", "refs/remotes/origin/" + branch)
+        if target != expected_commit:
+            raise RuntimeError("Remote branch changed; preview and confirm again")
+        try:
+            local = self.git("show-ref", "--verify", "--hash", "refs/heads/" + branch)
+        except subprocess.CalledProcessError as error:
+            if error.returncode != 1:
+                raise
+        else:
+            self.git("merge-base", "--is-ancestor", local, target)
+        # Reject tracked copies of private data on the target branch.
+        private = self.git("ls-tree", "-r", "--name-only", target, "--", ".env", "config/prompts.json",
+                           "config/knowledge", "config/pronote", "config/rose-local.json", "config/rose-password.txt", "config/admin-session.key", "logs")
+        if private:
+            raise RuntimeError("Target branch tracks private installation data")
+        with tempfile.TemporaryDirectory(prefix="minitel-branch-") as directory:
+            source = Path(directory)
+            self.snapshot(target, source)
+            candidate = self.prepare(source, old["active"]["extras"], target)
+        self.status("activating", commit=target, branch=branch)
+        self.switch(candidate, old, branch=branch, target=target, checkout_branch=branch)
+        self.status("ready", commit=target, branch=branch)
+        self.maintain()
+
+    def power(self, operation):
+        if operation not in {"reboot", "poweroff"}:
+            raise RuntimeError("Invalid power operation")
+        status = self.state / "deployment.json"
+        if status.exists() and json.loads(status.read_text()).get("phase") in {"queued", "preparing", "activating"}:
+            raise RuntimeError("A deployment is in progress")
+        self.command(["systemd-run", "--quiet", "--collect", "--unit=minitel-power", "--on-active=3s",
+                      "/usr/bin/systemctl", operation])
 
     def check_space(self):
         for folder in (self.root, self.state):
@@ -518,26 +590,35 @@ PrivateMounts=yes
             print(f"Runtime maintenance deferred ({type(error).__name__}); inspect the installer/deployment journal.",
                   file=sys.stderr)
 
-    def queue(self, operation):
+    def queue(self, operation, branch=None, commit=None):
         if not self.read().get("active"):
             raise RuntimeError("Run install.sh first")
+        arguments = []
+        if operation == "switch":
+            self.valid_branch(branch)
+            if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+                raise RuntimeError("Invalid confirmed commit")
+            arguments = ["--branch", branch, "--commit", commit]
+        elif operation not in {"update", "rollback"}:
+            raise RuntimeError("Invalid deployment operation")
         self.command([
             "systemd-run", "--quiet", "--collect", "--unit=minitel-deploy", "--on-active=3s",
-            "/usr/local/sbin/minitel-runtime", "apply-" + operation,
+            "/usr/local/sbin/minitel-runtime", "apply-" + operation, *arguments,
         ])
         self.status("queued", operation=operation)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("install", "update", "rollback", "apply-update", "apply-rollback", "housekeeping"))
+    parser.add_argument("operation", choices=("install", "update", "rollback", "apply-update", "apply-rollback", "housekeeping", "switch-branch", "apply-switch", "poweroff", "reboot"))
     parser.add_argument("--extra", action="append", choices=sorted(EXTRAS), default=[])
     parser.add_argument("--branch")
+    parser.add_argument("--commit")
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.exit(1, "Run with sudo.\n")
-    if args.operation != "install" and (args.extra or args.branch):
-        parser.error("Feature/branch options are for installation only")
+    if (args.extra and args.operation != "install") or (args.branch and args.operation not in {"install", "apply-switch"}) or (args.commit and args.operation != "apply-switch"):
+        parser.error("Options not allowed for this operation")
     os.umask(0o022)
     manager = Runtime()
     initialized = False
@@ -547,6 +628,16 @@ def main():
         with manager.locked():
             if args.operation in {"update", "rollback"}:
                 manager.queue(args.operation)
+            elif args.operation == "switch-branch":
+                payload = json.loads(sys.stdin.read(1024))
+                if not isinstance(payload, dict) or set(payload) != {"branch", "commit"}:
+                    raise RuntimeError("Invalid branch request")
+                manager.queue("switch", payload["branch"], payload["commit"])
+            elif args.operation == "apply-switch":
+                manager.status("preparing", operation=args.operation)
+                manager.switch_branch(args.branch, args.commit)
+            elif args.operation in {"poweroff", "reboot"}:
+                manager.power(args.operation)
             elif args.operation == "install":
                 manager.install(args.extra, args.branch)
             elif args.operation == "housekeeping":
@@ -559,7 +650,7 @@ def main():
         print("Another deployment is running.", file=sys.stderr)
         return 1
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError, SyntaxError, KeyError, TypeError) as error:
-        if initialized and args.operation not in {"update", "rollback", "housekeeping"}:
+        if initialized and args.operation not in {"update", "rollback", "housekeeping", "switch-branch", "poweroff", "reboot"}:
             manager.status("failed", error_type=type(error).__name__)
         message = str(error) if isinstance(error, RuntimeError) else "Inspect journalctl -u minitel-deploy -u minitel-runtime-install."
         print(f"Deployment failed ({type(error).__name__}): {message}", file=sys.stderr)

@@ -16,8 +16,10 @@ import threading
 import time
 import unicodedata
 from collections import OrderedDict
+from datetime import datetime
 from functools import wraps
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from dotenv import dotenv_values
 from flask import (
@@ -77,7 +79,7 @@ PROMPTS_DEFAULT = PROJ_DIR / "config" / "prompts.default.json"
 KNOWLEDGE_DIR = PROJ_DIR / "config" / "knowledge"
 ENV_FILE = PROJ_DIR / ".env"
 LOGS_DIR = PROJ_DIR / "logs"
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "mistral")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 log = logging.getLogger(__name__)
 def admin_session_secret():
     configured = os.getenv("FLASK_SECRET", "")
@@ -430,7 +432,7 @@ def ip_address():
 
 
 def log_tail(name, n=40):
-    if name not in {"chatgpt", "wifi", "admin"}:
+    if name not in {"chatgpt", "wifi", "admin", "deploy"}:
         return "(journal inconnu)"
     try:
         result = subprocess.run(
@@ -489,10 +491,10 @@ def check_update():
     if rc != 0 or not behind.isdigit():
         return {"ok": False, "msg": "Comparaison des versions indisponible ; réessayer la vérification."}
     n = int(behind)
-    rc, changes, _ = git("log", "--format=%h  %s", f"HEAD..origin/{branch}")
+    rc, changes, _ = git("log", "-20", "--format=%h  %s", f"HEAD..origin/{branch}")
     if rc != 0:
         return {"ok": False, "msg": "Liste des mises à jour indisponible ; réessayer la vérification."}
-    return {"ok": True, "behind": n, "log": changes}
+    return {"ok": True, "behind": n, "log": changes[:1600]}
 
 def do_update():
     return queue_deployment("update")
@@ -501,11 +503,12 @@ def do_rollback():
     return queue_deployment("rollback")
 
 
-def queue_deployment(operation):
+def queue_deployment(operation, payload=None):
     try:
         result = subprocess.run(
             ["sudo", "-n", "/usr/local/sbin/minitel-runtime", operation],
             capture_output=True, text=True, timeout=15, check=False,
+            input=json.dumps(payload) if payload is not None else None,
         )
     except (OSError, subprocess.SubprocessError, UnicodeError):
         return False, "Gestionnaire uv indisponible ; relancer sudo bash install.sh."
@@ -952,15 +955,20 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 </section>
 <section class="panel {{'active' if section=='maintenance'}}" id=maintenance>
   <div class=block>
-    <h2>Redémarrer le service Minitel</h2>
+    <h2>Système</h2>
+    <p class=sub>Dernière demande de redémarrage de cette session : {{restart_status}}</p>
     <p class=sub>Interrompt la conversation en cours. Ne redémarre pas le Pi.</p>
     <form method=POST action=/restart onsubmit="return confirm('Redémarrer le service Minitel et interrompre la session en cours ?')"><input type=hidden name=csrf value="{{csrf_token()}}">
       <button class="btn btn-s">↺ Redémarrer le terminal</button></form>
+    {% for operation,label in [('reboot','Redémarrer le Pi'),('poweroff','Arrêter le Pi')] %}
+    <form method=post action="/power/{{operation}}" onsubmit="return confirm('Confirmer cette opération ? La connexion sera interrompue.')">
+      <input type=hidden name=csrf value="{{csrf_token()}}"><button class="btn btn-d" {{'disabled' if deployment.phase in ['queued','preparing','activating']}}>{{label}}</button>
+    </form>{% endfor %}
   </div>
   <div class=block>
     <h2 id=software>🔄 Mise à jour de l'application</h2>
     <p class=sub>Version installée : <b>{{version}}</b> · branche suivie : {{runtime_branch}}</p>
-    <p>Dernière vérification des mises à jour (cette session) : {{update_status}}</p>
+    <p>Dernière vérification (cette session) : {{checked_at}} · {{update_status}}</p>
     <p>Dernier déploiement : <b>{{deployment.phase}}</b>{% if deployment.error_type %} · {{deployment.error_type}}{% endif %}</p>
     <a href="/?section=maintenance">Actualiser l’état</a>
     <form method=POST action=/check-update style=margin:0><input type=hidden name=csrf value="{{csrf_token()}}">
@@ -975,16 +983,32 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     </form>
     {% endif %}
     <hr>
+    <p>Version précédente : {{previous.commit}} · branche {{previous.branch}} · {{'disponible' if previous.available else 'indisponible'}}</p>
     <form method=POST action=/rollback onsubmit="return confirm('Revenir à la version précédente ?')" style=margin:0><input type=hidden name=csrf value="{{csrf_token()}}">
-      <button class="btn btn-d">↶ Revenir à la version précédente</button>
+      <button class="btn btn-d" {{'disabled' if not previous.available}}>↶ Revenir à la version précédente</button>
     </form>
+    <details {{'open' if branch_preview}}><summary>Changer de branche</summary>
+    <p>La branche et sa version seront déployées ensemble. Une copie locale modifiée ou des commits non publiés bloquent le changement.</p>
+    <form method=post action=/branch-preview><input type=hidden name=csrf value="{{csrf_token()}}">
+      <label>Branche sur origin<input type=text name=branch maxlength=128 list=branchChoices value="{{runtime_branch}}" required></label>
+      <datalist id=branchChoices><option value=main><option value=develop></datalist><button class="btn btn-s">Prévisualiser la version cible</button>
+    </form>
+    {% if branch_preview %}<p>Cible : <b>{{branch_preview.branch}}</b> · {{branch_preview.commit}}</p>
+    <form method=post action=/switch-branch onsubmit="return confirm('Déployer cette branche et redémarrer les services ?')"><input type=hidden name=csrf value="{{csrf_token()}}"><button class="btn btn-p">Confirmer le changement de branche</button></form>{% endif %}
+    </details>
     <p class=sub>Une opération planifiée n’est pas encore appliquée. <a href="/deployment-status">État du déploiement</a> (lecture seule).</p>
     <p class=sub style=margin-top:8px>La mise à jour récupère le code depuis GitHub. Tes personnalités, clés et fichiers de connaissance ne sont pas touchés.</p>
   </div>
 
   <div class=block>
-    <h2 id=logs>Journal du terminal <a href="/?section=maintenance" class=sub>Actualiser</a></h2>
-    <pre>{{log_chatgpt}}</pre>
+    <h2 id=logs>Diagnostics et journaux</h2>
+    <p>Provisionnement Wi-Fi : {{provision_status}} (inactive peut être normal après le démarrage).</p>
+    <form method=get action="/#logs"><input type=hidden name=section value=maintenance>
+      <label>Journal<select name=journal>{% for key,label in [('chatgpt','Terminal'),('admin','Administration'),('wifi','Wi-Fi'),('deploy','Déploiement')] %}<option value="{{key}}" {{'selected' if journal==key}}>{{label}}</option>{% endfor %}</select></label>
+      <label>Lignes<select name=lines>{% for n in [40,100,200] %}<option {{'selected' if lines==n}}>{{n}}</option>{% endfor %}</select></label>
+      <button class="btn btn-s">Afficher / actualiser</button></form>
+    <pre>{{diagnostic_log}}</pre>
+    <a href=/diagnostics.txt>Télécharger le diagnostic système (sans conversations ni identifiants)</a>
   </div>
   <div class=block>
     <h2 id=storage>Stockage</h2>
@@ -1056,7 +1080,7 @@ async function loadModels(provider,force=false){
   }catch(error){status.textContent=error.message||'Liste indisponible ; modèle actuel conservé.';modelLists.delete(provider);}
 }
 if(document.getElementById('ai').classList.contains('active'))loadModels(document.getElementById('providerSel').value);
-document.querySelectorAll('.provider-settings').forEach(d=>d.addEventListener('toggle',()=>{if(d.open)loadModels(d.dataset.provider);}));
+document.querySelectorAll('.provider-settings').forEach(d=>d.addEventListener('toggle',()=>{if(d.open&&document.getElementById('ai').classList.contains('active'))loadModels(d.dataset.provider);}));
 // Les brouillons restent en mémoire seulement ; avertir avant de les perdre.
 const editForm=document.getElementById('editForm'), llmForm=document.getElementById('llmForm');
 let editBaseline='', llmBaseline='', selectedPreset=document.getElementById('presetSel').value;
@@ -1206,6 +1230,8 @@ def health():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     error = None
+    if not ADMIN_PASSWORD.strip():
+        return render_template_string(LOGIN_HTML, error="ADMIN_PASSWORD doit être défini dans .env ; redémarrer l’administration après configuration."), 503
     if request.method == "POST":
         if hmac.compare_digest(request.form.get("password", "").encode(errors="replace"), ADMIN_PASSWORD.encode()):
             session.clear()
@@ -1236,9 +1262,18 @@ def index():
         edit_key = data["active"]
     services = {"minitel-chatgpt": svc_status("minitel-chatgpt"),
                 "admin-ui": svc_status("admin-ui")}
+    journal = request.args.get("journal", "chatgpt")
+    if journal not in {"chatgpt", "admin", "wifi", "deploy"}:
+        journal = "chatgpt"
+    lines = request.args.get("lines", "40")
+    lines = int(lines) if lines in {"40", "100", "200"} else 40
+    recent_log = log_tail("chatgpt")
     flash = session.pop("flash", None); flash_ok = session.pop("flash_ok", False)
     return render_template_string(
-        ADMIN_HTML, service_cards=service_cards(), section=section, presets=presets, knowledge=all_knowledge(),
+        ADMIN_HTML, service_cards=service_cards(), journal=journal, lines=lines,
+        diagnostic_log=recent_log if journal == "chatgpt" and lines == 40 else log_tail(journal, lines), provision_status=svc_status("wifi-manager"),
+        previous=previous_release(), branch_preview=session.get("branch_preview"),
+        checked_at=session.get("update_checked_at", "jamais"), section=section, presets=presets, knowledge=all_knowledge(),
         health={"uptime": system_health.uptime(), "disk": system_health.disk(PROJ_DIR),
                 "wifi": system_health.wifi(), "tailscale": system_health.tailscale(),
                 "temperature": system_health.temperature()},
@@ -1247,7 +1282,7 @@ def index():
         update_status=session.get("update_status", "non vérifiées dans cette session"),
         title_fonts=TITLE_FONTS, title_art_max=TITLE_ART_MAX_WORDS,
         active_key=data["active"], edit_key=edit_key, services=services, ip=ip_address(),
-        log_chatgpt=log_tail("chatgpt"),
+        log_chatgpt=recent_log,
         provider=llm_provider(),
         configured_model={"mistral": mistral_model, "claude": claude_model, "linkup": linkup_depth}[llm_provider()](),
         mistral_key_masked=mask_key(mistral_key()), mistral_model=mistral_model(),
@@ -1546,6 +1581,7 @@ def restart():
 @require_login
 def check_update_route():
     res = check_update()
+    session["update_checked_at"] = datetime.now(ZoneInfo("Europe/Paris")).strftime("%d/%m/%Y %H:%M:%S")
     session["update_status"] = (f"{res['behind']} mise(s) à jour disponible(s)" if res.get("ok")
                                 else "dernière vérification en échec")
     if not res["ok"]:
@@ -1579,6 +1615,80 @@ def rollback_route():
     session["flash"] = msg if ok else "Échec : " + msg
     session["flash_ok"] = ok
     return redirect(url_for("index", section="maintenance"))
+
+
+def previous_release():
+    try:
+        data = json.loads(RUNTIME_STATE.read_text())
+        previous = data.get("previous") or {}
+        return {"commit": previous.get("commit", "—"),
+                "branch": data.get("previous_branch", data.get("branch", "—")),
+                "available": bool(previous.get("release") and Path(previous["release"], "venv/bin/python").exists())}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {"commit": "—", "branch": "—", "available": False}
+
+
+def valid_branch(branch):
+    return bool(isinstance(branch, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}", branch) and
+                git("check-ref-format", "--branch", branch)[0] == 0)
+
+
+@app.route("/branch-preview", methods=["POST"])
+@require_login
+def preview_branch():
+    session.pop("branch_preview", None)
+    branch = request.form.get("branch", "").strip()
+    if not valid_branch(branch):
+        abort(400, "Nom de branche invalide")
+    rc, _, _ = git("fetch", "origin", "+refs/heads/" + branch + ":refs/remotes/origin/" + branch)
+    if not rc:
+        rc, commit, _ = git("rev-parse", "refs/remotes/origin/" + branch)
+        if not rc and re.fullmatch(r"[0-9a-f]{40}", commit):
+            session["branch_preview"] = {"branch": branch, "commit": commit}
+            session["flash"] = "Version cible récupérée. Confirmez le changement de branche."
+            session["flash_ok"] = True
+            return redirect(url_for("index", section="maintenance", _anchor="software"))
+    session["flash"], session["flash_ok"] = "Branche indisponible sur origin ; réessayer.", False
+    return redirect(url_for("index", section="maintenance", _anchor="software"))
+
+
+@app.route("/switch-branch", methods=["POST"])
+@require_login
+def switch_branch_route():
+    preview = session.pop("branch_preview", None)
+    if not isinstance(preview, dict):
+        abort(400, "Prévisualisez d’abord la branche cible")
+    ok, message = queue_deployment("switch-branch", preview)
+    session["flash"], session["flash_ok"] = message, ok
+    session.pop("update_log", None)
+    session.pop("update_status", None)
+    return redirect(url_for("index", section="maintenance", _anchor="software"))
+
+
+@app.route("/power/<operation>", methods=["POST"])
+@require_login
+def power_route(operation):
+    if operation not in {"reboot", "poweroff"}:
+        abort(404)
+    ok, _ = queue_deployment(operation)
+    session["flash"] = (("Redémarrage" if operation == "reboot" else "Arrêt") + " du Pi planifié ; connexion interrompue dans quelques secondes." if ok else
+                        "Opération refusée ; vérifier le gestionnaire installé et les opérations en cours.")
+    session["flash_ok"] = ok
+    return redirect(url_for("index", section="maintenance"))
+
+
+@app.route("/diagnostics.txt")
+@require_login
+def diagnostic_report():
+    report = {"version": current_version(), "branch": runtime_branch(),
+              "services": {key: svc_status(key) for key in ("minitel-chatgpt", "admin-ui", "wifi-manager")},
+              "uptime": system_health.uptime(), "temperature_c": system_health.temperature(),
+              "disk": system_health.disk(PROJ_DIR), "local_ip": ip_address(),
+              "wifi": system_health.wifi(), "tailscale": system_health.tailscale(),
+              "deployment": system_health.deployment(DEPLOYMENT_STATUS)}
+    response = app.response_class(json.dumps(report, ensure_ascii=False, indent=2) + "\n", mimetype="text/plain")
+    response.headers["Content-Disposition"] = "attachment; filename=minitel-diagnostic.txt"
+    return response
 
 
 @app.route("/storage-status")

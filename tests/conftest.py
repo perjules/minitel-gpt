@@ -9,6 +9,7 @@ from services import config_store, system_health
 
 @pytest.fixture
 def console(tmp_path, monkeypatch):
+    monkeypatch.setattr(admin, "ADMIN_PASSWORD", "synthetic-admin-password")
     prompts = tmp_path / "prompts.json"
     config_store.save_prompts(prompts, {"active": "main", "presets": {
         "main": {"label": "Main", "system": "synthetic prompt"},
@@ -19,7 +20,7 @@ def console(tmp_path, monkeypatch):
         monkeypatch.setattr(admin, name, path)
     monkeypatch.setattr(admin, "svc_status", lambda _: "active")
     monkeypatch.setattr(admin, "ip_address", lambda: "192.0.2.1")
-    monkeypatch.setattr(admin, "log_tail", lambda _: "\n".join(f"line {n}" for n in range(40)))
+    monkeypatch.setattr(admin, "log_tail", lambda _, n=40: "\n".join(f"line {n}" for n in range(40)))
     monkeypatch.setattr(admin, "current_version", lambda: "test-version")
     monkeypatch.setattr(system_health, "command", lambda *args: "")
     monkeypatch.setattr(admin, "restart_terminal", Mock(return_value=True))

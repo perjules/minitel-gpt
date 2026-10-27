@@ -379,3 +379,109 @@ def test_readiness_failure_rolls_back_before_committing_new_state(manager):
         manager.switch(after, state, branch="develop", target="new")
     assert manager.read() == state
     assert (manager.root / "current").resolve() == Path(before["release"])
+
+
+@pytest.fixture
+def branch_installation(manager, tmp_path, monkeypatch):
+    """Real Git in disposable local repositories; deployment/systemd are mocked."""
+    def command(*args):
+        return subprocess.run(['git', '-C', str(manager.project), *args], check=True,
+                              capture_output=True, text=True).stdout.strip()
+    command('init', '-b', 'develop')
+    command('config', 'user.name', 'Fixture')
+    command('config', 'user.email', 'fixture@example.invalid')
+    (manager.project / '.gitignore').write_text('.env\nconfig/rose-local.json\n')
+    (manager.project / 'source.txt').write_text('develop')
+    command('add', '.')
+    command('commit', '-m', 'develop fixture')
+    before_commit = command('rev-parse', 'HEAD')
+    command('switch', '-c', 'main')
+    (manager.project / 'source.txt').write_text('main')
+    command('commit', '-am', 'main fixture')
+    target = command('rev-parse', 'HEAD')
+    command('switch', 'develop')
+    remote = tmp_path / 'origin.git'
+    subprocess.run(['git', 'clone', '--bare', str(manager.project), str(remote)],
+                   check=True, capture_output=True)
+    command('remote', 'add', 'origin', str(remote))
+    before = release(manager, before_commit, ['gmail'])
+    after = release(manager, target, ['gmail'])
+    manager.activate(before)
+    runtime.atomic_json(manager.state / 'runtime.json', {'branch': 'develop', 'active': before})
+    (manager.project / '.env').write_text('private synthetic settings')
+    (manager.project / 'config').mkdir()
+    (manager.project / 'config/rose-local.json').write_text('private synthetic edits')
+    monkeypatch.setattr(manager, 'git', command)
+    monkeypatch.setattr(manager, 'snapshot', Mock())
+    monkeypatch.setattr(manager, 'prepare', Mock(return_value=after))
+    monkeypatch.setattr(manager, 'maintain', Mock())
+    manager.command.reset_mock()
+    return manager, target, before_commit
+
+
+def test_branch_switch_and_cross_branch_rollback_preserve_local_data(branch_installation):
+    manager, target, before = branch_installation
+    manager.switch_branch('main', target)
+    assert manager.git('branch', '--show-current') == manager.read()['branch'] == 'main'
+    assert manager.git('rev-parse', 'HEAD') == target
+    assert manager.read()['previous_branch'] == 'develop'
+    assert (manager.project / '.env').read_text() == 'private synthetic settings'
+    assert (manager.project / 'config/rose-local.json').read_text() == 'private synthetic edits'
+    manager.rollback()
+    assert manager.git('branch', '--show-current') == manager.read()['branch'] == 'develop'
+    assert manager.git('rev-parse', 'HEAD') == before
+
+
+@pytest.mark.parametrize('failure', ['dirty', 'changed-target', 'unpublished-target', 'preparation', 'private-target'])
+def test_branch_refusals_leave_running_checkout_and_environment_intact(branch_installation, failure, monkeypatch):
+    manager, target, before = branch_installation
+    old = manager.read()
+    pointer = (manager.root / 'current').resolve()
+    if failure == 'dirty':
+        (manager.project / 'source.txt').write_text('owner edits')
+    elif failure == 'changed-target':
+        target = before
+    elif failure == 'unpublished-target':
+        manager.git('switch', 'main')
+        (manager.project / 'source.txt').write_text('unpublished work')
+        manager.git('commit', '-am', 'unpublished fixture')
+        manager.git('switch', 'develop')
+    elif failure == 'preparation':
+        manager.prepare.side_effect = RuntimeError('fixture staging failure')
+    else:
+        original_git = manager.git
+        monkeypatch.setattr(manager, 'git', lambda *args: '.env' if args[0] == 'ls-tree' else original_git(*args))
+    with pytest.raises((RuntimeError, subprocess.CalledProcessError)):
+        manager.switch_branch('main', target)
+    assert manager.read() == old
+    assert manager.git('branch', '--show-current') == 'develop'
+    assert manager.git('rev-parse', 'HEAD') == before
+    assert (manager.root / 'current').resolve() == pointer
+    manager.command.assert_not_called()
+
+
+def test_failed_branch_activation_restores_original_branch_and_runtime(branch_installation):
+    manager, target, before = branch_installation
+    old = manager.read()
+    fail_once(manager, lambda args: args[:2] == ['systemctl', 'start'])
+    with pytest.raises(subprocess.CalledProcessError):
+        manager.switch_branch('main', target)
+    assert manager.read() == old
+    assert manager.git('branch', '--show-current') == 'develop'
+    assert manager.git('rev-parse', 'HEAD') == before
+    assert (manager.root / 'current').resolve() == Path(old['active']['release'])
+
+
+def test_branch_queue_validates_arguments_and_power_waits_for_deployment(branch_installation):
+    manager, target, _ = branch_installation
+    for branch in ('--upload-pack=bad', '../main', 'main;id', 'x\nmain'):
+        with pytest.raises((RuntimeError, subprocess.CalledProcessError)):
+            manager.queue('switch', branch, target)
+    manager.command.assert_not_called()
+    manager.queue('switch', 'main', target)
+    assert manager.command.call_args.args[0][-5:] == ['apply-switch', '--branch', 'main', '--commit', target]
+    with pytest.raises(RuntimeError, match='deployment'):
+        manager.power('reboot')
+    manager.status('ready')
+    manager.power('poweroff')
+    assert manager.command.call_args.args[0][-2:] == ['/usr/bin/systemctl', 'poweroff']
