@@ -76,7 +76,14 @@ sudo bash scripts/install_printer.sh
 ```
 
 Gmail enrollment and `install_gmail.sh --activate` still require the existing
-encrypted credentials/systemd checks. Installing dependencies never activates
+encrypted credentials/systemd checks. Browser enrollment and activation are also
+available from Services → Gmail after the one-time private HTTPS/Web-client setup
+in [GMAIL.md](GMAIL.md#browser-enrollment-through-the-admin-console). The existing
+fixed credential helper saves encrypted client configuration/enrollment and can
+queue a delayed restart of the two Gmail services; it accepts no arbitrary paths
+or commands. An installed Gmail extension receives this helper through the usual
+runtime update, without an installer rerun or added sudo permission.
+Installing dependencies never activates
 Gmail, enables PRONOTE, or prints. Already running services may restart after an
 environment change. Repeating an unchanged installation retains the rollback
 pair and does not recreate the environment. A changed system Python version or

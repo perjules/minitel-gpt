@@ -7,12 +7,15 @@ personality and serial/navigation paths remain available.
 
 ## Validation status
 
-The full suite passes **147 offline tests**, including mocked REST/model responses,
+The full suite passes **623 offline tests** (28 October 2026), including mocked REST/model responses,
 Flask console checks and simulated UART workflows. New composition uses synthetic
 correspondents and validates the existing review/send gate without contacting Google
 or sending real messages. Model selection quality, real metadata-fetch latency and
 an owner-controlled new-message exchange still require live acceptance. Physical
 Minitel acceptance is separate from both offline simulations and admin-console tests.
+Browser OAuth includes synthetic state/PKCE, expiry, replay, exact-scope, failure,
+encrypted-storage, privileged-activation and callback-log checks. A real Web-client
+enrollment through the phone/Tailscale HTTPS address has not been performed here.
 
 Record personal setup progress and live results in the installation's private project
 record; this guide documents generic setup and acceptance. Automated tests use fake
@@ -42,10 +45,12 @@ are recorded here.
 
    Do not add `gmail.modify`, `gmail.compose`, broad `mail.google.com`, profile or
    identity scopes. Gmail drafts are not used; the outgoing draft lives in Python RAM.
-4. Under **Clients**, create a **Desktop app** OAuth client and download its JSON.
-   Do not create a Web application or TV/limited-input client. Desktop loopback
-   callbacks are supported; no public redirect domain, Google password, app password
-   or pasted authorization code is needed.
+4. For authorization from the **admin console**, create a **Web application**
+   OAuth client with the exact HTTPS callback described in
+   [Browser enrollment](#browser-enrollment-through-the-admin-console), and download
+   its JSON. The older command-line enrollment below still requires a separate
+   **Desktop app** client with a loopback callback. A TV/limited-input client does
+   not support the Gmail scopes used here.
    The downloaded JSON is **application configuration, not an account token**.
    The Pi obtains tokens during browser enrollment and encrypts them automatically;
    do not try to obtain or paste a token yourself. If the client form offers an
@@ -75,11 +80,107 @@ are recorded here.
    only for your own known project/account. Public distribution is outside this
    prototype. Workspace policy or Advanced Protection may block authorization.
 
-References checked 12 October 2026:
+References (browser flow checked 28 October 2026):
 [Audience and seven-day expiry](https://support.google.com/cloud/answer/15549945),
 [personal-use verification exceptions](https://support.google.com/cloud/answer/13464323),
 [desktop OAuth/PKCE/loopback](https://developers.google.com/identity/protocols/oauth2/native-app),
+[web OAuth and redirect validation](https://developers.google.com/identity/protocols/oauth2/web-server),
 [device-flow allowed scopes](https://developers.google.com/identity/protocols/oauth2/limited-input-device#allowedscopes).
+
+### Browser enrollment through the admin console
+
+This is the recommended connection/reconnection path for a phone on the tailnet.
+The Gmail extension must already be installed (`sudo bash scripts/install_gmail.sh`
+for a first installation). An existing Gmail installation can receive this code
+through the admin updater: its root-owned helper is updated with the runtime.
+There are no new dependencies, sudo rules, persistent workers or OAuth tunnels.
+The existing Desktop command-line flow remains available below.
+
+**One-time private HTTPS setup on the Pi:** inspect existing routes first:
+
+```sh
+tailscale serve status
+tailscale funnel status
+```
+
+Use a free, dedicated HTTPS port so this does not replace an Alexa endpoint or
+another service on port 443. The example uses **9443**; check it is unused. With
+MagicDNS and HTTPS certificates enabled on the tailnet:
+
+```sh
+sudo tailscale serve --bg --https=9443 http://127.0.0.1:8080
+tailscale serve status
+```
+
+If Tailscale prints an HTTPS enablement link, follow it. Use **Serve**, never
+Funnel, for this console. The route stays private to devices allowed by your
+tailnet policy; allow TCP 9443 if your policy is restricted. HTTPS provisioning
+publishes the machine's DNS name in certificate transparency, not the admin
+contents. Serve uses the existing Tailscale daemon and resumes after reboot.
+The command does not change the console's existing LAN/8080 listener.
+
+Copy the full hostname printed by Serve. For example, the console URL is:
+
+```text
+https://minitelgpt.example-tailnet.ts.net:9443/services/gmail
+```
+
+In the same Google project, **Google Auth Platform → Clients → Create client →
+Web application**, add this exact **Authorized redirect URI**, using your hostname:
+
+```text
+https://minitelgpt.example-tailnet.ts.net:9443/services/gmail/oauth/callback
+```
+
+The scheme, hostname, port and path must match. Google's browser flow requires a
+named HTTPS host: the old `http://100.x.y.z:8080` address cannot be its callback.
+Google's server does not need to access the Pi: the browser on your connected
+phone follows the return URL. Download the Web client's JSON to that phone or
+computer; an existing Desktop client's JSON cannot substitute for it. Keep the
+project **In production** and retain exactly `gmail.readonly` and `gmail.send`.
+
+Open the HTTPS console, sign in using ADMIN_PASSWORD, then **Services → Gmail →
+Configuration initiale / changer le client Google**. Upload the JSON and paste
+that exact callback URI. The Pi validates and encrypts the client configuration
+to `/etc/credstore.encrypted/minitel-gmail-oauth` (root-only, 0600), separately from
+the account enrollment. No client secret is displayed back to the browser.
+
+**Every connection/reconnection after that:**
+
+1. Open **Services → Gmail** through its saved HTTPS address, with Tailscale on.
+2. Select **Connecter / réautoriser Gmail avec Google**, choose the shared account
+   and grant the two permissions on Google's page.
+3. Google returns to the console. Select **Appliquer l’autorisation enregistrée**.
+   This reloads encrypted credentials for both services after a three-second delay;
+   the Minitel session is interrupted. Wait a few seconds and reload the page.
+4. Enable Gmail if needed and select **Vérifier la connexion (lecture seule)**.
+
+Enrollment remains single-account; it does not create per-user account mappings.
+The existing activation checkbox remains separate from authorization. The new
+refresh token replaces the old encrypted enrollment only after scopes, refresh
+token and Gmail account profile have been checked. No email is sent or marked read.
+Until Apply, already cached access tokens can still refer to the prior account.
+
+Authorization attempts use state bound to the signed admin browser session and
+PKCE, expire after ten minutes and are consumed once. At most eight attempts are
+kept in RAM, with no cleanup worker. Restarting the admin service invalidates any
+pending attempt; start again. Tokens, client secrets and PKCE verifiers are never
+put in cookies or page HTML. The callback query is excluded from the Flask access
+log and the browser is redirected to a clean URL with no-referrer/no-store headers.
+Any additional proxy/access logger must likewise omit callback query strings.
+Only a loopback proxy's HTTPS forwarding header is trusted, and the request host
+must match the saved callback. No global forwarded-header trust is enabled.
+
+The existing fixed-purpose root credential helper handles client encryption,
+enrollment replacement and delayed activation. It accepts no paths or commands
+from the browser. Apply refuses during a deployment. A Google denial, expired
+attempt or token-exchange failure preserves the prior encrypted account token.
+If activation fails after enrollment was saved, retry Apply; do not reauthorize
+repeatedly. Logging out cancels that browser's pending attempt.
+
+References: [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve),
+[Serve flags and persistence](https://tailscale.com/docs/reference/tailscale-cli/serve),
+[HTTPS certificates](https://tailscale.com/docs/how-to/set-up-https-certificates).
 
 ### Install code on the Pi without promoting main
 
@@ -495,7 +596,8 @@ Memory records are deliberately saved only, and are not automatically added to
 outgoing messages. Gmail's encrypted enrollment and send/review gate are unchanged.
 
 `reconnect_required` means refresh authorization expired/revoked or service
-credentials are absent. Repeat desktop enrollment and `install_gmail.sh --activate`
+credentials are absent. Use the admin console's Connect/Reauthorize then Apply
+flow above, or repeat desktop enrollment and `install_gmail.sh --activate`
 to restart **both** services with the replaced encrypted credential. No account
 password or token is entered in the admin/chat. OAuth errors are sanitized rather
 than logging token response bodies. Never run token-dump commands or copy private

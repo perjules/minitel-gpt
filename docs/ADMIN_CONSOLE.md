@@ -50,8 +50,12 @@ activé dans la configuration, pas connexion distante vérifiée.
   vérification explicite en lecture seule. L’enrôlement chiffré existant reste
   utilisé. Le changement d’activation est enregistré dans `.env`, appliqué au
   processus admin et demande le redémarrage du service Minitel. Les identifiants
-  déjà livrés à admin-ui restent nécessaires ; le guide d’enrôlement explique
-  l’activation des deux services. `/gmail` reste compatible avec le test existant.
+  livrés à admin-ui restent nécessaires. La page permet aussi de connecter ou
+  réautoriser Google, puis d’appliquer l’autorisation chiffrée aux deux services.
+  Configuration initiale : HTTPS Tailscale Serve et client Google Application Web,
+  décrits dans [GMAIL.md](GMAIL.md#browser-enrollment-through-the-admin-console).
+  Le client Desktop et son outil CLI restent disponibles. `/gmail` reste compatible
+  avec le test existant.
 - PRONOTE : `/pronote`, comptes parents existants, enrôlement QR replié, table
   Alias / Compte / Nom exact, éditeur JSON avancé conservé. Aucun enfant autorisé
   automatiquement. Activation et changements sont pris en compte aux prochaines
