@@ -24,6 +24,9 @@ def console(tmp_path, monkeypatch):
     monkeypatch.setattr(admin, "current_version", lambda: "test-version")
     monkeypatch.setattr(system_health, "command", lambda *args: "")
     monkeypatch.setattr(admin, "restart_terminal", Mock(return_value=True))
+    def no_oauth_configuration():
+        raise admin.gmail_auth.GmailError("credential_unavailable")
+    monkeypatch.setattr(admin.gmail_oauth, "configuration", no_oauth_configuration)
     client = admin.app.test_client()
     with client.session_transaction() as session:
         session.update(logged_in=True, csrf_token="test-token")

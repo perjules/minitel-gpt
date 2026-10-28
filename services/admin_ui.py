@@ -19,6 +19,7 @@ from collections import OrderedDict
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 from zoneinfo import ZoneInfo
 
 from dotenv import dotenv_values
@@ -33,6 +34,7 @@ from flask import (
     session,
     url_for,
 )
+from werkzeug.serving import WSGIRequestHandler
 from werkzeug.utils import secure_filename
 
 try:
@@ -43,6 +45,7 @@ try:
         gmail_auth,
         gmail_client,
         gmail_mail,
+        gmail_oauth,
         io_limits,
         memory_session,
         mistral_answers,
@@ -61,6 +64,7 @@ except ImportError:
     import gmail_auth
     import gmail_client
     import gmail_mail
+    import gmail_oauth
     import io_limits
     import memory_session
     import mistral_answers
@@ -199,6 +203,9 @@ def security_context():
 def protect_requests():
     if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
         return
+    if request.path == "/services/gmail/oauth/configure":
+        # Keep the client JSON in memory, below Werkzeug's multipart spool limit.
+        request.max_content_length = 40000
     if request.content_length is not None and request.content_length > io_limits.MAX_REQUEST_BYTES:
         abort(413)
     if not session.get("logged_in") and request.endpoint != "login":
@@ -240,6 +247,8 @@ def no_cache(response):
     if not request.path.startswith("/assets/"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
+    if request.path.startswith("/services/gmail"):
+        response.headers["Referrer-Policy"] = "no-referrer"
     return response
 
 # ── Helpers prompts ──────────────────────────────────────────────────────
@@ -1237,6 +1246,7 @@ def login():
         return render_template_string(LOGIN_HTML, error="ADMIN_PASSWORD doit être défini dans .env ; redémarrer l’administration après configuration."), 503
     if request.method == "POST":
         if hmac.compare_digest(request.form.get("password", "").encode(errors="replace"), ADMIN_PASSWORD.encode()):
+            gmail_oauth.cancel(session.get("gmail_oauth"))
             session.clear()
             session["logged_in"] = True
             csrf_token()
@@ -1247,6 +1257,7 @@ def login():
 @app.route("/logout", methods=["POST"])
 @require_login
 def logout():
+    gmail_oauth.cancel(session.get("gmail_oauth"))
     discard_mail(session.get("gmail_session"))
     discard_memory(session.get("memory_session"))
     session.clear()
@@ -1754,7 +1765,7 @@ def toggle_service(feature):
 @app.route("/services/<feature>", methods=["GET", "POST"])
 @require_login
 def service_configuration(feature):
-    message = ""
+    message = session.pop("gmail_oauth_message", "") if feature == "gmail" else ""
     titles = {"gmail": "Gmail", "alexa": "Alexa", "printer": "Imprimante", "smart-home": "Maison connectée"}
     if feature not in titles:
         abort(404)
@@ -1780,9 +1791,96 @@ def service_configuration(feature):
                 message = "Connexion Gmail vérifiée. Aucun message envoyé ni marqué comme lu."
             except gmail_auth.GmailError:
                 message = "Connexion non confirmée ; vérifier l’activation et l’enrôlement."
-        context = {"account": account, "enabled": gmail_enabled(), "single_account": True}
+        try:
+            oauth_uri = gmail_oauth.configuration()["redirect_uri"]
+        except gmail_auth.GmailError:
+            oauth_uri = ""
+        context = {"account": account, "enabled": gmail_enabled(), "single_account": True,
+                   "oauth_uri": oauth_uri, "oauth_ready": session.get("gmail_oauth_saved", False),
+                   "oauth_console": oauth_uri.removesuffix(gmail_auth.OAUTH_CALLBACK) + "/services/gmail" if oauth_uri else ""}
     return render_template_string(admin_service_pages.HEAD + body + "</html>",
                                   title=titles[feature], message=message, **context)
+
+
+def gmail_https_origin(uri):
+    """Trust TLS forwarding only from the local Serve proxy, with the saved host."""
+    secure = request.is_secure or (
+        request.remote_addr in {"127.0.0.1", "::1"}
+        and request.headers.get("X-Forwarded-Proto") == "https"
+    )
+    expected, actual = urlsplit(uri), urlsplit("https://" + request.host)
+    try:
+        same_host = (actual.hostname == expected.hostname
+                     and (actual.port or 443) == (expected.port or 443))
+    except ValueError:
+        same_host = False
+    if not secure or not same_host:
+        raise gmail_auth.GmailError("oauth_https_origin_required")
+
+
+@app.route("/services/gmail/oauth/<action>", methods=["POST"])
+@require_login
+def gmail_oauth_action(action):
+    try:
+        if action == "configure":
+            uri = request.form.get("redirect_uri", "").strip()
+            gmail_auth.validate_oauth_config({"client_id": "validation.apps.googleusercontent.com",
+                                            "client_secret": "validation", "redirect_uri": uri})
+            gmail_https_origin(uri)
+            upload = request.files.get("client_json")
+            if upload is None:
+                raise gmail_auth.GmailError("web_oauth_configuration_required")
+            gmail_oauth.configure(upload.read(32769), uri)
+            session.pop("gmail_oauth", None)
+            session.pop("gmail_oauth_saved", None)
+            session["gmail_oauth_message"] = "Client Google enregistré et chiffré. Vous pouvez maintenant connecter Gmail."
+        elif action == "start":
+            config = gmail_oauth.configuration()
+            gmail_https_origin(config["redirect_uri"])
+            gmail_oauth.cancel(session.pop("gmail_oauth", None))
+            identifier, address = gmail_oauth.begin(config)
+            session["gmail_oauth"] = identifier
+            return redirect(address, code=303)
+        elif action == "apply":
+            if not session.get("gmail_oauth_saved"):
+                raise gmail_auth.GmailError("authorization_not_completed")
+            gmail_https_origin(gmail_oauth.configuration()["redirect_uri"])
+            if gmail_auth.credential_helper({"operation": "activate"}) != {"status": "queued"}:
+                raise gmail_auth.GmailError("credential_activation_failed")
+            session.pop("gmail_oauth_saved", None)
+            session["gmail_oauth_message"] = "Redémarrage des services programmé. La session du Minitel sera interrompue. Attendez quelques secondes puis rechargez cette page et vérifiez la connexion."
+        else:
+            abort(404)
+    except gmail_auth.GmailError as error:
+        messages = {
+            "oauth_https_origin_required": "Ouvrez cette page à l’adresse HTTPS enregistrée (Tailscale Serve), puis recommencez.",
+            "web_oauth_configuration_required": "Fournissez le JSON d’un client Google de type Application Web et son URI de redirection HTTPS exacte.",
+            "dependency_missing": "L’extension Gmail doit d’abord être installée sur le Pi.",
+            "authorization_not_completed": "Autorisez d’abord le compte Google depuis cette page.",
+        }
+        session["gmail_oauth_message"] = messages.get(str(error), "Opération indisponible. Vérifiez l’installation Gmail et réessayez ; l’autorisation précédente est conservée si la nouvelle n’a pas été enregistrée.")
+    return redirect(url_for("service_configuration", feature="gmail"), code=303)
+
+
+@app.route(gmail_auth.OAUTH_CALLBACK)
+@require_login
+def gmail_oauth_callback():
+    identifier = session.pop("gmail_oauth", None)
+    try:
+        gmail_https_origin(gmail_oauth.configuration()["redirect_uri"])
+        state, code, error = (request.args.getlist(key) for key in ("state", "code", "error"))
+        if (len(state) != 1 or len(state[0]) > 512 or len(code) + len(error) != 1
+                or (error and len(error[0]) > 256)):
+            raise gmail_auth.GmailError("oauth_callback_invalid")
+        gmail_oauth.complete(identifier, state[0], code[0] if code else None, denied=bool(error))
+        session["gmail_oauth_saved"] = True
+        session["gmail_oauth_message"] = "Autorisation Google enregistrée et chiffrée. Cliquez sur Appliquer pour la charger dans les deux services."
+    except gmail_auth.GmailError:
+        session["gmail_oauth_message"] = "Autorisation non terminée, expirée ou refusée. Recommencez la connexion Google ; aucun détail privé n’est affiché."
+    finally:
+        gmail_oauth.cancel(identifier)
+    # Remove the one-use code from the browser address before rendering any page.
+    return redirect(url_for("service_configuration", feature="gmail"), code=303)
 
 
 ROSE_HTML = """<!doctype html><html lang=fr><meta charset=utf-8>
@@ -2235,5 +2333,14 @@ def gmail_admin():
     finally:
         item["lock"].release()
 
+class AdminRequestHandler(WSGIRequestHandler):
+    def log_request(self, code="-", size="-"):
+        if unquote(urlsplit(self.path).path).strip("/") == gmail_auth.OAUTH_CALLBACK.strip("/"):
+            self.log("info", '"%s %s %s" %s %s', self.command, gmail_auth.OAUTH_CALLBACK,
+                     self.request_version, code, size)
+        else:
+            super().log_request(code, size)
+
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=False)
+    app.run(host="0.0.0.0", port=8080, debug=False, request_handler=AdminRequestHandler)

@@ -2,6 +2,7 @@
 
 import fcntl
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -11,6 +12,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 SCOPES = (
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -19,6 +21,8 @@ SCOPES = (
 TOKEN_URI = "https://oauth2.googleapis.com/token"
 CREDENTIAL_NAME = "gmail"
 STORE = Path("/etc/credstore.encrypted/minitel-gmail")
+OAUTH_STORE = Path("/etc/credstore.encrypted/minitel-gmail-oauth")
+OAUTH_CALLBACK = "/services/gmail/oauth/callback"
 HELPER = "/usr/local/libexec/minitel-gmail-credential"
 LOCK_PATH = Path("/run/minitel-gmail/auth.lock")
 INFO_FIELDS = {
@@ -96,13 +100,48 @@ def systemd_preflight():
         raise GmailError("encrypted_credentials_unsupported") from None
 
 
+def validate_oauth_config(config):
+    """Only a Google web client and an explicit HTTPS callback, never request Host."""
+    try:
+        if not isinstance(config, dict) or set(config) != {"client_id", "client_secret", "redirect_uri"}:
+            raise ValueError
+        if not all(isinstance(v, str) and 0 < len(v) <= 4096 and not any(ord(c) < 33 for c in v)
+                   for v in config.values()):
+            raise ValueError
+        if not config["client_id"].endswith(".apps.googleusercontent.com"):
+            raise ValueError
+        uri = urlsplit(config["redirect_uri"])
+        if (uri.scheme != "https" or not uri.hostname or "." not in uri.hostname
+                or not re.fullmatch(r"[a-z0-9.-]+", uri.hostname)
+                or uri.username or uri.password or uri.query or uri.fragment
+                or uri.path != OAUTH_CALLBACK or (uri.port is not None and not 1 <= uri.port <= 65535)):
+            raise ValueError
+        try:
+            ipaddress.ip_address(uri.hostname)
+        except ValueError:
+            pass
+        else:
+            raise ValueError
+    except (ValueError, TypeError, KeyError):
+        raise GmailError("web_oauth_configuration_required") from None
+    return config
+
+
 def encrypt_info(info, store=STORE):
-    """Root provisioning. Input/output pipes only; persist ciphertext atomically."""
     validate_info(info)
+    encrypt_payload(info, store, "gmail")
+
+
+def encrypt_oauth_config(config, store=OAUTH_STORE):
+    encrypt_payload(validate_oauth_config(config), store, "gmail-oauth")
+
+
+def encrypt_payload(info, store, name):
+    """Root provisioning. Input/output pipes only; persist ciphertext atomically."""
     try:
         payload = json.dumps(info).encode()
         result = subprocess.run(
-            ["systemd-creds", "encrypt", "--name=gmail", "--with-key=host", "-", "-"],
+            ["systemd-creds", "encrypt", "--name=" + name, "--with-key=host", "-", "-"],
             input=payload,
             check=False,
             capture_output=True,
@@ -112,7 +151,7 @@ def encrypt_info(info, store=STORE):
             raise GmailError("credential_encryption_failed")
         # Verify encrypted bytes with the host key before replacing the old file.
         decoded = subprocess.run(
-            ["systemd-creds", "decrypt", "--name=gmail", "-", "-"],
+            ["systemd-creds", "decrypt", "--name=" + name, "-", "-"],
             input=result.stdout,
             check=False,
             capture_output=True,
@@ -144,16 +183,24 @@ def encrypt_info(info, store=STORE):
 
 
 def decrypt_info(store=STORE):
+    return validate_info(decrypt_payload(store, "gmail"))
+
+
+def decrypt_oauth_config(store=OAUTH_STORE):
+    return validate_oauth_config(decrypt_payload(store, "gmail-oauth"))
+
+
+def decrypt_payload(store, name):
     try:
         result = subprocess.run(
-            ["systemd-creds", "decrypt", "--name=gmail", str(store), "-"],
+            ["systemd-creds", "decrypt", "--name=" + name, str(store), "-"],
             check=False,
             capture_output=True,
             timeout=15,
         )
         if result.returncode or len(result.stdout) > 32768:
             raise GmailError("credential_unavailable")
-        return validate_info(json.loads(result.stdout))
+        return json.loads(result.stdout)
     except (OSError, ValueError, subprocess.SubprocessError):
         raise GmailError("credential_unavailable") from None
 

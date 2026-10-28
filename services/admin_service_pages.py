@@ -20,12 +20,26 @@ GMAIL = '''<section><h2>Compte actuel</h2><p>{{account}}</p>
 <button>Enregistrer et appliquer</button></form>
 <form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><button name=action value=check>Vérifier la connexion (lecture seule)</button></form>
 <a href="/test?mode=gmail">Tester Gmail</a></section>
-<details><summary>Connexion et reconnexion</summary>
-<p>L’enrôlement chiffré existant reste utilisé. Sur le Pi : installer l’extension Gmail, effectuer l’autorisation Google avec l’outil d’enrôlement, puis activer les identifiants pour les deux services.</p>
-<pre>sudo bash scripts/install_gmail.sh
-sudo /opt/minitel-gpt/venv/bin/python scripts/gmail_enroll.py /etc/minitel-gmail/client.json
-sudo bash scripts/install_gmail.sh --activate</pre>
-<p>La procédure complète (préparation Google et tunnel de rappel) est décrite dans docs/GMAIL.md. Une désactivation conserve les identifiants.</p></details>'''
+<section><h2>Connexion Google</h2>
+<p>Autorisez le compte partagé dans votre navigateur, puis appliquez l’autorisation aux deux services. Aucun tunnel SSH n’est nécessaire après la configuration initiale.</p>
+{% if oauth_uri %}<p>Retour Google enregistré : <code>{{oauth_uri}}</code></p>
+<p>Utilisez <a href="{{oauth_console}}">cette adresse HTTPS de l’administration</a>, avec Tailscale connecté sur votre téléphone.</p>
+<form method=post action=/services/gmail/oauth/start><input type=hidden name=csrf value="{{csrf_token()}}"><button>Connecter / réautoriser Gmail avec Google</button></form>
+{% else %}<p>Configurez d’abord un client Google de type Application Web ci-dessous. Un ancien client Desktop ne permet pas le retour direct au téléphone.</p>{% endif %}
+{% if oauth_ready %}<form method=post action=/services/gmail/oauth/apply onsubmit="return confirm('Charger la nouvelle autorisation et redémarrer le Minitel et l’administration ? La session en cours sera interrompue.')">
+<input type=hidden name=csrf value="{{csrf_token()}}"><button>Appliquer l’autorisation enregistrée</button></form>
+<p>Les services redémarrent quelques secondes après ce bouton. Rechargez ensuite la page et vérifiez la connexion. Activez Gmail si nécessaire.</p>{% endif %}
+<details><summary>Configuration initiale / changer le client Google</summary>
+<p>Une seule fois : activer HTTPS avec Tailscale Serve pour cette administration, puis créer un client <b>Application Web</b> dans Google Cloud et télécharger son JSON. Ouvrez cette page via HTTPS avant de l’importer.</p>
+<p>Exemple d’URI à enregistrer exactement dans Google et dans ce formulaire :</p>
+<pre>https://nom-du-pi.nom-du-tailnet.ts.net:9443/services/gmail/oauth/callback</pre>
+<p>Dans Google, choisissez le statut <b>En production</b> pour éviter l’expiration après sept jours du mode Test. Les permissions restent lecture Gmail et envoi Gmail uniquement.</p>
+<form method=post action=/services/gmail/oauth/configure enctype=multipart/form-data><input type=hidden name=csrf value="{{csrf_token()}}">
+<label>JSON du client Google (Application Web)<input type=file name=client_json accept=".json,application/json" required></label>
+<label>URI de redirection autorisée<input type=url name=redirect_uri value="{{oauth_uri}}" required placeholder="https://nom-du-pi.nom-du-tailnet.ts.net:9443/services/gmail/oauth/callback"></label>
+<button>Enregistrer le client chiffré</button></form>
+<p>Le JSON et les jetons restent chiffrés sur le Pi, hors Git. Votre mot de passe Google est saisi chez Google uniquement. La procédure détaillée et l’ancien outil Desktop restent disponibles dans docs/GMAIL.md.</p>
+</details></section>'''
 PLACEHOLDER = '''<section><h2>En construction</h2><p>Administration inactive. Aucun réglage n’est appliqué depuis cette page.</p></section>'''
 
 TEST_NAV = '''<nav><a href="/test?mode=conversation">Conversation</a> · <a href="/test?mode=gmail">Gmail</a></nav>'''
