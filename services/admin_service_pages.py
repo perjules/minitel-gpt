@@ -35,7 +35,8 @@ GMAIL = '''<section><h2>Compte actuel</h2><p>{{account}}</p>
 <pre>https://nom-du-pi.nom-du-tailnet.ts.net:9443/services/gmail/oauth/callback</pre>
 <p>Dans Google, choisissez le statut <b>En production</b> pour éviter l’expiration après sept jours du mode Test. Les permissions restent lecture Gmail et envoi Gmail uniquement.</p>
 <form method=post action=/services/gmail/oauth/configure enctype=multipart/form-data><input type=hidden name=csrf value="{{csrf_token()}}">
-<label>JSON du client Google (Application Web)<input type=file name=client_json accept=".json,application/json" required></label>
+<label>JSON du client Google (Application Web)<input type=file name=client_json required></label>
+<p>Choisissez le fichier JSON téléchargé depuis Google. Son contenu est vérifié sur le Pi après l’envoi.</p>
 <label>URI de redirection autorisée<input type=url name=redirect_uri value="{{oauth_uri}}" required placeholder="https://nom-du-pi.nom-du-tailnet.ts.net:9443/services/gmail/oauth/callback"></label>
 <button>Enregistrer le client chiffré</button></form>
 <p>Le JSON et les jetons restent chiffrés sur le Pi, hors Git. Votre mot de passe Google est saisi chez Google uniquement. La procédure détaillée et l’ancien outil Desktop restent disponibles dans docs/GMAIL.md.</p>
