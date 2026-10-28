@@ -11,7 +11,7 @@ On the Pi, in the `minitel-gpt` checkout:
 
 ```bash
 git fetch origin
-git switch feature/alexa-voice-api
+git switch -c feature/alexa-voice-api --track origin/feature/alexa-voice-api
 # Or fetch the branch into a separate worktree if you want to keep develop running.
 python3 -c 'import secrets; print(secrets.token_urlsafe(36))'
 ```
