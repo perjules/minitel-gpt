@@ -20,5 +20,6 @@ integration. Keep the existing source layout and unpackaged application model.
   Test with synthetic accounts and mocked APIs. Never invoke live probes or send
   messages as part of the automated suite.
 
-Development happens on feature branches based on `develop`; stable `main` follows
-physical validation. See docs/TESTING.md for test collection and compatibility.
+Work directly on `develop` unless the owner explicitly requests another branch;
+stable `main` follows physical validation. See docs/TESTING.md for test collection
+and compatibility.

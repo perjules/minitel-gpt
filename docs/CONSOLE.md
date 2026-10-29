@@ -32,7 +32,10 @@ un terminal interactif (`ssh -t`). Ctrl-Q ou Ctrl-C quitte et restaure le termin
 | Retour arrière | CORRECTION |
 
 Ces touches ont exactement le comportement de la boucle Minitel selon l'écran.
-SOMMAIRE réinitialise la session et permet de changer de nom. RETOUR quitte la
+Commencez avec **Ctrl-P / SOMMAIRE** : le démarrage apparaît en français, puis
+**Ctrl-N / SUITE** ou 30 secondes d'attente ouvre la connexion. SOMMAIRE revient
+ensuite à une conversation vide avec le même nom et la même langue. **LOGOUT**
+puis Entrée permet de changer de nom, sans rejouer le démarrage. RETOUR quitte la
 console CALC ou interrompt son spectacle; dans PRONOTE, il quitte le mode ou
 interrompt la consultation; pendant une saisie ordinaire il efface
 un caractère. Tapez les commandes applicatives (`MAIL`, `CALC`, `ANNULER`, etc.)

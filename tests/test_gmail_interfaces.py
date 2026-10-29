@@ -359,9 +359,7 @@ class FullTerminalWorkflow(unittest.TestCase):
 
         session, api, _ = make_session()
         uart = startup.FakeSerial(
-            b"fr"
-            + fn(terminal.K_ENVOI)
-            + fn(terminal.K_SUITE)
+            startup.login_keys("fr")
             + b"MAIL"
             + fn(terminal.K_ENVOI)
             + b"LIRE 1"
@@ -388,6 +386,7 @@ class FullTerminalWorkflow(unittest.TestCase):
             patch.dict("os.environ", {"GMAIL_ENABLED": "1"}),
             patch.object(terminal.gmail_mail, "MailSession", return_value=session),
             patch.object(terminal.serial, "Serial", return_value=uart),
+            patch.object(terminal.memory_session, "MemorySession", return_value=Mock(username="Test", take_warning=lambda: "")),
             patch.object(terminal.time, "sleep"),
             patch.object(
                 terminal,

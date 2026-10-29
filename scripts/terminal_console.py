@@ -73,7 +73,9 @@ def main():
         # the adapter handle Ctrl-C with the same clean wrapper restoration.
         curses.raw()
         curses.curs_set(1)
-        chat.run(chat.Term(ConsoleSerial(window)))
+        console = ConsoleSerial(window)
+        console.redraw()  # Show the SOMMAIRE shortcut while waiting for connection.
+        chat.run(chat.Term(console))
 
     try:
         curses.wrapper(session)

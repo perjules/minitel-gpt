@@ -30,7 +30,7 @@ class TerminalModeTests(unittest.TestCase):
                     output.put((response, None))
                     return Mock(is_alive=lambda: False), output, chat.time.monotonic()
 
-                keys = b"fr" + startup.fn(chat.K_ENVOI) + startup.fn(chat.K_SUITE)
+                keys = startup.login_keys("fr")
                 keys += b"PRONOTE" + startup.fn(chat.K_ENVOI)
                 if response:
                     keys += b"COURS" + startup.fn(chat.K_ENVOI) + paging
@@ -61,7 +61,7 @@ class TerminalModeTests(unittest.TestCase):
                 "retrieved_at": "2026-10-14T07:00"}}, None))
             return Mock(is_alive=lambda: False), output, chat.time.monotonic()
 
-        keys = b"en" + startup.fn(chat.K_ENVOI) + startup.fn(chat.K_SUITE)
+        keys = startup.login_keys("en")
         for text in ("PRONOTE", "1", "COURS", "ENFANT", "2", "COURS"):
             keys += text.encode() + startup.fn(chat.K_ENVOI)
         keys += startup.fn(chat.K_RETOUR) + b"Hello" + startup.fn(chat.K_ENVOI)
@@ -95,7 +95,7 @@ class TerminalModeTests(unittest.TestCase):
             output.put(({"records": {"child": "Alex", "items": items}}, None))
             return Mock(is_alive=lambda: False), output, chat.time.monotonic()
 
-        keys = b"fr" + startup.fn(chat.K_ENVOI) + startup.fn(chat.K_SUITE)
+        keys = startup.login_keys("fr")
         for text in ("PRONOTE", "NOTES"):
             keys += text.encode() + startup.fn(chat.K_ENVOI)
         keys += startup.fn(chat.K_SUITE) + startup.fn(chat.K_RETOUR)
@@ -126,7 +126,7 @@ class TerminalModeTests(unittest.TestCase):
             output.put(({"records": {"child": "Alex", "items": [item]}}, None))
             return Mock(is_alive=lambda: False), output, chat.time.monotonic()
 
-        keys = b"fr" + startup.fn(chat.K_ENVOI) + startup.fn(chat.K_SUITE)
+        keys = startup.login_keys("fr")
         for text in ("PRONOTE", "NOTES"):
             keys += text.encode() + startup.fn(chat.K_ENVOI)
         with patch.object(chat.pronote, "backend", return_value=backend), patch.object(chat, "start_pronote", side_effect=start):
@@ -149,7 +149,7 @@ class TerminalModeTests(unittest.TestCase):
             output.put(({"display": "\n".join(f"Cours {i}" for i in range(36))}, None))
             return Mock(is_alive=lambda: False), output, chat.time.monotonic()
 
-        keys = b"fr" + startup.fn(chat.K_ENVOI) + startup.fn(chat.K_SUITE)
+        keys = startup.login_keys("fr")
         for text in ("PRONOTE", "COURS", "retour", "Hello"):
             keys += text.encode() + startup.fn(chat.K_ENVOI)
         with patch.object(chat.pronote, "backend", return_value=backend), patch.object(chat, "start_pronote", side_effect=start) as school:
@@ -177,7 +177,7 @@ class TerminalModeTests(unittest.TestCase):
             return {"status": "ordinary", "text": "PRIVATE RECORD" if private else "Public answer",
                     "chunks": [], "references": [], "private": private}
 
-        keys = b"fr" + startup.fn(chat.K_ENVOI) + startup.fn(chat.K_SUITE)
+        keys = startup.login_keys("fr")
         for text in ("Soleil", "Notes de Alex", "PRONOTE", "RETOUR", "Hello"):
             keys += text.encode() + startup.fn(chat.K_ENVOI)
         with patch.object(chat.pronote, "backend", return_value=backend):
@@ -266,7 +266,7 @@ class TerminalModeTests(unittest.TestCase):
         backend.execute.assert_called_once()
 
     def test_private_normal_school_turns_never_enter_persistent_memory(self):
-        uart = startup.FakeSerial(b"fr" + startup.fn(chat.K_ENVOI) + startup.fn(chat.K_SUITE)
+        uart = startup.FakeSerial(startup.login_keys("fr")
                                   + b"Qu en est il" + startup.fn(chat.K_ENVOI)
                                   + b"Hello" + startup.fn(chat.K_ENVOI))
         memory = Mock(take_warning=lambda: "")

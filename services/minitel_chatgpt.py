@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 MINITEL GPT - service de chat années 80 sur Minitel.
-Interface : langue → demarrage fictif → SUITE → saisie → reponse paginee.
-Touches : ENVOI = valider, SUITE = page suivante, SOMMAIRE = retour accueil.
-Timeout 5 min sans action → retour sommaire.
+Interface : SOMMAIRE → demarrage FR → connexion → saisie → reponse paginee.
+Touches : ENVOI = valider, SUITE = page suivante, SOMMAIRE = nouvelle conversation.
+SOMMAIRE réinitialise la conversation ; LOGOUT change d'utilisateur.
 """
 import json
 import logging
@@ -90,7 +90,9 @@ BAUD = 1200
 COLS = 40
 SCREEN_ROWS = 24
 CONTENT_ROWS = 18          # lignes de contenu par page de réponse
-IDLE_TIMEOUT = 300         # 5 min → retour sommaire
+IDLE_TIMEOUT = 300         # 5 min → nouvelle conversation, même utilisateur
+BOOT_CONTINUE_TIMEOUT = 30
+BOOT_CONTINUE_PROMPT = "SUITE: continuer / connexion dans 30 s"
 
 # ── Fournisseur d'IA (LLM) ───────────────────────────────────────────────
 # LLM_PROVIDER = "mistral" (defaut), "claude" ou "linkup". La cle et le modele
@@ -375,6 +377,53 @@ class Term:
             self.s = self.io(serial.Serial, detect_port(), BAUD, bytesize=7,
                              parity="E", stopbits=1, timeout=0.1, write_timeout=2)
             time.sleep(0.3)
+        self._presence_enabled = isinstance(self.s, serial.SerialBase)
+        self._presence_due = float("inf")
+        self._presence_deadline = None
+        self._presence_seen = False
+        self._presence_misses = 0
+
+    def start_presence(self):
+        # Begin only after the first SOMMAIRE, never disturb the power-on screen.
+        self._presence_due = time.monotonic()
+
+    def poll_presence(self):
+        """STUM terminal status: PRO1 70 -> PRO2 71 status (no screen output).
+
+        Three missed replies retire an established link. Terminals that never
+        acknowledge status keep working, without mistaking inactivity for off.
+        Console transports do not participate in this physical-terminal probe.
+        """
+        if not getattr(self, "_presence_enabled", False):
+            return
+        now = time.monotonic()
+        if self._presence_deadline is not None and now >= self._presence_deadline:
+            self._presence_deadline = None
+            self._presence_misses += 1
+            if self._presence_misses >= 3:
+                if self._presence_seen:
+                    raise terminal_link.Unavailable("terminal_status_lost")
+                self._presence_enabled = False
+                log.info("Terminal status unsupported; physical power detection disabled")
+                return
+        if self._presence_deadline is None and now >= self._presence_due:
+            queued = self.io(getattr, self.s, "out_waiting", 0)
+            self.w(b"\x1b\x39\x70")
+            # At 1200 baud the boot/page may still be queued ahead of this probe.
+            self._presence_deadline = now + 1 + queued * 10 / BAUD
+            self._presence_due = now + 2
+
+    def presence_reply(self):
+        self._presence_seen = True
+        self._presence_misses = 0
+        self._presence_deadline = None
+
+    def keyboard_activity(self):
+        if getattr(self, "_presence_enabled", False):
+            # A real key also proves liveness, including during slow page output.
+            self._presence_deadline = None
+            self._presence_misses = 0
+            self._presence_due = time.monotonic() + 2
 
     def io(self, operation, *args, **kwargs):
         try:
@@ -422,6 +471,7 @@ class Term:
         end = time.time() + timeout
         while time.time() < end:
             terminal_link.check_worker(getattr(self, "_pending", None))
+            self.poll_presence()
             b = self.read_byte()
             if b is None:
                 continue
@@ -433,6 +483,8 @@ class Term:
                     code = self.read_byte()
                 if code is None:
                     continue          # SEP parasite → ignorer, ne pas bloquer
+                if code in (K_ENVOI, K_SUITE, K_SOMMAIRE, K_GUIDE, K_RETOUR, K_CORR):
+                    self.keyboard_activity()
                 return ('fn', code)
             if b == ESC:
                 # Mode péri-info (Minitel 2) : touche fonction en VT100 "ESC O x"
@@ -443,6 +495,7 @@ class Term:
                 if b2 in (0x39, 0x3A, 0x3B):
                     # Consume complete PRO1/2/3 replies, including scroll ACKs.
                     # Their printable status bytes must not become user input.
+                    payload = []
                     for _ in range(b2 - 0x38):
                         reply = self.read_byte()
                         t3 = time.time() + 0.5
@@ -450,6 +503,9 @@ class Term:
                             reply = self.read_byte()
                         if reply is None:
                             break
+                        payload.append(reply)
+                    if b2 == 0x3A and len(payload) == 2 and payload[0] == 0x71:
+                        self.presence_reply()
                     continue
                 if b2 == 0x4F:        # 'O' → séquence SS3
                     code = self.read_byte()
@@ -457,8 +513,11 @@ class Term:
                     while code is None and time.time() < t3:
                         code = self.read_byte()
                     if code in SS3_MAP:
+                        self.keyboard_activity()
                         return ('fn', SS3_MAP[code])
                 continue              # autre séquence ESC → ignorer
+            if b in (CR, LF, BS, 0x7F) or 0x20 <= b <= 0x7E:
+                self.keyboard_activity()
             return ('char', b)
         return ('timeout', None)
 
@@ -773,17 +832,24 @@ def prepare_boot(language):
 
 
 def show_boot(t: Term, language, lines=None):
-    """Fictional diagnostics; only SUITE opens the question prompt."""
+    """Fictional diagnostics, then SUITE or 30 seconds opens login."""
     t.clear()
     try:
         t.w(SCROLL_ON)
         t.w(FG_CYAN)
-        for line in lines if lines is not None else UI[language]["boot"]:
+        rows = list(lines if lines is not None else UI[language]["boot"])
+        if rows and rows[-1] == UI[language]["boot"][-1]:
+            rows[-1] = BOOT_CONTINUE_PROMPT
+        for line in rows:
             t.line(line)
+        deadline = time.monotonic() + BOOT_CONTINUE_TIMEOUT
         while True:
-            kind, code = t.read_key(IDLE_TIMEOUT)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return 'done'
+            kind, code = t.read_key(remaining)
             if kind == 'timeout':
-                return 'timeout'
+                return 'done'
             if kind == 'fn':
                 if code == K_SUITE:
                     return 'done'
@@ -796,10 +862,20 @@ def show_boot(t: Term, language, lines=None):
         t.w(SCROLL_OFF)
 
 
+def wait_connection(t):
+    """Leave the physical power-on screen alone until SOMMAIRE is pressed."""
+    while True:
+        kind, code = t.read_key(IDLE_TIMEOUT)
+        if kind == 'fn' and code == K_SOMMAIRE:
+            t.start_presence()
+            return
+
+
 def show_question_prompt(t: Term, question_msg):
     t.clear()
     t.w(FG_WHITE)
     t.center(question_msg)
+    t.center("SOMMAIRE: reset / LOGOUT: connexion")
     t.line()
 
 
@@ -979,6 +1055,15 @@ def run_session(t):
     memory = None
     printer = printing_session.Session()
     keep_bill = False
+    username = None
+    language = None
+
+    wait_connection(t)
+    t.clear()
+    t.center(UI["fr"]["boot_wait"])
+    result = show_boot(t, "fr", prepare_boot("fr"))
+    if result == 'guide':
+        show_guide(t, "fr")
 
     while True:  # boucle sommaire
         # Recharger le preset à chaque retour au sommaire (prise en compte des édits)
@@ -994,17 +1079,23 @@ def run_session(t):
         printer.reset()
         history = []
         knowledge = factual_knowledge()
-        user_options = {"preserve_display": True} if keep_bill else {}
-        memory, user_action = select_memory_user(t, title_lines=title_lines, title_msg=title_msg, **user_options)
+        if username is None:
+            memory, user_action = select_memory_user(t, title_lines=title_lines, title_msg=title_msg)
+        else:
+            # Retire the old guard to block late worker writes, retain identity only.
+            memory = memory_session.MemorySession(username)
+            user_action = 'envoi'
         t._session_resources = (memory.close,) if memory is not None else ()
-        keep_bill = False
         if user_action == 'guide':
             show_guide(t)
         if user_action in ('guide', 'sommaire'):
             continue
+        if user_action != 'envoi':
+            continue
+        username = "" if memory.key == "shared" else memory.username
         mail = gmail_mail.MailSession(username=memory.username) if gmail_mail.enabled() else None
         t._session_resources = (mail.reset, memory.close) if mail is not None else (memory.close,)
-        language = "fr" if memory.key == "shared" else memory.saved_language()
+        language = language or ("fr" if memory.key == "shared" else memory.saved_language())
         action = user_action
         if language not in ("fr", "en"):
             show_home(t, title_lines, title_msg)
@@ -1023,18 +1114,12 @@ def run_session(t):
         if language == "en":
             question_msg = UI[language]["question"]
             loading_msg = UI[language]["loading"]
-        t.w(bytes([CR, LF]))
-        t.w(FG_CYAN)
-        t.center(UI[language]["boot_wait"])
-        # An unattended language-screen timeout must not spend an API call.
-        boot_lines = (prepare_boot(language) if action == 'envoi' and user_action == 'envoi'
-                      else list(UI[language]["boot"]))  # retained for this session only
-        result = show_boot(t, language, boot_lines)
-        if result == 'guide':
-            show_guide(t, language)
-        if result != 'done':
-            continue
-        show_question_prompt(t, question_msg)
+        if keep_bill:
+            t.line()
+            t.center(UI[language]["follow_up"])
+            keep_bill = False
+        else:
+            show_question_prompt(t, question_msg)
 
         while True:  # boucle conversation
             question, action = read_question(t, calculator_mode=calc.mode or school_mode.mode,
@@ -1043,6 +1128,10 @@ def run_session(t):
                 show_guide(t, language)
                 break          # retour au sommaire après l'écran d'aide
             if action in ('sommaire', 'timeout'):
+                break
+
+            if (question or "").strip().upper() == "LOGOUT":
+                username = language = None
                 break
 
             # Local maintenance commands: never send them to an LLM.

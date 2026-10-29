@@ -412,19 +412,19 @@ class MemoryInterfaces(unittest.TestCase):
 
     def test_full_uart_startup_reset_switch_and_persistence(self):
         uart = FakeSerial(
-            b"Alice"
+            fn(chat.K_SOMMAIRE) + fn(chat.K_SUITE)
+            + b"Alice"
             + fn(chat.K_ENVOI)
             + b"fr"
             + fn(chat.K_ENVOI)
-            + fn(chat.K_SUITE)
             + b"Retiens une preference"
             + fn(chat.K_ENVOI)
             + fn(chat.K_SOMMAIRE)
+            + b"LOGOUT" + fn(chat.K_ENVOI)
             + b"Bob"
             + fn(chat.K_ENVOI)
             + b"fr"
             + fn(chat.K_ENVOI)
-            + fn(chat.K_SUITE)
             + b"MEMOIRE"
             + fn(chat.K_ENVOI)
             + fn(chat.K_SOMMAIRE)
@@ -480,14 +480,14 @@ class MemoryInterfaces(unittest.TestCase):
                 keys += language.encode() + fn(chat.K_ENVOI)
             return (
                 keys
-                + fn(chat.K_SUITE)
                 + question.encode()
                 + fn(chat.K_ENVOI)
-                + fn(chat.K_SOMMAIRE)
+                + b"LOGOUT" + fn(chat.K_ENVOI)
             )
 
         uart = FakeSerial(
-            visit("Alice", "en", "Hello")
+            fn(chat.K_SOMMAIRE) + fn(chat.K_SUITE)
+            + visit("Alice", "en", "Hello")
             + visit("ALICE", None, "Again")
             + visit("Bob", "fr", "Bonjour")
             + visit("", None, "Salut")
@@ -521,7 +521,7 @@ class MemoryInterfaces(unittest.TestCase):
             chat.run()
         self.assertEqual(
             [call.args[0] for call in boot.call_args_list],
-            ["en", "en", "fr", "fr", "fr"],
+            ["fr"],
         )
         self.assertEqual(
             [call.args[1] for call in answer.call_args_list],

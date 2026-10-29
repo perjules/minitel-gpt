@@ -157,3 +157,76 @@ def test_unexpected_errors_keep_their_traceback_and_are_not_retried():
         terminal_link.supervise(lambda: term, session, sleep=sleep)
     sleep.assert_not_called()
     term.close.assert_called_once()
+
+
+def monitored_terminal(monkeypatch):
+    now = [0.0]
+    monkeypatch.setattr(chat.time, "monotonic", lambda: now[0])
+    output = Mock(return_value=None)
+    term = chat.Term(transport=SimpleNamespace(write=output))
+    term._presence_enabled = True
+    term.start_presence()
+    return term, now, output
+
+
+def test_status_polling_retires_a_previously_responsive_terminal(monkeypatch):
+    term, now, output = monitored_terminal(monkeypatch)
+    term.poll_presence()
+    term.presence_reply()
+    for instant in (2, 3, 4, 5, 6):
+        now[0] = instant
+        term.poll_presence()
+    now[0] = 7
+    with pytest.raises(terminal_link.Unavailable, match="terminal_status_lost"):
+        term.poll_presence()
+    assert all(call.args == (b"\x1b\x39\x70",) for call in output.call_args_list)
+
+
+def test_unknown_status_support_never_turns_keyboard_silence_into_power_loss(monkeypatch, caplog):
+    term, now, output = monitored_terminal(monkeypatch)
+    with caplog.at_level(logging.INFO):
+        for instant in range(20):
+            now[0] = instant
+            term.poll_presence()
+    assert output.call_count == 3
+    assert not term._presence_enabled
+    assert sum("power detection disabled" in record.message for record in caplog.records) == 1
+
+
+def test_idle_status_replies_and_keyboard_activity_preserve_established_link(monkeypatch):
+    term, now, output = monitored_terminal(monkeypatch)
+    for instant in range(0, 600, 2):
+        now[0] = instant
+        term.poll_presence()
+        term.presence_reply()
+    assert output.call_count == 300
+    assert term._presence_enabled
+    # One delayed response, followed by a real key, is sufficient evidence of life.
+    term._presence_misses = 2
+    term.keyboard_activity()
+    assert term._presence_misses == 0
+
+
+def test_console_and_unactivated_terminals_do_not_receive_status_probes(monkeypatch):
+    term, now, output = monitored_terminal(monkeypatch)
+    term._presence_due = float("inf")
+    term.poll_presence()
+    output.assert_not_called()
+    term.start_presence()
+    term._presence_enabled = False
+    now[0] = 1000
+    term.poll_presence()
+    output.assert_not_called()
+
+
+def test_status_reply_window_accounts_for_boot_bytes_still_queued_at_1200_baud(monkeypatch):
+    term, now, output = monitored_terminal(monkeypatch)
+    term.s.out_waiting = 1200
+    term.poll_presence()
+    for instant in range(1, 11):
+        now[0] = instant
+        term.poll_presence()
+    output.assert_called_once_with(b"\x1b\x39\x70")
+    assert term._presence_misses == 0
+    term.presence_reply()
+    assert term._presence_seen

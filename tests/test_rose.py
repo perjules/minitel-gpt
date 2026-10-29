@@ -848,7 +848,7 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(sessions[0].profile, {})
 
     def test_main_test_command_opens_gated_test_roster(self):
-        uart = startup.FakeSerial(b"3615 TEST" + startup.fn(chat.K_ENVOI))
+        uart = startup.FakeSerial(startup.fn(chat.K_SOMMAIRE) + b"3615 TEST" + startup.fn(chat.K_ENVOI))
         memory = Mock(key="owner", username="owner", pending=None)
         memory.saved_language.return_value = "en"
         with (patch.object(chat, "select_memory_user", return_value=(memory, "envoi")),
@@ -958,7 +958,7 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(model.call_count, 1)
 
     def test_main_english_restored_and_no_rose_turns_reach_memory_or_printer(self):
-        keys = (b"3615 JACQUELINE" + startup.fn(chat.K_ENVOI)
+        keys = (startup.fn(chat.K_SOMMAIRE) + b"3615 JACQUELINE" + startup.fn(chat.K_ENVOI)
                 + b"fixture" + startup.fn(chat.K_ENVOI)
                 + b"PRIVATE ROSE TURN" + startup.fn(chat.K_ENVOI)
                 + startup.fn(chat.K_RETOUR)

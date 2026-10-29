@@ -1,6 +1,9 @@
 # Mémoire légère — 3615 IA
 
-Au démarrage, entrez d'abord un nom puis **ENVOI**. Laissez vide pour la
+Sur le Minitel, appuyez sur **SOMMAIRE** après la mise sous tension : le démarrage
+fictif apparaît en français. **SUITE** ouvre immédiatement l'accueil; sans action,
+l'accueil apparaît 30 secondes après la fin du démarrage. Entrez alors un nom puis
+**ENVOI**. Laissez vide pour la
 mémoire commune. Le nom sélectionne des fichiers, **ce n'est pas une
 authentification** : aucun mot de passe, ni contrôle d'accès supplémentaire.
 La casse ne distingue pas deux noms; revenez avec le même nom après un redémarrage.
@@ -12,8 +15,26 @@ langue ni conserver de préférence de langue globale.
 Un timeout utilise le français sans enregistrer ce choix implicite. Pour refaire
 le choix d'un utilisateur connu, retirez le champ `language` de son `memory.json`
 pendant que les deux services sont arrêtés, puis redémarrez-les.
-**SOMMAIRE** efface la conversation, les choix en attente et les brouillons Gmail,
-puis permet un autre choix de nom, avec sa langue enregistrée. La mémoire reste.
+Sur le Minitel, **SOMMAIRE** efface la conversation, les choix en attente et les
+brouillons Gmail, puis revient directement à la requête initiale avec le même nom
+et la même langue. L'inactivité conserve aussi l'identité. **LOGOUT** puis **ENVOI**
+ferme cette session et revient au choix du nom. Ni SOMMAIRE ni LOGOUT ne rejoue le
+démarrage fictif. La mémoire enregistrée reste. La console web conserve son propre
+contrôle de nouvelle session et de sélection du nom.
+
+La détection de mise hors tension utilise une requête d'état du terminal sans
+effet à l'écran (STUM : `PRO1 70`, réponse `PRO2 71 status`). Elle ne débute qu'après
+le premier SOMMAIRE. Sur une liaison ayant déjà répondu, trois réponses manquantes
+consécutives retirent la session : mémoire fermée, brouillons invalidés, opérations
+en cours non rejouées. Le prochain SOMMAIRE lance un nouveau démarrage. Si le
+terminal n'a jamais répondu à cette requête, la détection est désactivée sans
+confondre son silence avec une extinction. Les transports console ne sont pas sondés.
+La requête est décrite dans le [STUM Minitel 1, section 2.1.3](https://www.minitel-alcatel.fr/documents/M1_1983-1984/STUM%20M1.pdf).
+Les sondes sont espacées de deux secondes, avec une seconde de réponse chacune
+en plus du temps nécessaire à vider les octets déjà en file sur l'UART à 1200 bauds;
+une extinction très brève ou survenue entièrement pendant un affichage ou un
+appel bloquant peut donc passer inaperçue. Le comportement reste à valider sur
+le Matra physique. Un redémarrage du service démarre aussi une nouvelle connexion.
 
 ## Demander, lire, préciser
 

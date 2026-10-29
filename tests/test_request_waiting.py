@@ -74,8 +74,8 @@ class WaitingTests(unittest.TestCase):
         release = threading.Event()
         entered = threading.Event()
         uart = FakeSerial(
-            b"en" + fn(chat.K_ENVOI) + fn(chat.K_SUITE) + b"Old" + fn(chat.K_ENVOI)
-            + fn(chat.K_SOMMAIRE) + b"fr" + fn(chat.K_ENVOI) + fn(chat.K_SUITE)
+            startup.login_keys("en") + b"Old" + fn(chat.K_ENVOI)
+            + fn(chat.K_SOMMAIRE)
             + b"New" + fn(chat.K_ENVOI)
         )
         real_start = chat.start_answer
@@ -95,6 +95,7 @@ class WaitingTests(unittest.TestCase):
         try:
             with (patch.object(chat, "select_memory_user", return_value=(Mock(take_warning=lambda: ""), "envoi")),
                   patch.object(chat.serial, "Serial", return_value=uart),
+                  patch.object(chat.memory_session, "MemorySession", return_value=Mock(username="Test", take_warning=lambda: "")),
                   patch.object(chat.time, "sleep"),
                   patch.object(chat, "load_preset", return_value=("persona", "3615 IA", "Question?", "WAIT", None)),
                   patch.object(chat, "factual_knowledge", return_value=""),
@@ -106,7 +107,7 @@ class WaitingTests(unittest.TestCase):
                 chat.run()
             call.assert_called_once()
             self.assertNotIn("STALE", screen_text(uart.output))
-            self.assertIn("Requete precedente", screen_text(uart.output))
+            self.assertIn("Previous request still finishing", screen_text(uart.output))
         finally:
             release.set()
             for pending in pending_requests:
@@ -126,9 +127,9 @@ class FactualIntegrationTests(unittest.TestCase):
             calls.append((history, language, knowledge))
             return result
 
-        keys = (b"en" + fn(chat.K_ENVOI) + fn(chat.K_SUITE) + b"Search now" + fn(chat.K_ENVOI)
+        keys = (startup.login_keys("en") + b"Search now" + fn(chat.K_ENVOI)
                 + b"Second source?" + fn(chat.K_ENVOI) + fn(chat.K_SOMMAIRE)
-                + b"fr" + fn(chat.K_ENVOI) + fn(chat.K_SUITE) + b"Bonjour" + fn(chat.K_ENVOI))
+                + b"Bonjour" + fn(chat.K_ENVOI))
         with patch.object(chat, "factual_knowledge", return_value="Known user reference"):
             screens, legacy = self.flow.run_session(keys, factual_reply=answer)
         self.assertEqual(legacy, [])
@@ -140,7 +141,7 @@ class FactualIntegrationTests(unittest.TestCase):
         self.assertNotIn("Sources:", turn["content"])
         self.assertNotIn("ALCATEL", json.dumps(calls))
         self.assertEqual(calls[2][0], [{"role": "user", "content": "Bonjour"}])
-        self.assertEqual(calls[2][1], "fr")
+        self.assertEqual(calls[2][1], "en")
         output = "\n".join(screens)
         self.assertIn("MINITEL 722079V -> ALCATEL MF-83", output)
         self.assertIn("[2] example.net", output)
@@ -162,7 +163,7 @@ class FactualIntegrationTests(unittest.TestCase):
 
             with self.subTest(failure=failure):
                 screens, _ = self.flow.run_session(
-                    b"en" + fn(chat.K_ENVOI) + fn(chat.K_SUITE) + b"Search now" + fn(chat.K_ENVOI)
+                    startup.login_keys("en") + b"Search now" + fn(chat.K_ENVOI)
                     + b"Explain" + fn(chat.K_ENVOI), factual_reply=answer)
                 self.assertEqual(calls[1], [{"role": "user", "content": "Explain"}])
                 self.assertIn("Recovered.", "\n".join(screens))

@@ -65,9 +65,9 @@ class ConsoleTests(unittest.TestCase):
         self.assertEqual(key_bytes("é"), b"")
 
     def test_real_loop_startup_paging_history_calculator_and_reset(self):
-        # Blank username -> shared scope/French -> SUITE. Page a long reply,
-        # ask a follow-up, use local arithmetic, then reset to username selection.
-        keys = (list("\n") + ["\x0e"] + list("hello\n")
+        # SOMMAIRE -> boot -> SUITE -> blank username/shared French. Page a long
+        # reply, follow up, use arithmetic, then reset while retaining the user.
+        keys = (["\x10", "\x0e"] + list("\nhello\n")
                 + ["\x0e"] + list("follow up\nCALC 2+3\n") + ["\x10"])
         console = ConsoleSerial(Window(keys))
         snapshots = []
@@ -116,7 +116,7 @@ class ConsoleTests(unittest.TestCase):
         self.assertNotIn("Choose language", visible)
         self.assertIn("2+3", visible)
         self.assertIn("5", visible)
-        self.assertIn("Nom / name", snapshots[-1])
+        self.assertIn("Quelle est votre requete", snapshots[-1])
 
 
 if __name__ == "__main__":

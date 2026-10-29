@@ -514,11 +514,9 @@ class AdminAndUARTTests(unittest.TestCase):
 
     def test_real_uart_console_arithmetic_exit_and_conversation_recovery(self):
         uart = FakeSerial(
-            b"Owner"
-            + fn(terminal.K_ENVOI)
-            + b"fr"
-            + fn(terminal.K_ENVOI)
-            + fn(terminal.K_SUITE)
+            fn(terminal.K_SOMMAIRE) + fn(terminal.K_SUITE)
+            + b"Owner" + fn(terminal.K_ENVOI)
+            + b"fr" + fn(terminal.K_ENVOI)
             + b"CALC"
             + fn(terminal.K_ENVOI)
             + b"0.1+0,2"

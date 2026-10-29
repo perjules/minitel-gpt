@@ -216,8 +216,10 @@ maintenance fictives, interruptible par les touches existantes.
 
 La [mémoire légère](docs/MEMORY.md) ajoute un nom facultatif au démarrage :
 vide sélectionne la mémoire commune, sans authentification. Préférences, notes,
-listes et tâches se gèrent en langage naturel; SOMMAIRE permet de changer
-d'utilisateur sans perdre les éléments enregistrés. Les journaux de conversations
+listes et tâches se gèrent en langage naturel. Sur le Minitel, SOMMAIRE revient à
+une conversation vide en conservant l'utilisateur et sa langue; LOGOUT puis ENVOI
+permet de changer d'utilisateur. Le démarrage fictif en français précède la
+connexion et n'est pas rejoué après SOMMAIRE ou LOGOUT. Les journaux de conversations
 visibles sont conservés séparément sur le Pi, hors Git. Voir le guide pour
 le test admin, le stockage et l'acceptation avant validation physique.
 
