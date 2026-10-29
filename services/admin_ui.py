@@ -56,6 +56,7 @@ try:
         rose_config,
         storage_health,
         system_health,
+        user_services,
     )
 except ImportError:
     import admin_service_pages
@@ -75,6 +76,7 @@ except ImportError:
     import rose_config
     import storage_health
     import system_health
+    import user_services
 
 PROJ_DIR = Path(__file__).parent.parent
 ASSETS_DIR = PROJ_DIR / "assets"
@@ -579,7 +581,7 @@ def generate_prompt(description):
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"].strip()
 
-def llm_answer(system_prompt, user_message, knowledge=""):
+def llm_answer(system_prompt, user_message, knowledge="", selected=None):
     """Interroge le LLM configuré comme le ferait le terminal (system + question).
     Retourne le texte de la réponse."""
     import requests
@@ -627,11 +629,16 @@ def llm_answer(system_prompt, user_message, knowledge=""):
     key = mistral_key()
     if not is_real_key(key):
         raise RuntimeError("Clé Mistral absente")
+    school = pronote.backend()
+    if selected is not None:
+        school = user_services.ProfileSchool(school, selected.user, selected.registry)
+        if pronote_answers.school_record_request(user_message, pronote.backend().config().get('children', {})) and not school.config()['children']:
+            return 'PRONOTE: aucun accès attribué à ce profil.'
     options = mistral_answers.settings({**os.environ, **read_env()})
     if options[0] == "conversations":
         result = mistral_answers.answer(history, "fr", key, mistral_model(),
                                         options[1], options[2], knowledge,
-                                        **({"pronote": pronote.backend()} if pronote.backend().tools() else {}))
+                                        **({"pronote": school} if school.tools() else {}))
         return (mistral_answers.notice(result["status"], "fr")
                 or pronote_answers.render(result, "fr", full_urls=True))
     messages = [{"role": "system", "content": system_prompt}] + history

@@ -33,6 +33,7 @@ try:  # Support both systemd's direct script and package imports in tests.
         pronote_answers,
         pronote_mode,
         terminal_link,
+        user_services,
     )
 except ImportError:
     # Direct systemd entry point: keep one identity for exception/session classes.
@@ -48,6 +49,7 @@ except ImportError:
         pronote_answers,
         pronote_mode,
         terminal_link,
+        user_services,
     )
 
 try:
@@ -549,6 +551,11 @@ def call_answer(system_prompt, history, language, options, knowledge,
     explicit_memory = memory_session.explicit_request(question)
     note_request = re.match(r"^note\b", question, re.IGNORECASE)
     school = pronote.backend() if PROVIDER == "mistral" and api == "conversations" else None
+    if school is not None and memory is not None:
+        original = school
+        school = user_services.ProfileSchool(school, memory.user, memory.registry)
+        if pronote_answers.school_record_request(question, original.config().get('children', {})) and not school.config()['children']:
+            return {'display':'PRONOTE: aucun accès attribué à ce profil.', 'turn':None}
     school_enabled = school is not None and bool(school.tools())
     school_request = (school_enabled and not explicit_memory and not note_request
                       and pronote_answers.school_record_request(question, school.config().get("children", {})))
@@ -1110,7 +1117,7 @@ def run_session(t):
                 memory.remember_language(language)
         system_prompt = session_prompt(system_prompt, language)
         calc = calculator.Session()
-        school_mode = pronote_mode.Session()
+        school_mode = pronote_mode.Session(user_services.ProfileSchool(pronote.backend(), memory.user, memory.registry))
         if language == "en":
             question_msg = UI[language]["question"]
             loading_msg = UI[language]["loading"]

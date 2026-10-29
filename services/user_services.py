@@ -44,3 +44,42 @@ class ProfileMailClient(gmail_client.GmailClient):
 def mail_client(name='', root=None):
     registry = user_registry.Registry(root)
     return ProfileMailClient(registry.resolve(name), registry)
+
+
+class ProfileSchool:
+    def __init__(self, backend, user, registry):
+        self.backend, self.user, self.registry = backend, user, registry
+
+    def config(self):
+        config = self.backend.config()
+        try:
+            allowed = self.registry.children(self.user.id) if self.registry.get(self.user.id).revision == self.user.revision else set()
+        except gmail_auth.GmailError:
+            allowed = set()
+        return {**config, 'children':{k:v for k,v in config['children'].items() if k in allowed}}
+
+    def tools(self):
+        import copy
+        children = self.config()['children']
+        if not children:
+            return []
+        tools = copy.deepcopy(self.backend.tools())
+        for tool in tools:
+            prop = tool['function']['parameters']['properties'].get('child')
+            if prop is not None:
+                prop['enum'] = list(children)
+        return tools
+
+    def execute(self,name,arguments,deadline=None):
+        import json
+        if isinstance(arguments,str):
+            try:
+                arguments=json.loads(arguments)
+            except ValueError:
+                return {'error':'invalid_arguments'}
+        allowed=self.config()['children']
+        if name=='pronote_list_children' and arguments=={}:
+            return {'children':list(allowed)}
+        if not isinstance(arguments,dict) or arguments.get('child') not in allowed:
+            return {'error':'permission_denied'}
+        return self.backend.execute(name,arguments,deadline)
