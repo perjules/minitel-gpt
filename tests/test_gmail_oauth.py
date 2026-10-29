@@ -216,6 +216,7 @@ def root_helper(tmp_path, monkeypatch):
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, 'gmail_auth', auth)
     spec.loader.exec_module(module)
+    monkeypatch.setattr(module, 'ACCOUNTS_STORE', tmp_path / 'accounts')
     monkeypatch.setattr(module, 'Path', lambda p: tmp_path / str(p).lstrip('/'))
     (tmp_path / 'run').mkdir()
     (tmp_path / 'var/lib/minitel-gpt').mkdir(parents=True)

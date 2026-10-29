@@ -740,6 +740,7 @@ class AdditionalContracts(unittest.TestCase):
             lock = Path(directory, "root-lock")
             with (
                 patch.object(module, "Path", return_value=lock),
+                patch.object(module, "ACCOUNTS_STORE", Path(directory, "accounts")),
                 patch.object(module, "decrypt_info", side_effect=lambda: info()),
                 patch.object(module, "encrypt_info") as encrypt,
             ):
