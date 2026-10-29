@@ -1115,6 +1115,8 @@ class MailSession:
         }
 
     def send(self, ticket, epoch, deadline):
+        if isinstance(self.client, user_services.ProfileMailClient):
+            self.client.tokens.guard("send")
         with self.lock:
             draft = self.draft
             if not self.review_valid(ticket):

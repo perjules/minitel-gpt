@@ -18,7 +18,10 @@ from services.gmail_auth import (
     SCOPES,
     TOKEN_URI,
     GmailError,
+    account_bundle,
+    account_id,
     encrypt_info,
+    save_accounts,
     systemd_preflight,
 )
 
@@ -93,7 +96,7 @@ def load_client(path):
     return data
 
 
-def enroll(path):
+def enroll(path, target=None):
     if os.geteuid() != 0:
         raise GmailError("run_as_root")
     print(json.dumps(systemd_preflight()))
@@ -144,7 +147,18 @@ def enroll(path):
 
     with Path("/run/minitel-gmail-root.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        encrypt_info(info)
+        if target is None:
+            encrypt_info(info)
+        else:
+            account_id(target)
+            data=account_bundle()
+            existing=data['accounts'].get(target)
+            if existing and existing['info']['email_address'].casefold()!=info['email_address'].casefold():
+                raise GmailError('wrong_google_account')
+            if any(k!=target and v['info']['email_address'].casefold()==info['email_address'].casefold() for k,v in data['accounts'].items()):
+                raise GmailError('duplicate_account')
+            data['accounts'][target]={'info':info,'revision':existing['revision']+1 if existing else 1}
+            save_accounts(data)
     print(
         "Encrypted enrollment saved. Activate/restart both services; run the read-only probe."
     )
@@ -155,9 +169,10 @@ def main():
     parser.add_argument(
         "client_config", help="root-owned 0600 Desktop OAuth JSON outside the checkout"
     )
+    parser.add_argument("--account-id", help="explicit account ID for multi-account enrollment; synchronize metadata in admin afterward")
     arguments = parser.parse_args()
     try:
-        enroll(arguments.client_config)
+        enroll(arguments.client_config, arguments.account_id)
     except GmailError as error:
         print("Enrollment failed: " + str(error), file=sys.stderr)
         return 1

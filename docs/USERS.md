@@ -1,0 +1,99 @@
+# Profiles and private-service access
+
+Names select profiles; they do not authenticate the operator. Anyone knowing a
+name can select that profile until passwords are implemented. Administration
+continues to require ADMIN_PASSWORD and CSRF tokens.
+
+Blank input selects the reserved MinitelGPT profile. An unfamiliar name creates a
+profile with no Gmail or PRONOTE access. Existing name normalization and memory
+namespaces are retained. Display-name changes retain stable user and memory IDs.
+Aliases must be unique; a disabled identity does not become a new identity.
+
+## Data
+
+`users.sqlite3` lives under MINITEL_MEMORY_DIR, or
+`/home/minitel/.local/share/3615-ia`, outside Git. The database is private (0600),
+uses SQLite foreign keys and short transactions, and schema version 1. It contains
+profiles, aliases, Gmail metadata, one-mailbox assignments, read/send permissions
+and PRONOTE child grants. No OAuth secrets, passwords, mail bodies or memory
+contents are stored there. Connections are short-lived with a three-second lock
+wait. An invalid database is reported, not silently replaced.
+
+The existing memory files and saved language preferences are unchanged. No memory
+migration, user password UI, background synchronization or autonomous send is added.
+
+Gmail credentials are in the root-only, host-encrypted
+`/etc/credstore.encrypted/minitel-gmail-accounts`, bounded to sixteen accounts.
+The existing encrypted OAuth client configuration and HTTPS callback are reused.
+The legacy `/etc/credstore.encrypted/minitel-gmail` is retained untouched as the
+pre-migration credential backup. Once the account bundle exists, implicit legacy
+reads/rotations and single-account enrollment writes are refused.
+
+Root helpers accept validated account IDs and enrollment revisions only. Each
+refresh rotation preserves the other accounts. Account revision comparisons reject
+late enrollments and stale credential operations. OAuth attempts retain their
+user/account target, PKCE and state in bounded RAM. Reauthorization to a different
+Google mailbox is rejected; adding that mailbox requires a separate account.
+
+## Rollout on the Pi
+
+Use the complete release on develop, not an intermediate implementation commit.
+An already-installed Gmail extension receives the root helper through the normal
+runtime update. No additional package, sudo rule or database daemon is required.
+The runtime checks that the interpreter imports sqlite3.
+
+1. Update through Maintenance, refresh the console, then open Services →
+   Utilisateurs et accès (`/users`). Create your profile and the other known names.
+2. Open Services → Gmail. Select **Importer l’ancien compte partagé sans
+   l’attribuer**. This retains its existing Google authorization and imports it as
+   an unassigned account. The database is backed up once to
+   `users.before-multi.sqlite3`; the legacy encrypted token file is unchanged.
+3. Return to Utilisateurs et accès, assign that mailbox explicitly to its owner,
+   and choose read-only or read/send. Save. No personal mailbox is automatically
+   assigned to the default profile.
+4. In Gmail, choose the MinitelGPT profile in the Google connection form, connect
+   the dedicated device Gmail account, then Apply. Apply assigns read-only access
+   unless **Autoriser aussi l’envoi** is checked. Both services restart after the
+   response so systemd delivers the updated credential bundle.
+5. Connect additional users in the same way. Each account belongs to one profile
+   in this release. Configure allowed PRONOTE child aliases in Utilisateurs et accès.
+6. Check each mailbox using the explicit account selector and read-only connection
+   check. The user-mode Gmail console honors the selected user's grants.
+
+Opening a profile or making a request never silently falls back to another
+mailbox. Grant changes invalidate old sessions, cached views and approval tickets;
+reopen the session after changing access. SOMMAIRE retains identity and resets the
+conversation; LOGOUT selects another identity. Already dispatched external requests
+cannot be recalled and are never replayed after reconnect/reset.
+
+A failed Google consent preserves existing accounts. Credential storage happens
+before the database update; an interrupted callback may leave an unassigned
+account. Use **Synchroniser les comptes enregistrés** to recover its metadata,
+then explicitly assign it. Synchronization does not grant access. If Apply fails,
+retry Apply. A local disconnect removes grants first; failure to erase ciphertext
+leaves a disabled account, not restored access. It does not revoke Google's grant.
+
+## Recovery and downgrade
+
+Back up the SQLite database using sqlite3's backup API (or with services stopped),
+not by copying it while writes are active. Back up encrypted credential files and
+retain the Pi's systemd host key using the existing secure installation procedure.
+Never export plaintext token data. No backup/restore web feature is added here.
+
+Normal code rollback is not a user-data rollback. The runtime refuses a target
+release without multi-account support while the account bundle exists. For an
+intentional downgrade, stop both application services, preserve the current
+SQLite and encrypted account bundle, restore matching old data and legacy
+credential delivery under root, and only then deploy the old release. Removing
+or renaming the account bundle without restoring matching code/units is unsafe.
+Do not downgrade merely to regain automatic shared-mailbox access.
+
+## Acceptance
+
+Offline checks use synthetic accounts and mocked Google/systemd operations. On
+hardware, test blank/default, two named users and an unassigned name. Verify
+correct inbox and From address; read-only send denial; LOGOUT and SOMMAIRE;
+expired/revoked authorization; grant removal during a session; and restart
+persistence. Real sends require an explicit owner-controlled recipient and review.
+Operational tracing contains only user/account IDs, operation and outcome. Existing
+private transcript rules remain; no duplicate mail-body archive is introduced.

@@ -11,6 +11,7 @@ from pathlib import Path
 # This file and gmail_auth.py are copied into the same root-owned release.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gmail_auth import (
+    ACCOUNTS_STORE,
     GmailError,
     account_bundle,
     account_id,
@@ -30,15 +31,18 @@ def activate():
         status = Path("/var/lib/minitel-gpt/deployment.json")
         if status.exists() and json.loads(status.read_text()).get("phase") in {"queued", "preparing", "activating"}:
             raise GmailError("deployment_busy")
-        decrypt_info()  # Retain legacy capability; multi-account secrets stay root-only.
+        if ACCOUNTS_STORE.exists():
+            account_bundle()
+        else:
+            decrypt_info()
         for service in ("minitel-chatgpt", "admin-ui"):
             folder = Path(f"/etc/systemd/system/{service}.service.d")
             folder.mkdir(mode=0o755, parents=True, exist_ok=True)
             # Same credential drop-in as install_gmail.sh; no general systemd access.
             (folder / "gmail.conf").write_text(
                 "[Unit]\nAfter=systemd-tmpfiles-setup.service\n[Service]\n"
-                "Environment=GMAIL_ENABLED=1\n"
-                "LoadCredentialEncrypted=gmail:/etc/credstore.encrypted/minitel-gmail\n"
+                "Environment=GMAIL_ENABLED=1\n" +
+                ("LoadCredentialEncrypted=gmail:" + str(ACCOUNTS_STORE if ACCOUNTS_STORE.exists() else Path('/etc/credstore.encrypted/minitel-gmail')) + "\n") +
                 "PrivateMounts=yes\n"
             )
         for command in (
@@ -83,6 +87,12 @@ def process(request):
                 data["accounts"][identifier] = {"info": info, "revision": revision}
                 save_accounts(data)
                 return {"status": "saved", "revision": revision}
+            if operation == 'forget' and set(request) == {'operation','account_id','revision'}:
+                if entry is None or request['revision'] != entry['revision']:
+                    raise GmailError('enrollment_changed')
+                del data['accounts'][identifier]
+                save_accounts(data)
+                return {'status':'saved'}
             if entry is None or request.get("revision") != entry["revision"]:
                 raise GmailError("enrollment_changed")
             if operation == "read" and set(request) == {"operation", "account_id", "revision"}:
@@ -110,6 +120,8 @@ def process(request):
             return {"status": "saved"}
         if request == {"operation": "activate"}:
             return activate()
+        if ACCOUNTS_STORE.exists():
+            raise GmailError("account_target_required")
         info = decrypt_info()
         if request == {"operation": "read"}:
             return info

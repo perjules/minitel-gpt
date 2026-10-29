@@ -138,7 +138,7 @@ class Runtime:
                             capture_output=True, text=True).stdout.strip()
 
     def probe(self, environment, extras):
-        modules = ["flask", "requests", "serial", "dotenv", "pyfiglet"]
+        modules = ["sqlite3", "flask", "requests", "serial", "dotenv", "pyfiglet"]
         for extra, names in {"gmail": ["google.auth", "google_auth_oauthlib", "cryptography"],
                              "pronote": ["pronotepy"], "printer": ["bleak", "PIL"]}.items():
             if extra in extras:
@@ -253,6 +253,8 @@ Environment=GMAIL_ENABLED=1
 LoadCredentialEncrypted=gmail:/etc/credstore.encrypted/minitel-gmail
 PrivateMounts=yes
 """
+        if self.system_path('/etc/credstore.encrypted/minitel-gmail-accounts').exists():
+            gmail = gmail.replace('minitel-gmail\n','minitel-gmail-accounts\n')
         for service in SERVICES[:2]:
             folder = self.system_path(f"/etc/systemd/system/{service}.service.d")
             (folder / "pronote.conf").unlink(missing_ok=True)
@@ -325,6 +327,9 @@ PrivateMounts=yes
     def switch(self, candidate, old, *, branch, target=None, checkout_branch=None):
         if checkout_branch and target:
             self.protect_untracked(target)
+        accounts = self.system_path('/etc/credstore.encrypted/minitel-gmail-accounts')
+        if accounts.exists() and 'AccountTokenSource' not in (Path(candidate['release']) / 'root/gmail_auth.py').read_text():
+            raise RuntimeError('Multi-account Gmail requires a compatible release; restore matching data before downgrade')
         running = self.running()
         old_commit = old.get("active", {}).get("commit") or self.git("rev-parse", "HEAD")
         paths = [self.system_path(f"/etc/systemd/system/{service}.service") for service in SERVICES]

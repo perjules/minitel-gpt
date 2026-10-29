@@ -551,10 +551,12 @@ def call_answer(system_prompt, history, language, options, knowledge,
     explicit_memory = memory_session.explicit_request(question)
     note_request = re.match(r"^note\b", question, re.IGNORECASE)
     school = pronote.backend() if PROVIDER == "mistral" and api == "conversations" else None
-    if school is not None and memory is not None:
+    if school is not None and isinstance(getattr(memory,'user',None), user_services.user_registry.User):
         original = school
         school = user_services.ProfileSchool(school, memory.user, memory.registry)
-        if pronote_answers.school_record_request(question, original.config().get('children', {})) and not school.config()['children']:
+        if (original.config().get('enabled') and not explicit_memory and not note_request
+                and '@' not in question and pronote_answers.school_record_request(question, original.config().get('children', {}))
+                and not school.config()['children']):
             return {'display':'PRONOTE: aucun accès attribué à ce profil.', 'turn':None}
     school_enabled = school is not None and bool(school.tools())
     school_request = (school_enabled and not explicit_memory and not note_request
@@ -1141,6 +1143,13 @@ def run_session(t):
                 username = language = None
                 break
 
+            try:
+                memory.active()
+            except memory_session.memory.MemoryProblem:
+                t.line('Profil modifié. Reconnectez-vous.')
+                username = language = None
+                break
+
             # Local maintenance commands: never send them to an LLM.
             maintenance = (question or "").strip().lower()
             if maintenance in ("mainframe --shutdown", "mainframe --reboot"):
@@ -1218,6 +1227,11 @@ def run_session(t):
                         answer = response["display"]
                     else:
                         answer = "PRONOTE: " + ("timeout" if action == "deadline" else "unavailable")
+                try:
+                    memory.active()
+                except memory_session.memory.MemoryProblem:
+                    username = language = None
+                    break
                 answer = safe_display(answer)
                 if school_mode.grade_view and not direct.get("print"):
                     # One test per physical page, even with unusually long

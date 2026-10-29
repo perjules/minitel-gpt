@@ -133,9 +133,9 @@ def complete(identifier, state, code, denied=False):
         if result.get('status') != 'saved':
             raise auth.GmailError("credential_helper_unavailable")
         if target is not None:
-            Registry().record_account(target['account_id'], email, result['revision'])
+            user_revision = Registry().record_account(target['account_id'], email, result['revision'], target['user_id'], target['user_revision'])
             return {'email': email, 'account_id':target['account_id'], 'user_id':target['user_id'],
-                    'user_revision':Registry().get(target['user_id']).revision}
+                    'user_revision':user_revision}
         return email
     except auth.GmailError:
         raise

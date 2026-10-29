@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from services.gmail_auth import GmailError
-from services.gmail_client import GmailClient
+from services.user_services import mail_client
 
 
 def main():
@@ -19,8 +19,9 @@ def main():
         action="store_true",
         help="force another in-memory access-token renewal",
     )
+    parser.add_argument("--user", required=True, help="explicit profile name; empty string selects default")
     args = parser.parse_args()
-    client = GmailClient()
+    client = mail_client(args.user)
     try:
         deadline = time.monotonic() + 60
         records = client.list("", deadline)

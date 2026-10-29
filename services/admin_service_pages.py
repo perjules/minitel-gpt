@@ -16,13 +16,14 @@ FUTURE = '''<details><summary>Associations utilisateurs — à venir</summary>
 GMAIL = '''<section><h2>Comptes Gmail</h2><p>{{account}}</p>
 <p><a href=/users>Utilisateurs et accès</a></p>
 {% for a in oauth_accounts %}<p>{{a.email}} · profil #{{a.user_id or 'non attribué'}}</p>
-<form method=post action=/services/gmail/accounts><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=disable><input type=hidden name=account_id value="{{a.id}}"><label><input type=checkbox name=enabled {{'checked' if a.enabled}}> Compte actif</label><button>Appliquer</button></form>{% endfor %}
+<form method=post action=/services/gmail/accounts><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=disable><input type=hidden name=account_id value="{{a.id}}"><label><input type=checkbox name=enabled {{'checked' if a.enabled}}> Compte actif</label><button>Appliquer</button></form>
+<form method=post action=/services/gmail/accounts onsubmit="return confirm('Déconnecter ce compte et retirer ses accès locaux ?')"><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=disconnect><input type=hidden name=account_id value="{{a.id}}"><button>Déconnecter localement</button></form>{% endfor %}
 <form method=post action=/services/gmail/accounts><input type=hidden name=csrf value="{{csrf_token()}}"><button name=action value=migrate>Importer l’ancien compte partagé sans l’attribuer</button><button name=action value=sync>Synchroniser les comptes enregistrés</button></form>
 <p>Intégration : {{'active' if enabled else 'inactive'}}. La configuration locale ne confirme pas la connexion.</p>
 <form method=post action=/services/gmail/toggle><input type=hidden name=csrf value="{{csrf_token()}}">
 <label><input type=checkbox name=enabled value=1 {{'checked' if enabled}}> Activer Gmail</label>
 <button>Enregistrer et appliquer</button></form>
-<form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><button name=action value=check>Vérifier la connexion (lecture seule)</button></form>
+<form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><label>Compte à vérifier<select name=account_id>{% for a in oauth_accounts %}<option value="{{a.id}}">{{a.email}}</option>{% endfor %}</select></label><button name=action value=check>Vérifier la connexion (lecture seule)</button></form>
 <a href="/test?mode=gmail">Tester Gmail</a></section>
 <section><h2>Connexion Google</h2>
 <p>Autorisez le compte du profil sélectionné dans votre navigateur, puis appliquez l’autorisation aux deux services. Aucun tunnel SSH n’est nécessaire après la configuration initiale.</p>

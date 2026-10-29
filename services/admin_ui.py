@@ -1473,7 +1473,7 @@ def test_preset_route():
                 result = selected.handle(msg, language) if selected.interested(msg) else {"passthrough": True}
             if result.get("passthrough"):
                 remembered = selected.context(msg)
-                answer = llm_answer(system + "\n\n" + remembered, msg, knowledge=kb + "\n\n" + remembered)
+                answer = llm_answer(system + "\n\n" + remembered, msg, knowledge=kb + "\n\n" + remembered, selected=selected)
             else:
                 answer = result["display"]
             selected.active()  # A reset/switch abandons a late generated scene.
@@ -1797,7 +1797,11 @@ def service_configuration(feature):
             try:
                 if not gmail_enabled():
                     raise gmail_auth.GmailError("disabled")
-                gmail_client.GmailClient().list("", time.monotonic() + 20)
+                identifier = request.form.get('account_id','')
+                metadata = next((a for a in user_registry.Registry().accounts() if a['id']==identifier),None)
+                if metadata is None:
+                    raise gmail_auth.GmailError('account_required')
+                gmail_client.GmailClient(tokens=gmail_auth.AccountTokenSource(identifier,revision=metadata['revision'])).list("", time.monotonic() + 20)
                 message = "Connexion Gmail vérifiée. Aucun message envoyé ni marqué comme lu."
             except gmail_auth.GmailError:
                 message = "Connexion non confirmée ; vérifier l’activation et l’enrôlement."
@@ -1966,9 +1970,34 @@ def gmail_accounts_admin():
         action=request.form.get('action')
         if action=='migrate':
             identifier=secrets.token_hex(16)
+            import sqlite3
+            backup=registry.path.with_name('users.before-multi.sqlite3')
+            if not backup.exists():
+                with registry.connection() as db:
+                    fd=os.open(backup,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+                    os.close(fd)
+                    target=sqlite3.connect(backup)
+                    try:
+                        db.backup(target)
+                    finally:
+                        target.close()
             result=gmail_auth.credential_helper({'operation':'migrate','account_id':identifier})
             if result.get('status')!='saved':
                 raise gmail_auth.GmailError('migration_unavailable')
+        elif action=='disconnect':
+            identifier=request.form['account_id']
+            account=next((a for a in registry.accounts() if a['id']==identifier),None)
+            if account is None:
+                raise gmail_auth.GmailError('unknown_account')
+            with registry.connection() as db:
+                db.execute('UPDATE users SET revision=revision+1 WHERE id IN (SELECT user_id FROM user_gmail_access WHERE account_id=?)',(identifier,))
+                db.execute('DELETE FROM user_gmail_access WHERE account_id=?',(identifier,))
+                db.execute('UPDATE gmail_accounts SET enabled=0 WHERE id=?',(identifier,))
+            result=gmail_auth.credential_helper({'operation':'forget','account_id':identifier,'revision':account['revision']})
+            if result.get('status')!='saved':
+                raise gmail_auth.GmailError('credential_helper_unavailable')
+            with registry.connection() as db:
+                db.execute('DELETE FROM gmail_accounts WHERE id=?',(identifier,))
         elif action=='disable':
             with registry.connection() as db:
                 identifier=request.form['account_id']
@@ -2231,6 +2260,16 @@ def memory_entry(username=None, reset=False):
                 discard_memory(identifier)
         identifier = session.get("memory_session")
         item = MEMORY_SESSIONS.get(identifier)
+        if item:
+            selected=item['memory']
+            try:
+                changed=selected.registry.get(selected.user.id).revision != selected.user.revision
+            except gmail_auth.GmailError:
+                changed=True
+            if changed:
+                username='' if selected.key=='shared' else selected.username
+                discard_memory(identifier)
+                item=None
         key = memory_session.memory.user_key(username)[0] if username is not None else None
         if item and (reset or (key is not None and key != item["memory"].key)):
             discard_memory(identifier)
@@ -2278,6 +2317,13 @@ def mail_entry(username=""):
             if now - item["used"] > MAIL_TTL:
                 discard_mail(identifier)
         identifier = session.get("gmail_session")
+        if identifier in MAIL_SESSIONS:
+            client=MAIL_SESSIONS[identifier]['mail'].client
+            if isinstance(client,user_services.ProfileMailClient):
+                try:
+                    client.tokens.guard()
+                except gmail_auth.GmailError:
+                    discard_mail(identifier)
         if identifier in MAIL_SESSIONS and MAIL_SESSIONS[identifier]["mail"].username != (username.strip() or "MinitelGPT"):
             discard_mail(identifier)
         if identifier not in MAIL_SESSIONS:
@@ -2316,7 +2362,7 @@ input,button{font:inherit;padding:.5em;margin:.2em} input[type=text]{width:90%}<
 <form method=post><input type=hidden name=csrf value="{{csrf}}">
 <label>Utilisateur (vide = mémoire commune)<input type=text name=username maxlength=60 value="{{username}}"></label>
 <button name=action value=user>Choisir l’utilisateur</button></form>
-<p>Compte Gmail partagé. Destination mémoire/journal : {{ memory_label }}.</p>
+<p>Compte lié au profil sélectionné. Destination mémoire/journal : {{ memory_label }}. Aucun compte de secours.</p>
 <p>Brouillons temporaires; commandes et réponses visibles journalisées dans la mémoire sélectionnée ici. Lecture sans marquer comme lu. Le modèle ne peut pas envoyer.</p>
 {% if not enabled %}<p>Gmail désactivé. Suivre docs/GMAIL.md pour la connexion sur ordinateur.</p>{% endif %}
 <pre>{{ page }}</pre><p>Page {{ position }} / {{ count }}</p>
@@ -2437,6 +2483,13 @@ def gmail_admin():
         return response
     finally:
         item["lock"].release()
+
+@app.errorhandler(memory_session.memory.MemoryProblem)
+@app.errorhandler(gmail_auth.GmailError)
+def profile_error(error):
+    return render_template_string(admin_service_pages.HEAD,title='Profil indisponible',
+                                  message='Profil ou accès indisponible. Revenez au choix du nom ou contactez l’administrateur.'),400
+
 
 class AdminRequestHandler(WSGIRequestHandler):
     def log_request(self, code="-", size="-"):

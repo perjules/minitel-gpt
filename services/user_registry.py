@@ -35,7 +35,8 @@ class Registry:
             raise GmailError('user_registry_invalid')
         fd = os.open(self.path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
         os.close(fd)
-        os.chmod(self.path, 0o600)
+        if self.path.stat().st_mode & 0o777 != 0o600:
+            os.chmod(self.path, 0o600)
         db = sqlite3.connect(self.path, timeout=3)
         db.row_factory = sqlite3.Row
         try:
@@ -101,10 +102,19 @@ COMMIT;''')
         with self.connection() as db:
             return [dict(r) for r in db.execute('SELECT a.*,g.user_id,g.can_read,g.can_send FROM gmail_accounts a LEFT JOIN user_gmail_access g ON a.id=g.account_id ORDER BY email')]
 
-    def record_account(self, account_id, email, revision):
+    def record_account(self, account_id, email, revision, target_user=None, expected_revision=None):
         with self.connection() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if target_user is not None:
+                current=self.user(db.execute('SELECT * FROM users WHERE id=?',(target_user,)).fetchone())
+                if current.revision != expected_revision:
+                    raise GmailError('account_assignment_changed')
+            previous = db.execute('SELECT revision FROM gmail_accounts WHERE id=?',(account_id,)).fetchone()
             db.execute('INSERT INTO gmail_accounts(id,email,revision) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET email=excluded.email,revision=excluded.revision', (account_id,email,revision))
-            db.execute('UPDATE users SET revision=revision+1 WHERE id IN (SELECT user_id FROM user_gmail_access WHERE account_id=?)', (account_id,))
+            if previous is None or previous[0] != revision:
+                db.execute('UPDATE users SET revision=revision+1 WHERE id IN (SELECT user_id FROM user_gmail_access WHERE account_id=?)', (account_id,))
+            if target_user is not None:
+                return self.user(db.execute('SELECT * FROM users WHERE id=?',(target_user,)).fetchone()).revision
 
     def configure(self, user_id, name, enabled, aliases, account_id, send, children):
         name = memory.clean_text(name,60)

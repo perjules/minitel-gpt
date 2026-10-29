@@ -28,7 +28,7 @@ if [[ "${1:-}" != '--activate' ]]; then
   echo 'Dependencies installed. Enroll using scripts/gmail_enroll.py, then rerun with --activate.'
   exit 0
 fi
-if [[ ! -f /etc/credstore.encrypted/minitel-gmail ]]; then
+if [[ ! -f /etc/credstore.encrypted/minitel-gmail && ! -f /etc/credstore.encrypted/minitel-gmail-accounts ]]; then
   echo 'Encrypted enrollment missing. Services unchanged; enroll first.' >&2
   exit 1
 fi
@@ -36,9 +36,13 @@ fi
 /opt/minitel-gpt/venv/bin/python -I - "$GMAIL_PROJECT" <<'PY'
 import sys
 sys.path.insert(0, "/opt/minitel-gpt/current/root")
-from gmail_auth import decrypt_info
-decrypt_info()
+from gmail_auth import ACCOUNTS_STORE, account_bundle, decrypt_info
+account_bundle() if ACCOUNTS_STORE.exists() else decrypt_info()
 PY
+GMAIL_CREDENTIAL=/etc/credstore.encrypted/minitel-gmail
+if [[ -f /etc/credstore.encrypted/minitel-gmail-accounts ]]; then
+  GMAIL_CREDENTIAL=/etc/credstore.encrypted/minitel-gmail-accounts
+fi
 for GMAIL_SERVICE in minitel-chatgpt admin-ui; do
   mkdir -p "/etc/systemd/system/$GMAIL_SERVICE.service.d"
   cat > "/etc/systemd/system/$GMAIL_SERVICE.service.d/gmail.conf" <<EOF
@@ -46,7 +50,7 @@ for GMAIL_SERVICE in minitel-chatgpt admin-ui; do
 After=systemd-tmpfiles-setup.service
 [Service]
 Environment=GMAIL_ENABLED=1
-LoadCredentialEncrypted=gmail:/etc/credstore.encrypted/minitel-gmail
+LoadCredentialEncrypted=gmail:$GMAIL_CREDENTIAL
 PrivateMounts=yes
 EOF
 done

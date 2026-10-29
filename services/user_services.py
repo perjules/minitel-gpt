@@ -15,6 +15,15 @@ class ProfileTokens:
         self.email_address = None
         self.credentials = None
 
+    @property
+    def credentials(self):
+        return self.source.credentials if self.source else None
+
+    @credentials.setter
+    def credentials(self,value):
+        if self.source:
+            self.source.credentials=value
+
     def guard(self, operation='read'):
         if self.registry.get(self.user.id).revision != self.user.revision:
             raise gmail_auth.GmailError('account_assignment_changed')
@@ -37,8 +46,16 @@ class ProfileMailClient(gmail_client.GmailClient):
         super().__init__(tokens=ProfileTokens(user, registry))
 
     def request(self, method, path, deadline, params=None, payload=None):
-        self.tokens.guard('send' if method == 'POST' else 'read')
-        return super().request(method,path,deadline,params,payload)
+        operation='send' if method == 'POST' else 'read'
+        outcome='denied'
+        try:
+            self.tokens.guard(operation)
+            result=super().request(method,path,deadline,params,payload)
+            outcome='ok'
+            return result
+        finally:
+            self.tokens.registry.audit(self.tokens.user.id,
+                self.tokens.binding[1] if self.tokens.binding else None,operation,outcome)
 
 
 def mail_client(name='', root=None):
