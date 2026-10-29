@@ -51,7 +51,7 @@ def cancel(identifier):
         PENDING.pop(identifier, None)
 
 
-def begin(config):
+def begin(config, target=None):
     try:
         from google_auth_oauthlib.flow import Flow
     except ImportError:
@@ -76,7 +76,7 @@ def begin(config):
                 del PENDING[key]
         if len(PENDING) >= MAX_PENDING:
             raise auth.GmailError("busy")
-        PENDING[identifier] = (now, state, flow)
+        PENDING[identifier] = (now, state, flow, target)
     return identifier, url
 
 
@@ -94,6 +94,14 @@ def complete(identifier, state, code, denied=False):
     if not isinstance(code, str) or not 0 < len(code) <= 8192:
         raise auth.GmailError("oauth_callback_invalid")
     try:
+        target = entry[3]
+        if target is not None:
+            try:
+                from .user_registry import Registry
+            except ImportError:
+                from user_registry import Registry
+            if Registry().get(target['user_id']).revision != target['user_revision']:
+                raise auth.GmailError('account_assignment_changed')
         flow = entry[2]
         flow.fetch_token(code=code, timeout=(3, 15))
         credentials = flow.credentials
@@ -118,8 +126,16 @@ def complete(identifier, state, code, denied=False):
                                    "refresh_token": credentials.refresh_token,
                                    "token_uri": auth.TOKEN_URI, "scopes": list(auth.SCOPES),
                                    "email_address": email})
-        if auth.credential_helper({"operation": "enroll", "info": info}) != {"status": "saved"}:
+        payload = {"operation": "enroll", "info": info}
+        if target is not None:
+            payload.update(account_id=target['account_id'], revision=target['revision'])
+        result = auth.credential_helper(payload)
+        if result.get('status') != 'saved':
             raise auth.GmailError("credential_helper_unavailable")
+        if target is not None:
+            Registry().record_account(target['account_id'], email, result['revision'])
+            return {'email': email, 'account_id':target['account_id'], 'user_id':target['user_id'],
+                    'user_revision':Registry().get(target['user_id']).revision}
         return email
     except auth.GmailError:
         raise

@@ -21,7 +21,6 @@ try:
     from . import user_services
     from .gmail_auth import GmailError, enabled
     from .gmail_client import (
-        GmailClient,
         addresses,
         one_header,
         printable,
