@@ -514,6 +514,36 @@ class CompositionSessionTests(unittest.TestCase):
         model.route.assert_not_called()
         client.send.assert_not_called()
 
+    def test_sentence_with_address_after_failed_lookup_uses_router(self):
+        for request, action, instruction in (
+            ("send a mail to bob@web.de to confirm Friday", "compose", "confirm Friday"),
+            ("Envoie un mail à bob@hotmail.com", "compose", ""),
+            ("Peux-tu envoyer un mail à bob@hotmail.com", "compose", ""),
+            ("Please send a mail to bob@web.de", "compose", ""),
+            ("send it to bob@stellantis.com", "retarget", ""),
+        ):
+            with self.subTest(request=request):
+                session, client, model = compose_session()
+                model.resolve.side_effect = None
+                model.resolve.return_value = {"status": "no_match", "ids": []}
+                session.handle("ECRIRE Bob : confirmer mardi")
+                address = request.split("@", 1)[1].split()[0]
+                model.route.return_value = {
+                    "action": action,
+                    "recipient": "bob@" + address,
+                    "instruction": instruction,
+                }
+                result = session.handle(request)
+                self.assertIn("review_ticket", result)
+                self.assertEqual(session.draft["recipient"], "bob@" + address)
+                self.assertEqual(
+                    model.composition.call_args.args[0], instruction or "confirmer mardi"
+                )
+                model.route.assert_called_once()
+                self.assertTrue(model.route.call_args.kwargs["context"]["pending_composition"])
+                client.correspondent_metadata.assert_called_once()
+                client.send.assert_not_called()
+
     def test_literal_address_replaces_ambiguous_choices(self):
         session, client, model = compose_session()
         client.correspondent_metadata.return_value["records"].append(

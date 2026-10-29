@@ -53,6 +53,10 @@ DRAFT_RULES = (
 CONTEXT_LIMIT = 12000
 DRAFT_LIMIT = 12000
 LITERAL_EDIT = re.compile(r"^\s*(ajouter|remplacer|a|r)\s*(\d+|tout)?\s*:", re.IGNORECASE)
+COMPOSE_REQUEST = re.compile(
+    r"\b(?:send|write|compose|draft|envoie|envoyer|écris|ecris|écrire|ecrire|rédige|redige)\s+",
+    re.IGNORECASE,
+)
 
 
 def literal_command(question):
@@ -167,6 +171,10 @@ class MailModel:
             "must remain separate. Never infer a recipient from a selected message. "
             "With a pending draft, ordinary content changes are revise; 'send it to NAME' "
             "is retarget, never approval. No send action exists. Context contains only state flags. "
+            "With a pending composition, a recipient correction can be compose or retarget; "
+            "leave instruction empty if the user only supplies the new recipient. "
+            "For a literal email recipient, return only the address or name <address>, "
+            "never the surrounding request sentence. "
             "Use public for general factual questions about email technology or Gmail configuration, "
             "rather than operating the user mailbox. Search date boundaries use Europe/Paris epoch seconds after:/before:. "
             "Never invent sender addresses: only literal addresses supplied by the user. "
@@ -533,13 +541,15 @@ class MailSession:
             return self.make_draft(question, epoch, deadline, revise=True)
         # A supplied address resolves either a missing contact or a name ambiguity.
         # Do this before keyword routing (even mail@example.org contains "mail").
+        # Full composition requests still need routing to separate address and text.
         if (self.composition and not self.draft
-                and not self.composition.get("instruction_needed") and "@" in question):
+                and not self.composition.get("instruction_needed") and "@" in question
+                and not COMPOSE_REQUEST.search(question)):
             return self.compose(question, self.composition["instruction"], epoch, deadline,
                                 previous=self.composition.get("previous"))
         # New email intent is routed before the conversational revision catch-all.
         new_intent = bool(
-            re.search(
+            COMPOSE_REQUEST.search(question) or re.search(
                 r"\b(mail|email|courriel|écris|ecris|écrire|ecrire|write|compose)\b",
                 question,
                 re.IGNORECASE,
@@ -577,12 +587,20 @@ class MailSession:
             context={
                 "selected_message": self.selected is not None,
                 "pending_draft_kind": self.draft.get("kind") if self.draft else None,
+                "pending_composition": self.composition is not None,
             },
         )
         action = route["action"]
-        if action == "compose":
+        if action == "compose" or (
+            action == "retarget" and self.composition and not self.draft
+        ):
+            pending = self.composition
             return self.compose(
-                route["recipient"], route.get("instruction", ""), epoch, deadline
+                route["recipient"],
+                route.get("instruction") or (pending["instruction"] if pending else ""),
+                epoch,
+                deadline,
+                previous=pending.get("previous") if pending else None,
             )
         if action == "retarget":
             if not self.draft or self.draft.get("kind") != "new":
