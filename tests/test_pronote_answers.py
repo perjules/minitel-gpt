@@ -32,7 +32,12 @@ class SchoolMemoryRoutingTests(unittest.TestCase):
         self.addCleanup(self.memory.close)
         self.backend = Mock()
         self.backend.tools.return_value = [{"type": "function"}]
-        self.backend.config.return_value = {"children": {"Alex": {}, "Élodie": {}}}
+        self.backend.config.return_value = {"enabled":True,"children": {"Alex": {}, "Élodie": {}}}
+        registry=self.memory.registry
+        u=self.memory.user
+        registry.configure(u.id,u.display_name,True,['test'],None,False,['Alex','Élodie'])
+        self.memory.user=registry.get(u.id)
+        self.backend.tools.return_value=[{'function':{'parameters':{'properties':{'child':{'enum':['Alex','Élodie']}}}}}]
 
     def ask(self, question):
         result = {"status": "ordinary", "text": "Données scolaires", "chunks": [], "references": []}
@@ -56,7 +61,7 @@ class SchoolMemoryRoutingTests(unittest.TestCase):
                     _, saved, context, answer = self.ask(question)
                     saved.assert_not_called()
                     context.assert_not_called()
-                    self.assertIs(answer.call_args.kwargs["pronote"], self.backend)
+                    self.assertIs(answer.call_args.kwargs["pronote"].backend, self.backend)
                     self.assertEqual(answer.call_args.args[0][-1]["content"], question)
                     self.assertEqual(self.memory.pending, pending)
 

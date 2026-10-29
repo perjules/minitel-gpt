@@ -12,6 +12,12 @@ from services.console_terminal import Screen
 
 
 class TerminalModeTests(unittest.TestCase):
+    def setUp(self):
+        from services.user_registry import Registry
+        r=Registry()
+        u=r.resolve('Test')
+        r.configure(u.id,u.display_name,True,['Test'],None,False,['Alex','Sam'])
+
     def test_direct_output_stays_visible_while_waiting_for_next_command(self):
         cases = [
             (None, "NOTES / MOYENNES / DEVOIRS", b""),

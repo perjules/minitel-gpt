@@ -32,3 +32,8 @@ def console(tmp_path, monkeypatch):
         session.update(logged_in=True, csrf_token="test-token")
     return client, {"X-CSRF-Token": "test-token"}, prompts
 
+
+
+@pytest.fixture(autouse=True)
+def isolated_user_registry(tmp_path, monkeypatch):
+    monkeypatch.setenv('MINITEL_MEMORY_DIR',str(tmp_path / 'private-users'))

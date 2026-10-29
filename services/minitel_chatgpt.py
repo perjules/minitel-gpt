@@ -552,11 +552,8 @@ def call_answer(system_prompt, history, language, options, knowledge,
     note_request = re.match(r"^note\b", question, re.IGNORECASE)
     school = pronote.backend() if PROVIDER == "mistral" and api == "conversations" else None
     if school is not None and isinstance(getattr(memory,'user',None), user_services.user_registry.User):
-        original = school
         school = user_services.ProfileSchool(school, memory.user, memory.registry)
-        if (original.config().get('enabled') and not explicit_memory and not note_request
-                and '@' not in question and pronote_answers.school_record_request(question, original.config().get('children', {}))
-                and not school.config()['children']):
+        if not explicit_memory and not note_request and '@' not in question and school.denied(question):
             return {'display':'PRONOTE: aucun accès attribué à ce profil.', 'turn':None}
     school_enabled = school is not None and bool(school.tools())
     school_request = (school_enabled and not explicit_memory and not note_request
@@ -592,6 +589,8 @@ def call_answer(system_prompt, history, language, options, knowledge,
         result = mistral_answers.answer(history, language, MISTRAL_KEY,
                                         MISTRAL_MODEL, web_search, timeout, knowledge,
                                         **({"pronote": school} if school_enabled else {}))
+        if memory is not None:
+            memory.active()
         notice = mistral_answers.notice(result["status"], language)
         if notice:
             # Operational notices are not successful factual turns. Do not
@@ -1092,7 +1091,11 @@ def run_session(t):
             memory, user_action = select_memory_user(t, title_lines=title_lines, title_msg=title_msg)
         else:
             # Retire the old guard to block late worker writes, retain identity only.
-            memory = memory_session.MemorySession(username)
+            try:
+                memory = memory_session.MemorySession(username)
+            except memory_session.memory.MemoryProblem:
+                username = language = None
+                continue
             user_action = 'envoi'
         t._session_resources = (memory.close,) if memory is not None else ()
         if user_action == 'guide':

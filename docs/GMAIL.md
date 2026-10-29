@@ -1,5 +1,9 @@
 # Gmail prototype — 3615 IA
 
+> Multi-user profiles and Gmail/PRONOTE assignments: see [USERS.md](USERS.md).
+> Its migration and account-selection instructions supersede the old shared-mailbox setup below.
+
+
 Optional single-account Gmail reading, replies and **new messages to recent correspondents**, shared by the authenticated
 admin console `/gmail` and the physical Minitel. Disabled until encrypted enrollment
 is installed and both services are activated. Existing web search, PRONOTE, boot,

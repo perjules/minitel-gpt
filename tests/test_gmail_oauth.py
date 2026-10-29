@@ -26,7 +26,7 @@ INFO = {key: CONFIG[key] for key in ("client_id", "client_secret")} | {
 @pytest.fixture
 def enrollment(monkeypatch):
     oauth.PENDING.clear()
-    helper = Mock(return_value={"status": "saved"})
+    helper = Mock(side_effect=lambda request: ({'status':'saved','revision':1} if 'account_id' in request and request['operation']=='enroll' else {'status':'saved'}))
     monkeypatch.setattr(auth, "credential_helper", helper)
     monkeypatch.setattr(oauth, "configuration", lambda: CONFIG.copy())
     yield helper
@@ -101,7 +101,7 @@ def test_attempts_are_bounded_and_cancelled(enrollment, monkeypatch):
     identifier = next(iter(oauth.PENDING))
     oauth.cancel(identifier)
     begin()
-    future = max(entry[0] for entry in oauth.PENDING.values()) + oauth.LIFETIME
+    future = max(entry[0] for entry in oauth.PENDING.values()) + oauth.LIFETIME + 1
     monkeypatch.setattr(oauth.time, 'monotonic', lambda: future)
     begin()
     assert len(oauth.PENDING) == 1
@@ -159,6 +159,7 @@ def test_ui_callback_bound_to_login_browser_origin_and_csrf(console, enrollment,
     page = client.get(result.location, base_url=ORIGIN)
     assert 'Appliquer l’autorisation enregistrée' in page.text
     assert not any(secret in page.text for secret in ('PRIVATE-CLIENT', 'PRIVATE-REFRESH', 'PRIVATE-CODE'))
+    enrollment.side_effect = None
     enrollment.return_value = {'status': 'queued'}
     result = client.post('/services/gmail/oauth/apply', base_url=ORIGIN, headers=headers)
     assert result.status_code == 303

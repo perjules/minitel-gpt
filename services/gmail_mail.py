@@ -404,6 +404,8 @@ class MailSession:
             )
 
     def save(self, epoch, function):
+        if isinstance(self.client, user_services.ProfileMailClient):
+            self.client.tokens.guard("read")
         with self.lock:
             if self.epoch != epoch:
                 raise GmailError("session_reset")

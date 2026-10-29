@@ -21,8 +21,8 @@ def main():
     )
     parser.add_argument("--user", required=True, help="explicit profile name; empty string selects default")
     args = parser.parse_args()
-    client = mail_client(args.user)
     try:
+        client = mail_client(args.user)
         deadline = time.monotonic() + 60
         records = client.list("", deadline)
         if records:

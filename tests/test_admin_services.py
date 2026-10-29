@@ -25,18 +25,20 @@ def test_gmail_toggle_persists_without_destroying_credentials(console, monkeypat
     response = client.post('/services/gmail/toggle', data={'enabled': '1'}, headers=headers)
     assert response.status_code == 302
     assert admin.read_env()['GMAIL_ENABLED'] == '1' and admin.gmail_auth.enabled()
-    assert 'Associations utilisateurs' in client.get('/services/gmail').text
+    assert 'Utilisateurs et accès' in client.get('/services/gmail').text
     admin.restart_terminal.assert_called_once()
 
 
 def test_gmail_connection_check_is_explicit_and_read_only(console, monkeypatch):
     client, headers, _ = console
     monkeypatch.setenv('GMAIL_ENABLED', '1')
+    admin.user_registry.Registry().record_account('a'*32,'synthetic@example.org',1)
+    monkeypatch.setattr(admin.gmail_auth,'AccountTokenSource',Mock())
     connection = Mock()
     monkeypatch.setattr(admin.gmail_client, 'GmailClient', Mock(return_value=connection))
     client.get('/services/gmail')
     connection.list.assert_not_called()
-    result = client.post('/services/gmail', data={'action': 'check'}, headers=headers)
+    result = client.post('/services/gmail', data={'action': 'check','account_id':'a'*32}, headers=headers)
     assert 'Connexion Gmail vérifiée' in result.text
     connection.list.assert_called_once()
     connection.send.assert_not_called()

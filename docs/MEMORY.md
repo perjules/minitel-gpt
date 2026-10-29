@@ -1,5 +1,9 @@
 # Mémoire légère — 3615 IA
 
+> Multi-user profiles and Gmail/PRONOTE assignments: see [USERS.md](USERS.md).
+> Its migration and account-selection instructions supersede the old shared-mailbox setup below.
+
+
 Sur le Minitel, appuyez sur **SOMMAIRE** après la mise sous tension : le démarrage
 fictif apparaît en français. **SUITE** ouvre immédiatement l'accueil; sans action,
 l'accueil apparaît 30 secondes après la fin du démarrage. Entrez alors un nom puis

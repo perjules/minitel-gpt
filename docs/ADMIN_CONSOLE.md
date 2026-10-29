@@ -1,5 +1,9 @@
 # Console d’administration 3615 IA
 
+> Multi-user profiles and Gmail/PRONOTE assignments: see [USERS.md](USERS.md).
+> Its migration and account-selection instructions supersede the old shared-mailbox setup below.
+
+
 Quatre sections : **Tableau de bord**, **Configuration IA**, **Services**,
 **Maintenance**. Interface Flask/HTML/CSS/JavaScript, sans dépendance ajoutée,
 sans framework ni nouvelle surveillance permanente. Les mesures sont prises

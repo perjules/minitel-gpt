@@ -634,7 +634,7 @@ def llm_answer(system_prompt, user_message, knowledge="", selected=None):
     school = pronote.backend()
     if selected is not None:
         school = user_services.ProfileSchool(school, selected.user, selected.registry)
-        if pronote_answers.school_record_request(user_message, pronote.backend().config().get('children', {})) and not school.config()['children']:
+        if school.denied(user_message):
             return 'PRONOTE: aucun accès attribué à ce profil.'
     options = mistral_answers.settings({**os.environ, **read_env()})
     if options[0] == "conversations":
@@ -1786,11 +1786,7 @@ def service_configuration(feature):
         context = {}
     else:
         body = admin_service_pages.GMAIL
-        account = "Compte partagé — enrôlement à vérifier sur le Pi."
-        try:
-            account = gmail_auth.TokenSource().delivered_info()["email_address"]
-        except gmail_auth.GmailError:
-            pass
+        account = "Chaque profil utilise uniquement le compte qui lui est attribué."
         if request.method == "POST":
             if request.form.get("action") != "check":
                 abort(400)
@@ -2175,7 +2171,7 @@ Intégration : {{'active' if status.enabled else 'inactive'}}. État local, sans
 <form method=post><input type=hidden name=csrf value="{{csrf}}"><label>Compte à vérifier<input name=account required autocapitalize="none" autocorrect="off" spellcheck="false"></label><button name=action value=children>Vérifier la connexion et relire les enfants</button></form>
 <details><summary>Configuration JSON avancée</summary><form method=post><input type=hidden name=csrf value="{{csrf}}">
 <textarea name=children rows=8 required>{{mapping}}</textarea><label><input type=checkbox name=enabled {{'checked' if status.enabled}}> Activer</label><button name=action value=configure>Enregistrer le JSON</button></form></details>
-""" + admin_service_pages.FUTURE + "</html>"
+""" + '<p><a href=/users>Configurer les accès par utilisateur</a></p></html>'
 
 
 @app.route("/pronote", methods=["GET", "POST"])

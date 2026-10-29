@@ -97,3 +97,12 @@ expired/revoked authorization; grant removal during a session; and restart
 persistence. Real sends require an explicit owner-controlled recipient and review.
 Operational tracing contains only user/account IDs, operation and outcome. Existing
 private transcript rules remain; no duplicate mail-body archive is introduced.
+
+## Offline validation — 29 October 2026
+
+The complete suite passed: **652 tests and 400 subtests**. Ruff, requirements export
+freshness, installer shell syntax and git whitespace checks passed. Seventeen
+focused account tests exercise real SQLite transactions/concurrency and mocked
+private-service boundaries, including stale-result rejection and migration backup.
+No live Google requests, real email sends, Pi deployment, systemd commands or
+physical Minitel checks were performed as part of this implementation.

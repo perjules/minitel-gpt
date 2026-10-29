@@ -9,10 +9,6 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}summary{cursor:pointer}input:dis
 @media(max-width:600px){table,tr,td,th{display:block}thead{display:none}}[role=status]{border-left:3px solid #4ecdc4;padding:10px}
 </style><a href="/?section=services">Retour aux services</a><h1>{{title}}</h1>
 {% if message %}<p role=status>{{message}}</p>{% endif %}'''
-FUTURE = '''<details><summary>Associations utilisateurs — à venir</summary>
-<p>Les associations utilisateurs ne sont pas encore disponibles.{% if single_account %} Le compte Gmail reste partagé ; les comptes supplémentaires seront ajoutés ultérieurement.{% endif %}</p>
-<label>Utilisateur<input disabled placeholder="À venir"></label><label>Compte associé<select disabled><option>À venir</option></select></label>
-<button disabled>Associer un utilisateur</button>{% if single_account %}<button disabled>Ajouter un compte</button>{% endif %}</details>'''
 GMAIL = '''<section><h2>Comptes Gmail</h2><p>{{account}}</p>
 <p><a href=/users>Utilisateurs et accès</a></p>
 {% for a in oauth_accounts %}<p>{{a.email}} · profil #{{a.user_id or 'non attribué'}}</p>

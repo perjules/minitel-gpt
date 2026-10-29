@@ -120,7 +120,10 @@ class StartupTests(unittest.TestCase):
         calls, memories = [], []
 
         def memory(username="Test"):
-            instance = Mock(username=username, key="users/test", pending=None,
+            from services.user_registry import Registry
+            registry=Registry()
+            user=registry.resolve(username)
+            instance = Mock(user=user, registry=registry, username=username, key="users/test", pending=None,
                             take_warning=lambda: "", context=lambda q: "",
                             interested=lambda q: False)
             instance.saved_language.return_value = None

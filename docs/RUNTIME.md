@@ -368,3 +368,12 @@ and retained-pair rollback also restores the previous branch. Both local commits
 and private installation data are protected. A target branch must support the
 shared runtime assets. Power requests are delayed transient systemd jobs and do
 not run concurrently with deployment. This adds no permanent monitoring service.
+
+
+## Multi-user compatibility
+
+See [USERS.md](USERS.md). Once the encrypted account bundle exists, code targets
+without AccountTokenSource are refused before stopping services. The credential
+drop-in selects the bundle for systemd delivery; the helper returns one account
+only. sqlite3 is checked during preparation. Migration leaves the legacy encrypted
+file untouched and requires explicit assignment; code rollback does not migrate data.
