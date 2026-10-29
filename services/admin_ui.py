@@ -2258,7 +2258,7 @@ def gmail_admin():
         return "Requête refusée", 403
     user_change = request.method == "POST" and request.form.get("action") == "user"
     selected = memory_entry(request.form.get("username", "") if user_change else None)
-    item = mail_entry(selected.username)
+    item = mail_entry("" if selected.key == "shared" else selected.username)
     cancelling = request.method == "POST" and (
         request.form.get("action") in ("cancel", "reset")
         or request.form.get("question", "").strip().upper() in ("ANNULER", "SOMMAIRE")

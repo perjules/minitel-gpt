@@ -1093,7 +1093,7 @@ def run_session(t):
         if user_action != 'envoi':
             continue
         username = "" if memory.key == "shared" else memory.username
-        mail = gmail_mail.MailSession(username=memory.username) if gmail_mail.enabled() else None
+        mail = gmail_mail.MailSession(username=username) if gmail_mail.enabled() else None
         t._session_resources = (mail.reset, memory.close) if mail is not None else (memory.close,)
         language = language or ("fr" if memory.key == "shared" else memory.saved_language())
         action = user_action

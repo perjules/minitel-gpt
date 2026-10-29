@@ -7,10 +7,12 @@ import time
 
 try:
     from . import persistent_memory as memory
+    from . import user_registry
     from .gmail_auth import GmailError
     from .gmail_mail import MailModel
 except ImportError:
     import persistent_memory as memory
+    import user_registry
     from gmail_auth import GmailError
     from gmail_mail import MailModel
 
@@ -131,7 +133,12 @@ class MemorySession:
     def __init__(
         self, username="", store=None, model=None, extra_secrets=(), root=None
     ):
-        self.key, self.username = memory.user_key(username)
+        self.registry = user_registry.Registry(root)
+        try:
+            self.user = self.registry.resolve(username)
+        except GmailError:
+            raise memory.MemoryProblem("Profil indisponible ou désactivé.") from None
+        self.key, self.username = self.user.memory_key, self.user.display_name
         self.label = (
             "mémoire commune" if self.key == "shared" else "mémoire de " + self.username
         )
@@ -155,6 +162,12 @@ class MemorySession:
             self.warning = str(error)
 
     def active(self):
+        try:
+            current = self.registry.get(self.user.id)
+        except GmailError:
+            raise memory.MemoryProblem("Profil indisponible ou désactivé.") from None
+        if current.revision != self.user.revision:
+            raise memory.MemoryProblem("Profil modifié; ouvrez une nouvelle session.")
         if self.closed:
             raise memory.MemoryProblem(
                 "Session mémoire réinitialisée; aucune modification tardive."

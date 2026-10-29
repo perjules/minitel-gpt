@@ -18,6 +18,7 @@ import requests
 
 try:
     from . import gmail_correspondents as correspondents
+    from . import user_services
     from .gmail_auth import GmailError, enabled
     from .gmail_client import (
         GmailClient,
@@ -28,9 +29,9 @@ try:
     )
 except ImportError:
     import gmail_correspondents as correspondents
+    import user_services
     from gmail_auth import GmailError, enabled
     from gmail_client import (
-        GmailClient,
         addresses,
         one_header,
         printable,
@@ -297,7 +298,7 @@ class MailModel:
 
 class MailSession:
     def __init__(self, client=None, model=None, self_aliases=None, username="", auto_summary_chars=None):
-        self.client, self.model = client or GmailClient(), model or MailModel()
+        self.client, self.model = client or user_services.mail_client(username), model or MailModel()
         self.username = username.strip() or "MinitelGPT"
         try:
             self.auto_summary_chars = max(0, int(auto_summary_chars if auto_summary_chars is not None
@@ -460,6 +461,8 @@ class MailSession:
                     self.busy = False
 
     def perform(self, question, ticket, epoch, deadline):
+        if isinstance(self.client, user_services.ProfileMailClient):
+            self.client.tokens.guard("read")
         literal = literal_command(question)
         if literal:
             return self.literal_edit(question, literal, epoch, deadline)

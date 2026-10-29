@@ -109,7 +109,7 @@ COMMIT;''')
     def configure(self, user_id, name, enabled, aliases, account_id, send, children):
         name = memory.clean_text(name,60)
         normalized = []
-        for alias in aliases:
+        for alias in [*aliases, name] if user_id != 1 else aliases:
             memory.user_key(alias)
             value = ' '.join(unicodedata.normalize('NFKC',alias).split()).casefold()
             if value:
@@ -153,4 +153,4 @@ COMMIT;''')
         return set(self.details(user_id)['children'])
 
     def audit(self,user_id,account_id,operation,outcome):
-        logging.getLogger(__name__).info('user_operation %s',json.dumps(dict(user_id=user_id,account_id=account_id,operation=operation,outcome=outcome)))
+        logging.getLogger(__name__).info('user_operation %s',json.dumps({'user_id':user_id,'account_id':account_id,'operation':operation,'outcome':outcome}))
