@@ -13,7 +13,11 @@ FUTURE = '''<details><summary>Associations utilisateurs — à venir</summary>
 <p>Les associations utilisateurs ne sont pas encore disponibles.{% if single_account %} Le compte Gmail reste partagé ; les comptes supplémentaires seront ajoutés ultérieurement.{% endif %}</p>
 <label>Utilisateur<input disabled placeholder="À venir"></label><label>Compte associé<select disabled><option>À venir</option></select></label>
 <button disabled>Associer un utilisateur</button>{% if single_account %}<button disabled>Ajouter un compte</button>{% endif %}</details>'''
-GMAIL = '''<section><h2>Compte actuel</h2><p>{{account}}</p>
+GMAIL = '''<section><h2>Comptes Gmail</h2><p>{{account}}</p>
+<p><a href=/users>Utilisateurs et accès</a></p>
+{% for a in oauth_accounts %}<p>{{a.email}} · profil #{{a.user_id or 'non attribué'}}</p>
+<form method=post action=/services/gmail/accounts><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=disable><input type=hidden name=account_id value="{{a.id}}"><label><input type=checkbox name=enabled {{'checked' if a.enabled}}> Compte actif</label><button>Appliquer</button></form>{% endfor %}
+<form method=post action=/services/gmail/accounts><input type=hidden name=csrf value="{{csrf_token()}}"><button name=action value=migrate>Importer l’ancien compte partagé sans l’attribuer</button><button name=action value=sync>Synchroniser les comptes enregistrés</button></form>
 <p>Intégration : {{'active' if enabled else 'inactive'}}. La configuration locale ne confirme pas la connexion.</p>
 <form method=post action=/services/gmail/toggle><input type=hidden name=csrf value="{{csrf_token()}}">
 <label><input type=checkbox name=enabled value=1 {{'checked' if enabled}}> Activer Gmail</label>
@@ -21,13 +25,13 @@ GMAIL = '''<section><h2>Compte actuel</h2><p>{{account}}</p>
 <form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><button name=action value=check>Vérifier la connexion (lecture seule)</button></form>
 <a href="/test?mode=gmail">Tester Gmail</a></section>
 <section><h2>Connexion Google</h2>
-<p>Autorisez le compte partagé dans votre navigateur, puis appliquez l’autorisation aux deux services. Aucun tunnel SSH n’est nécessaire après la configuration initiale.</p>
+<p>Autorisez le compte du profil sélectionné dans votre navigateur, puis appliquez l’autorisation aux deux services. Aucun tunnel SSH n’est nécessaire après la configuration initiale.</p>
 {% if oauth_uri %}<p>Retour Google enregistré : <code>{{oauth_uri}}</code></p>
 <p>Utilisez <a href="{{oauth_console}}">cette adresse HTTPS de l’administration</a>, avec Tailscale connecté sur votre téléphone.</p>
-<form method=post action=/services/gmail/oauth/start><input type=hidden name=csrf value="{{csrf_token()}}"><button>Connecter / réautoriser Gmail avec Google</button></form>
+<form method=post action=/services/gmail/oauth/start><input type=hidden name=csrf value="{{csrf_token()}}"><label>Profil à connecter<select name=user_id>{% for u in oauth_users %}<option value="{{u.id}}">{{u.display_name}} · #{{u.id}}</option>{% endfor %}</select></label><button>Connecter / réautoriser Gmail avec Google</button></form>
 {% else %}<p>Configurez d’abord un client Google de type Application Web ci-dessous. Un ancien client Desktop ne permet pas le retour direct au téléphone.</p>{% endif %}
 {% if oauth_ready %}<form method=post action=/services/gmail/oauth/apply onsubmit="return confirm('Charger la nouvelle autorisation et redémarrer le Minitel et l’administration ? La session en cours sera interrompue.')">
-<input type=hidden name=csrf value="{{csrf_token()}}"><button>Appliquer l’autorisation enregistrée</button></form>
+<input type=hidden name=csrf value="{{csrf_token()}}"><label><input type=checkbox name=send> Autoriser aussi l’envoi pour ce profil</label><button>Appliquer l’autorisation enregistrée</button></form>
 <p>Les services redémarrent quelques secondes après ce bouton. Rechargez ensuite la page et vérifiez la connexion. Activez Gmail si nécessaire.</p>{% endif %}
 <details><summary>Configuration initiale / changer le client Google</summary>
 <p>Une seule fois : activer HTTPS avec Tailscale Serve pour cette administration, puis créer un client <b>Application Web</b> dans Google Cloud et télécharger son JSON. Ouvrez cette page via HTTPS avant de l’importer.</p>

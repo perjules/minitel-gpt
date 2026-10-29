@@ -56,6 +56,7 @@ try:
         rose_config,
         storage_health,
         system_health,
+        user_registry,
         user_services,
     )
 except ImportError:
@@ -76,6 +77,7 @@ except ImportError:
     import rose_config
     import storage_health
     import system_health
+    import user_registry
     import user_services
 
 PROJ_DIR = Path(__file__).parent.parent
@@ -961,6 +963,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 </section>
 
 <section class="panel {{'active' if section=='services'}}" id=services>
+<p><a href=/users>Utilisateurs et accès</a></p>
   <div class=health-grid>{% for service in service_cards %}<div class=block>
     <h2>{{service.label}}</h2><p><span class="dot {{'on' if service.enabled else 'off'}}"></span>{{'Active' if service.enabled else 'Inactive'}}</p>
     {% if service.placeholder %}<p class=sub>Administration en construction</p>
@@ -1782,7 +1785,7 @@ def service_configuration(feature):
         body = admin_service_pages.PLACEHOLDER
         context = {}
     else:
-        body = admin_service_pages.GMAIL + admin_service_pages.FUTURE
+        body = admin_service_pages.GMAIL
         account = "Compte partagé — enrôlement à vérifier sur le Pi."
         try:
             account = gmail_auth.TokenSource().delivered_info()["email_address"]
@@ -1803,6 +1806,7 @@ def service_configuration(feature):
         except gmail_auth.GmailError:
             oauth_uri = ""
         context = {"account": account, "enabled": gmail_enabled(), "single_account": True,
+                   "oauth_users": user_registry.Registry().users(), "oauth_accounts": user_registry.Registry().accounts(),
                    "oauth_uri": oauth_uri, "oauth_ready": session.get("gmail_oauth_saved", False),
                    "oauth_console": oauth_uri.removesuffix(gmail_auth.OAUTH_CALLBACK) + "/services/gmail" if oauth_uri else ""}
     return render_template_string(admin_service_pages.HEAD + body + "</html>",
@@ -1845,20 +1849,37 @@ def gmail_oauth_action(action):
             config = gmail_oauth.configuration()
             gmail_https_origin(config["redirect_uri"])
             gmail_oauth.cancel(session.pop("gmail_oauth", None))
-            identifier, address = gmail_oauth.begin(config)
+            registry = user_registry.Registry()
+            selected = registry.get(int(request.form.get('user_id', '1')))
+            accounts = registry.accounts()
+            existing = next((a for a in accounts if a['user_id'] == selected.id), None)
+            target = {'user_id':selected.id,'user_revision':selected.revision,
+                      'account_id':existing['id'] if existing else secrets.token_hex(16),
+                      'revision':existing['revision'] if existing else 0}
+            identifier, address = gmail_oauth.begin(config, target)
             session["gmail_oauth"] = identifier
             return redirect(address, code=303)
         elif action == "apply":
             if not session.get("gmail_oauth_saved"):
                 raise gmail_auth.GmailError("authorization_not_completed")
             gmail_https_origin(gmail_oauth.configuration()["redirect_uri"])
+            saved = session.get('gmail_oauth_result')
+            if saved:
+                registry = user_registry.Registry()
+                user = registry.get(saved['user_id'])
+                if user.revision != saved['user_revision']:
+                    raise gmail_auth.GmailError('account_assignment_changed')
+                details = registry.details(user.id)
+                registry.configure(user.id,user.display_name,True,details['aliases'],saved['account_id'],
+                                   request.form.get('send') == 'on',details['children'])
+                session.pop('gmail_oauth_result',None)
             if gmail_auth.credential_helper({"operation": "activate"}) != {"status": "queued"}:
                 raise gmail_auth.GmailError("credential_activation_failed")
             session.pop("gmail_oauth_saved", None)
             session["gmail_oauth_message"] = "Redémarrage des services programmé. La session du Minitel sera interrompue. Attendez quelques secondes puis rechargez cette page et vérifiez la connexion."
         else:
             abort(404)
-    except gmail_auth.GmailError as error:
+    except (gmail_auth.GmailError, ValueError) as error:
         messages = {
             "oauth_https_origin_required": "Ouvrez cette page à l’adresse HTTPS enregistrée (Tailscale Serve), puis recommencez.",
             "web_oauth_configuration_required": "Fournissez le JSON d’un client Google de type Application Web et son URI de redirection HTTPS exacte.",
@@ -1879,7 +1900,9 @@ def gmail_oauth_callback():
         if (len(state) != 1 or len(state[0]) > 512 or len(code) + len(error) != 1
                 or (error and len(error[0]) > 256)):
             raise gmail_auth.GmailError("oauth_callback_invalid")
-        gmail_oauth.complete(identifier, state[0], code[0] if code else None, denied=bool(error))
+        result = gmail_oauth.complete(identifier, state[0], code[0] if code else None, denied=bool(error))
+        if isinstance(result,dict):
+            session['gmail_oauth_result'] = result
         session["gmail_oauth_saved"] = True
         session["gmail_oauth_message"] = "Autorisation Google enregistrée et chiffrée. Cliquez sur Appliquer pour la charger dans les deux services."
     except gmail_auth.GmailError:
@@ -1888,6 +1911,81 @@ def gmail_oauth_callback():
         gmail_oauth.cancel(identifier)
     # Remove the one-use code from the browser address before rendering any page.
     return redirect(url_for("service_configuration", feature="gmail"), code=303)
+
+
+USERS_HTML = admin_service_pages.HEAD + """
+<p>Un nom choisit un profil, sans authentification. <a href=/services/gmail>Comptes Gmail</a></p>
+<form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=create>
+<label>Nouveau nom<input name=name required maxlength=60></label><button>Créer le profil</button></form>
+{% for u in users %}<section><h2>{{u.display_name}} · #{{u.id}}</h2><form method=post>
+<input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=save><input type=hidden name=user_id value="{{u.id}}">
+<label>Nom affiché<input name=name value="{{u.display_name}}" required maxlength=60></label>
+<label>Alias (un par ligne)<textarea name=aliases>{{details[u.id].aliases|join('\n')}}</textarea></label>
+<label><input type=checkbox name=enabled {{'checked' if u.enabled}}> Profil actif (le profil commun reste actif)</label>
+<label>Compte Gmail<select name=account_id><option value="">Aucun accès</option>{% for a in accounts %}<option value="{{a.id}}" {{'selected' if a.user_id==u.id}}>{{a.email}} {{'(désactivé)' if not a.enabled}}</option>{% endfor %}</select></label>
+<label><input type=checkbox name=send {{'checked' if senders.get(u.id)}}> Autoriser aussi l’envoi (sinon lecture seule)</label>
+<p>PRONOTE : enfants autorisés</p>{% for child in children %}<label><input type=checkbox name=child value="{{child}}" {{'checked' if child in details[u.id].children}}> {{child}}</label>{% endfor %}
+<button>Enregistrer les accès</button></form></section>{% endfor %}
+"""
+
+
+@app.route('/users',methods=['GET','POST'])
+@require_login
+def users_admin():
+    registry = user_registry.Registry()
+    message = ''
+    try:
+        if request.method == 'POST':
+            if request.form.get('action') == 'create':
+                registry.resolve(request.form.get('name',''))
+            elif request.form.get('action') == 'save':
+                children = request.form.getlist('child')
+                if not set(children) <= set(pronote.backend().config()['children']):
+                    raise gmail_auth.GmailError('unknown_child')
+                registry.configure(int(request.form['user_id']),request.form['name'],request.form.get('enabled')=='on',
+                    request.form.get('aliases','').splitlines(),request.form.get('account_id',''),
+                    request.form.get('send')=='on',children)
+            else:
+                abort(400)
+            message = 'Accès enregistrés. Les anciennes sessions doivent être rouvertes.'
+        users = registry.users()
+        accounts = registry.accounts()
+        return render_template_string(USERS_HTML,title='Utilisateurs et accès',message=message,users=users,
+            accounts=accounts,details={u['id']:registry.details(u['id']) for u in users},
+            senders={a['user_id']:a['can_send'] for a in accounts},children=pronote.backend().config()['children'])
+    except (gmail_auth.GmailError,ValueError,KeyError) as error:
+        return render_template_string(admin_service_pages.HEAD,title='Utilisateurs et accès',
+                                      message='Modification refusée : '+str(error)),400
+
+
+@app.route('/services/gmail/accounts',methods=['POST'])
+@require_login
+def gmail_accounts_admin():
+    registry = user_registry.Registry()
+    try:
+        action=request.form.get('action')
+        if action=='migrate':
+            identifier=secrets.token_hex(16)
+            result=gmail_auth.credential_helper({'operation':'migrate','account_id':identifier})
+            if result.get('status')!='saved':
+                raise gmail_auth.GmailError('migration_unavailable')
+        elif action=='disable':
+            with registry.connection() as db:
+                identifier=request.form['account_id']
+                db.execute('UPDATE users SET revision=revision+1 WHERE id IN (SELECT user_id FROM user_gmail_access WHERE account_id=?)',(identifier,))
+                db.execute('UPDATE gmail_accounts SET enabled=? WHERE id=?',(request.form.get('enabled')=='on',identifier))
+        elif action!='sync':
+            abort(400)
+        metadata=gmail_auth.credential_helper({'operation':'accounts'})
+        if not isinstance(metadata,dict) or 'status' in metadata:
+            raise gmail_auth.GmailError('credential_helper_unavailable')
+        for identifier,item in metadata.items():
+            gmail_auth.account_id(identifier)
+            registry.record_account(identifier,item['email'],item['revision'])
+        session['gmail_oauth_message']='Comptes synchronisés. Attribuez explicitement le compte importé dans Utilisateurs et accès.'
+    except (gmail_auth.GmailError,KeyError,ValueError):
+        session['gmail_oauth_message']='Opération indisponible. Les accès existants sont conservés.'
+    return redirect('/services/gmail',code=303)
 
 
 ROSE_HTML = """<!doctype html><html lang=fr><meta charset=utf-8>
@@ -2351,3 +2449,4 @@ class AdminRequestHandler(WSGIRequestHandler):
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, debug=False, request_handler=AdminRequestHandler)
+
