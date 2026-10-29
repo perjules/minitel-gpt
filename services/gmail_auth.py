@@ -21,6 +21,7 @@ SCOPES = (
 TOKEN_URI = "https://oauth2.googleapis.com/token"
 CREDENTIAL_NAME = "gmail"
 STORE = Path("/etc/credstore.encrypted/minitel-gmail")
+ACCOUNTS_STORE = Path("/etc/credstore.encrypted/minitel-gmail-accounts")
 OAUTH_STORE = Path("/etc/credstore.encrypted/minitel-gmail-oauth")
 OAUTH_CALLBACK = "/services/gmail/oauth/callback"
 HELPER = "/usr/local/libexec/minitel-gmail-credential"
@@ -129,6 +130,8 @@ def validate_oauth_config(config):
 
 def encrypt_info(info, store=STORE):
     validate_info(info)
+    if store == STORE and ACCOUNTS_STORE.exists():
+        raise GmailError("account_target_required")
     encrypt_payload(info, store, "gmail")
 
 
@@ -198,7 +201,7 @@ def decrypt_payload(store, name):
             capture_output=True,
             timeout=15,
         )
-        if result.returncode or len(result.stdout) > 32768:
+        if result.returncode or len(result.stdout) > 262144:
             raise GmailError("credential_unavailable")
         return json.loads(result.stdout)
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -314,3 +317,52 @@ class TokenSource:
             self.email_address = info["email_address"]
             self.credentials = credentials
             return credentials.token
+
+
+def account_id(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{32}", value):
+        raise GmailError("invalid_account_id")
+    return value
+
+
+def account_bundle():
+    if not ACCOUNTS_STORE.exists():
+        return {"version": 1, "accounts": {}}
+    data = decrypt_payload(ACCOUNTS_STORE, "gmail-accounts")
+    if not isinstance(data, dict) or set(data) != {"version", "accounts"} or data["version"] != 1 or not isinstance(data["accounts"], dict) or len(data["accounts"]) > 16:
+        raise GmailError("credential_configuration_error")
+    for identifier, entry in data["accounts"].items():
+        account_id(identifier)
+        if set(entry) != {"info", "revision"} or not isinstance(entry["revision"], int) or entry["revision"] < 1:
+            raise GmailError("credential_configuration_error")
+        validate_info(entry["info"])
+    return data
+
+
+def save_accounts(data):
+    if len(data["accounts"]) > 16:
+        raise GmailError("account_limit")
+    encrypt_payload(data, ACCOUNTS_STORE, "gmail-accounts")
+
+
+class AccountTokenSource(TokenSource):
+    def __init__(self, identifier, guard=None, revision=None):
+        self.identifier = account_id(identifier)
+        self.guard = guard or (lambda operation: None)
+        self.revision = revision
+        super().__init__(lock_path=LOCK_PATH.with_name(self.identifier + ".lock"), helper=self.selected_helper)
+
+    def selected_helper(self, request):
+        return credential_helper({**request, "account_id": self.identifier, "revision": self.revision})
+
+    def delivered_info(self):
+        # Root helper remains the only token source; require systemd delivery as capability.
+        directory = os.getenv("CREDENTIALS_DIRECTORY")
+        if not directory or not (Path(directory) / CREDENTIAL_NAME).is_file():
+            raise GmailError("reconnect_required")
+        self.guard("read")
+        return validate_info(self.selected_helper({"operation": "read"}))
+
+    def token(self, deadline):
+        self.guard("read")
+        return super().token(deadline)

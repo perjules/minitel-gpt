@@ -12,10 +12,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gmail_auth import (
     GmailError,
+    account_bundle,
+    account_id,
     decrypt_info,
     decrypt_oauth_config,
     encrypt_info,
     encrypt_oauth_config,
+    save_accounts,
     validate_info,
 )
 
@@ -27,7 +30,7 @@ def activate():
         status = Path("/var/lib/minitel-gpt/deployment.json")
         if status.exists() and json.loads(status.read_text()).get("phase") in {"queued", "preparing", "activating"}:
             raise GmailError("deployment_busy")
-        decrypt_info()  # Refuse to change units without verified enrollment.
+        decrypt_info()  # Retain legacy capability; multi-account secrets stay root-only.
         for service in ("minitel-chatgpt", "admin-ui"):
             folder = Path(f"/etc/systemd/system/{service}.service.d")
             folder.mkdir(mode=0o755, parents=True, exist_ok=True)
@@ -54,6 +57,45 @@ def process(request):
         raise GmailError("invalid_request")
     with Path("/run/minitel-gmail-root.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        if "account_id" in request:
+            identifier = account_id(request["account_id"])
+            data = account_bundle()
+            entry = data["accounts"].get(identifier)
+            operation = request.get("operation")
+            if operation == "migrate" and set(request) == {"operation", "account_id"}:
+                if entry or data["accounts"]:
+                    raise GmailError("already_migrated")
+                data["accounts"][identifier] = {"info": decrypt_info(), "revision": 1}
+                save_accounts(data)
+                return {"status": "saved", "revision": 1}
+            if operation == "enroll" and set(request) == {"operation", "account_id", "revision", "info"}:
+                info = validate_info(request["info"])
+                configured = decrypt_oauth_config()
+                if any(info[k] != configured[k] for k in ("client_id", "client_secret")):
+                    raise GmailError("oauth_configuration_changed")
+                if request["revision"] != (entry["revision"] if entry else 0):
+                    raise GmailError("enrollment_changed")
+                if entry and entry["info"]["email_address"].casefold() != info["email_address"].casefold():
+                    raise GmailError("wrong_google_account")
+                if any(k != identifier and v["info"]["email_address"].casefold() == info["email_address"].casefold() for k,v in data["accounts"].items()):
+                    raise GmailError("duplicate_account")
+                revision = request["revision"] + 1
+                data["accounts"][identifier] = {"info": info, "revision": revision}
+                save_accounts(data)
+                return {"status": "saved", "revision": revision}
+            if entry is None or request.get("revision") != entry["revision"]:
+                raise GmailError("enrollment_changed")
+            if operation == "read" and set(request) == {"operation", "account_id", "revision"}:
+                return entry["info"]
+            if operation == "rotate" and set(request) == {"operation", "account_id", "revision", "expected", "replacement"}:
+                if request["expected"] != entry["info"]["refresh_token"] or not isinstance(request["replacement"],str) or not 0 < len(request["replacement"]) <= 4096:
+                    raise GmailError("invalid_rotation")
+                entry["info"]["refresh_token"] = request["replacement"]
+                save_accounts(data)
+                return {"status": "saved"}
+            raise GmailError("invalid_request")
+        if request == {"operation": "accounts"}:
+            return {k: {"email":v["info"]["email_address"], "revision":v["revision"]} for k,v in account_bundle()["accounts"].items()}
         if request == {"operation": "oauth_read"}:
             return decrypt_oauth_config()
         if set(request) == {"operation", "config"} and request["operation"] == "oauth_configure":
