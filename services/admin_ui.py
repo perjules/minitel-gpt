@@ -39,6 +39,7 @@ from werkzeug.utils import secure_filename
 
 try:
     from . import (
+        admin_memory_pages,
         admin_service_pages,
         calculator,
         config_store,
@@ -47,6 +48,8 @@ try:
         gmail_mail,
         gmail_oauth,
         io_limits,
+        memory_automation,
+        memory_inspection,
         memory_session,
         mistral_answers,
         mistral_settings,
@@ -61,6 +64,7 @@ try:
         user_services,
     )
 except ImportError:
+    import admin_memory_pages
     import admin_service_pages
     import calculator
     import config_store
@@ -69,6 +73,8 @@ except ImportError:
     import gmail_mail
     import gmail_oauth
     import io_limits
+    import memory_automation
+    import memory_inspection
     import memory_session
     import mistral_answers
     import mistral_settings
@@ -253,7 +259,7 @@ def no_cache(response):
     if not request.path.startswith("/assets/"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
-    if request.path.startswith("/services/gmail"):
+    if request.path.startswith(("/services/gmail", "/maintenance/memory")):
         response.headers["Referrer-Policy"] = "no-referrer"
     return response
 
@@ -1073,6 +1079,10 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       <button class="btn btn-s">Afficher / actualiser</button></form>
     <pre>{{diagnostic_log}}</pre>
     <a href=/diagnostics.txt>Télécharger le diagnostic système (sans conversations ni identifiants)</a>
+  </div>
+  <div class=block>
+    <h2 id=memory>Mémoire des utilisateurs</h2>
+    <p><a href="/maintenance/memory">État, consultation et téléchargement des souvenirs</a></p>
   </div>
   <div class=block>
     <h2 id=storage>Stockage</h2>
@@ -2566,6 +2576,81 @@ def gmail_admin():
         return response
     finally:
         item["lock"].release()
+
+MEMORY_GATE_SECONDS = 300
+
+
+def memory_unlocked():
+    until = session.get("memory_unlock_until", 0)
+    return isinstance(until, (int, float)) and 0 < until - time.time() <= MEMORY_GATE_SECONDS
+
+
+def inspection_store():
+    return memory_session.memory.MemoryStore(read_env().get("MINITEL_MEMORY_DIR"))
+
+
+@app.route("/maintenance/memory", methods=["GET", "POST"])
+@require_login
+def memory_admin():
+    message, status = None, 200
+    if request.method == "POST":
+        if request.form.get("action") == "lock":
+            session.pop("memory_unlock_until", None)
+            return redirect(url_for("memory_admin"))
+        session.pop("memory_unlock_until", None)
+        if (request.form.get("action") == "unlock" and ADMIN_PASSWORD.strip()
+                and hmac.compare_digest(request.form.get("password", "").encode(errors="replace"), ADMIN_PASSWORD.encode())):
+            session["memory_unlock_until"] = time.time() + MEMORY_GATE_SECONDS
+            return redirect(url_for("memory_admin"))
+        message, status = "Mot de passe incorrect.", 401
+    store = inspection_store()
+    profiles = memory_inspection.inventory(store)
+    # Keep actual memory text out of the template context until unlocked.
+    visible = [{k: v for k, v in p.items() if k != "data"} for p in profiles]
+    return render_template_string(
+        admin_service_pages.HEAD + admin_memory_pages.BODY,
+        title="Mémoire des utilisateurs", message=message, profiles=visible, selected=None,
+        unlocked=memory_unlocked(), automatic=memory_automation.enabled(),
+        legacy=memory_inspection.unassigned(store, profiles, contents=memory_unlocked()),
+        paths=memory_inspection.storage_paths(store)), status
+
+
+@app.route("/maintenance/memory/<int:user_id>")
+@require_login
+def memory_admin_profile(user_id):
+    if not memory_unlocked():
+        abort(403, "Déverrouillez la mémoire dans Maintenance.")
+    store = inspection_store()
+    profiles = memory_inspection.inventory(store)
+    selected = next((p for p in profiles if p["user_id"] == user_id), None)
+    if selected is None:
+        abort(404)
+    if selected.get("error"):
+        abort(503, selected["error"])
+    return render_template_string(
+        admin_service_pages.HEAD + admin_memory_pages.BODY,
+        title="Mémoire des utilisateurs", message=None,
+        profiles=[{k: v for k, v in selected.items() if k != "data"}], selected=selected,
+        unlocked=True, automatic=memory_automation.enabled(), legacy=[],
+        paths=memory_inspection.storage_paths(store))
+
+
+@app.route("/maintenance/memory/export", defaults={"user_id": None})
+@app.route("/maintenance/memory/export/<int:user_id>")
+@require_login
+def memory_admin_export(user_id):
+    if not memory_unlocked():
+        abort(403, "Déverrouillez la mémoire dans Maintenance.")
+    try:
+        data = memory_inspection.export(inspection_store(), user_id)
+    except KeyError:
+        abort(404)
+    response = app.response_class(memory_inspection.encode_export(data), mimetype="application/json")
+    name = "all" if user_id is None else str(user_id)
+    response.headers["Content-Disposition"] = f'attachment; filename="3615-memory-{name}.json"'
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
 
 @app.errorhandler(memory_session.memory.MemoryProblem)
 @app.errorhandler(gmail_auth.GmailError)
