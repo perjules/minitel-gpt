@@ -215,7 +215,9 @@ maintenance fictives, interruptible par les touches existantes.
 ### Mémoire, notes et listes
 
 La [mémoire légère](docs/MEMORY.md) ajoute un nom facultatif au démarrage :
-vide sélectionne la mémoire commune, sans authentification. Préférences, notes,
+vide sélectionne le profil MinitelGPT, sans authentification.
+Chaque profil dispose de sa propre mémoire; aucun espace commun n’est proposé.
+Préférences, notes,
 listes et tâches se gèrent en langage naturel. Sur le Minitel, SOMMAIRE revient à
 une conversation vide en conservant l'utilisateur et sa langue; LOGOUT puis ENVOI
 permet de changer d'utilisateur. Le démarrage fictif en français précède la

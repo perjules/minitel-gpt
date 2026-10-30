@@ -2435,7 +2435,7 @@ input,button{font:inherit;padding:.5em;margin:.2em} input[type=text]{width:90%}<
 <a href="/?section=services">Retour aux services</a><h1>Tester le Minitel — Gmail</h1>
 <nav><a href="/test?mode=conversation">Conversation</a> · <a href="/test?mode=gmail">Gmail</a> · <a href="/services/gmail">Configurer Gmail</a></nav>
 <form method=post><input type=hidden name=csrf value="{{csrf}}">
-<label>Utilisateur (vide = mémoire commune)<input type=text name=username maxlength=60 value="{{username}}"></label>
+<label>Utilisateur (vide = MinitelGPT)<input type=text name=username maxlength=60 value="{{username}}"></label>
 <button name=action value=user>Choisir l’utilisateur</button></form>
 <p>Compte lié au profil sélectionné. Destination mémoire/journal : {{ memory_label }}. Aucun compte de secours.</p>
 <p>Brouillons temporaires; commandes et réponses visibles journalisées dans la mémoire sélectionnée ici. Lecture sans marquer comme lu. Le modèle ne peut pas envoyer.</p>

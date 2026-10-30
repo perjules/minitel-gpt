@@ -18,6 +18,7 @@ except ImportError:
 
 
 def shared_request(question):
+    """Recognize the retired shared-space commands so they cannot silently save locally."""
     q = memory.normalized(question)
     return bool(
         re.search(
@@ -139,9 +140,7 @@ class MemorySession:
         except GmailError:
             raise memory.MemoryProblem("Profil indisponible ou désactivé.") from None
         self.key, self.username = self.user.memory_key, self.user.display_name
-        self.label = (
-            "mémoire commune" if self.key == "shared" else "mémoire de " + self.username
-        )
+        self.label = "mémoire de " + self.username
         self.model = model or MemoryModel()
         self.lock = threading.RLock()
         self.turn_lock = threading.Lock()
@@ -241,7 +240,7 @@ class MemorySession:
 
     def interested(self, question):
         q = memory.normalized(question)
-        if self.pending:
+        if self.pending or shared_request(question):
             return True
         if re.match(
             r"^(?:memoire|memory|liste|list|retiens|note|garde|oublie|corrige|remplace|supprime|retire|modifie|remember|save|forget)\b",
@@ -270,14 +269,8 @@ class MemorySession:
             and self.recent
         )
 
-    def scope(self, question):
-        return "shared" if shared_request(question) else self.key
-
-    def destination(self, key):
-        return "mémoire commune" if key == "shared" else self.label
-
-    def display(self, items, key):
-        label = self.destination(key)
+    def display(self, items):
+        label = self.label
         if not items:
             return "Aucun élément dans " + label + "."
         result = []
@@ -329,6 +322,14 @@ class MemorySession:
             raise memory.MemoryProblem("Demande trop longue (2000 caractères).")
         with self.lock:
             self.active()
+            if shared_request(question):
+                self.pending = None
+                raise memory.MemoryProblem(
+                    "La mémoire partagée n'est plus disponible. "
+                    "Reformulez pour votre mémoire personnelle ("
+                    + self.username
+                    + ")."
+                )
             pending = self.pending
         if pending and question.isdigit():
             index = int(question) - 1
@@ -338,7 +339,7 @@ class MemorySession:
                 )
             proposal = {**pending["proposal"], "ids": [pending["choices"][index]]}
             return self.execute(
-                proposal, pending["key"], pending["snapshot"], pending["allowed"]
+                proposal, pending["snapshot"], pending["allowed"]
             )
         if pending:
             # A short refinement can name an already displayed choice. No new authority.
@@ -390,34 +391,23 @@ class MemorySession:
                     "ids": [pending["choices"][selected]],
                 }
                 return self.execute(
-                    proposal, pending["key"], pending["snapshot"], pending["allowed"]
+                    proposal, pending["snapshot"], pending["allowed"]
                 )
             with self.lock:
                 self.pending = None
-        key = self.scope(question)
-        snapshot = self.store.read(key)
+        snapshot = self.store.read(self.key)
         folded = memory.normalized(question)
         if folded in {"memoire", "memory"}:
-            return {"display": self.display(snapshot["items"], key)}
+            return {"display": self.display(snapshot["items"])}
         if re.match(r"^(?:liste|list)\s+", folded):
             title = question.split(" ", 1)[1].strip()
-            if shared_request(question):
-                title = (
-                    re.sub(
-                        r"^(?:commune?|shared|common)\s*",
-                        "",
-                        title,
-                        flags=re.IGNORECASE,
-                    ).strip()
-                    or "courses"
-                )
             items = [
                 r
                 for r in snapshot["items"]
                 if r["kind"] == "list"
                 and memory.normalized(r["title"]) == memory.normalized(title)
             ]
-            return {"display": self.display(items, key)}
+            return {"display": self.display(items)}
         candidates, partial = memory.catalogue(snapshot, question)
         proposal = self.model.plan(
             question, candidates, partial, self.recent[-4:], language, deadline
@@ -502,7 +492,7 @@ class MemorySession:
                     if memory.normalized(r["title"])
                     == memory.normalized(proposal["title"])
                 ]
-            return {"display": self.display(items, key)}
+            return {"display": self.display(items)}
         if operation in {"replace", "remove", "complete"}:
             if not identifiers:
                 raise memory.MemoryProblem(
@@ -518,7 +508,6 @@ class MemorySession:
                 with self.lock:
                     self.active()
                     self.pending = {
-                        "key": key,
                         "snapshot": snapshot,
                         "proposal": proposal,
                         "choices": identifiers,
@@ -526,7 +515,7 @@ class MemorySession:
                     }
                 return {
                     "display": "Quel élément de "
-                    + self.destination(key)
+                    + self.label
                     + " ?\n"
                     + "\n".join(
                         f"{i}. {r['title']}: {r['text'][:150]}"
@@ -560,9 +549,9 @@ class MemorySession:
             proposal["text"] = self.last_answer
         elif proposal.get("source", "user") != "user":
             raise memory.MemoryProblem("Source mémoire invalide.")
-        return self.execute(proposal, key, snapshot, allowed)
+        return self.execute(proposal, snapshot, allowed)
 
-    def execute(self, proposal, key, snapshot, allowed):
+    def execute(self, proposal, snapshot, allowed):
         with self.lock:
             self.active()
             if proposal["operation"] not in allowed:
@@ -578,12 +567,12 @@ class MemorySession:
                     raise memory.MemoryProblem(
                         "Le modèle n'a vu qu'un extrait de cette note longue. Donnez un remplacement complet : REMPLACE ENTIEREMENT la note nom par : texte."
                     )
-            item, result = self.store.apply(key, proposal, snapshot)
+            item, result = self.store.apply(self.key, proposal, snapshot)
             self.pending = None
         return {
             "display": result
             + " dans "
-            + self.destination(key)
+            + self.label
             + ":\n"
             + (item["title"] + "\n" if item["title"] else "")
             + item["text"]

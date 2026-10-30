@@ -46,7 +46,7 @@ PLACEHOLDER = '''<section><h2>En construction</h2><p>Administration inactive. Au
 
 TEST_NAV = '''<nav><a href="/test?mode=conversation">Conversation</a> · <a href="/test?mode=gmail">Gmail</a></nav>'''
 CHAT_TEST = r'''<p>Test de l’IA configurée. Les requêtes sont réelles et la conversation est journalisée dans la mémoire choisie.</p>
-<label>Utilisateur (vide = mémoire commune)<input id=memoryUser maxlength=60 value="{{username}}" onchange="++testSequence;document.getElementById('testOut').textContent='';document.getElementById('testSpin').style.display='none'"></label>
+<label>Utilisateur (vide = MinitelGPT)<input id=memoryUser maxlength=60 value="{{username}}" onchange="++testSequence;document.getElementById('testOut').textContent='';document.getElementById('testSpin').style.display='none'"></label>
 <textarea id=testMsg rows=4 placeholder="Votre question"></textarea>
 <button type=button onclick="testPreset(false)">Envoyer</button><button type=button onclick="testPreset(true)">SOMMAIRE / nouvelle session</button>
 <span id=testSpin style="display:none">Consultation…</span><pre id=testOut role=status></pre>

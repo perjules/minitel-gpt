@@ -10,6 +10,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
+import pytest
 from test_terminal_startup import EndOfInput, FakeSerial, fn, screen_text
 from web_client import csrf_client
 
@@ -17,6 +18,76 @@ from services import admin_ui as admin
 from services import memory_session as sessions
 from services import minitel_chatgpt as chat
 from services import persistent_memory as memory
+
+
+@pytest.mark.parametrize("username", ["Alice", ""])
+@pytest.mark.parametrize(
+    "question",
+    [
+        "MEMOIRE commune",
+        "LISTE commune courses",
+        "Montre les notes partagées.",
+        "Ajoute du lait à la liste de courses commune.",
+        "Corrige la mémoire globale.",
+        "Oublie les notes pour tout le monde.",
+        "Show shared memory.",
+        "Remove milk from the shared shopping list.",
+    ],
+)
+def test_shared_requests_never_read_or_change_another_profile(
+    tmp_path, username, question
+):
+    store = memory.MemoryStore(tmp_path)
+    # An existing installation's former shared data stays in the default profile.
+    store.apply(
+        "shared",
+        {"operation": "save", "kind": "fact", "text": "Legacy default fact"},
+        {},
+    )
+    model = Mock()
+    selected = sessions.MemorySession(username, store, model, root=tmp_path)
+    try:
+        before = store.read(selected.key)
+        legacy = store.read("shared")
+        with patch.object(store, "read", wraps=store.read) as read:
+            assert selected.interested(question)
+            assert "n'est plus disponible" in selected.handle(question)["display"]
+            read.assert_not_called()
+        model.plan.assert_not_called()
+        assert store.read(selected.key) == before
+        assert store.read("shared") == legacy
+        result = selected.handle("MEMOIRE")["display"]
+        assert ("Legacy default fact" in result) == (username == "")
+        assert "mémoire commune" not in selected.label
+    finally:
+        selected.close()
+
+
+def test_rejected_shared_request_discards_pending_personal_choice(tmp_path):
+    store, model = memory.MemoryStore(tmp_path), Mock()
+    selected = sessions.MemorySession("Alice", store, model, root=tmp_path)
+    try:
+        for text in ("piles AA", "piles AAA"):
+            store.apply(
+                selected.key,
+                {"operation": "add", "kind": "list", "title": "courses", "text": text},
+                {},
+            )
+        before = store.read(selected.key)
+        model.plan.return_value = {
+            "operation": "remove", "ids": [r["id"] for r in before["items"]]
+        }
+        assert "Quel élément" in selected.handle("Retire les piles.")["display"]
+        assert selected.pending
+        selected.handle("Retire les piles de la liste commune.")
+        assert selected.pending is None
+        model.plan.return_value = {
+            "operation": "clarify", "clarification": "Précisez la demande."
+        }
+        assert "Précisez" in selected.handle("1")["display"]
+        assert store.read(selected.key) == before
+    finally:
+        selected.close()
 
 
 class MemoryTests(unittest.TestCase):
@@ -44,15 +115,17 @@ class MemoryTests(unittest.TestCase):
         self.assertIn("Enregistré", result["display"])
         return self.store.read((session or self.alice).key)["items"][-1]
 
-    def test_personal_shared_separation_and_restart(self):
+    def test_personal_default_profile_separation_and_restart(self):
         self.save()
         self.alice.remember_language("en")
         bob = sessions.MemorySession("Bob", self.store, self.model)
         self.addCleanup(bob.close)
         self.assertEqual(self.store.read(bob.key)["items"], [])
         self.plan("add", kind="list", title="courses", text="lait")
-        result = self.alice.handle("Ajoute du lait à la liste commune.")
-        self.assertIn("mémoire commune", result["display"])
+        default = sessions.MemorySession("", self.store, self.model)
+        self.addCleanup(default.close)
+        result = default.handle("Ajoute du lait à ma liste de courses.")
+        self.assertIn("mémoire de MinitelGPT", result["display"])
         self.assertEqual(self.store.read("shared")["items"][0]["text"], "lait")
         self.assertNotIn("lait", self.alice.context("Quelles courses ?"))
         self.assertNotIn("Réponses courtes", bob.context("Que sais-tu ?"))
@@ -62,9 +135,10 @@ class MemoryTests(unittest.TestCase):
         )
         self.addCleanup(restored.close)
         self.assertIn("Réponses courtes", restored.handle("MEMOIRE")["display"])
-        shared = sessions.MemorySession("", self.store, self.model)
-        self.addCleanup(shared.close)
-        self.assertIn("lait", shared.handle("LISTE courses")["display"])
+        restored_default = sessions.MemorySession("", self.store, self.model)
+        self.addCleanup(restored_default.close)
+        self.assertIn("lait", restored_default.handle("LISTE courses")["display"])
+        self.assertNotIn("lait", restored.handle("MEMOIRE")["display"])
 
     def test_fact_correction_recall_removal_and_list_completion(self):
         record = self.save(
@@ -158,27 +232,27 @@ class MemoryTests(unittest.TestCase):
             "ne permet pas", self.alice.handle("Que sais-tu sur moi ?")["display"]
         )
 
-    def test_ambiguous_shared_target_and_stale_selection(self):
+    def test_ambiguous_personal_target_and_stale_selection(self):
         for item in ("piles AA", "piles AAA"):
             self.plan("add", kind="list", title="courses", text=item)
-            self.alice.handle("Ajoute des piles à la liste commune.")
-        identifiers = [r["id"] for r in self.store.read("shared")["items"]]
+            self.alice.handle("Ajoute des piles à ma liste de courses.")
+        identifiers = [r["id"] for r in self.store.read(self.alice.key)["items"]]
         self.plan("complete", ids=identifiers)
         self.assertIn(
             "Quel élément",
-            self.alice.handle("J'ai acheté les piles de la liste commune.")["display"],
+            self.alice.handle("J'ai acheté les piles de ma liste de courses.")["display"],
         )
-        self.assertIn("mémoire commune", self.alice.handle("les piles AAA")["display"])
-        self.assertEqual(self.store.read(self.alice.key)["items"], [])
+        self.assertIn("mémoire de Alice", self.alice.handle("les piles AAA")["display"])
+        self.assertEqual(self.store.read("shared")["items"], [])
         self.plan("remove", ids=identifiers)
-        self.alice.handle("Retire les piles de la liste commune.")
+        self.alice.handle("Retire les piles de ma liste de courses.")
         self.store.apply(
-            "shared",
+            self.alice.key,
             {"operation": "add", "kind": "list", "title": "courses", "text": "lait"},
             {},
         )
         self.assertIn("a changé", self.alice.handle("1")["display"])
-        self.assertEqual(len(self.store.read("shared")["items"]), 3)
+        self.assertEqual(len(self.store.read(self.alice.key)["items"]), 3)
 
     def test_reset_during_model_call_prevents_late_write(self):
         entered, release = threading.Event(), threading.Event()
@@ -261,13 +335,17 @@ class MemoryTests(unittest.TestCase):
         with self.assertRaises(memory.MemoryProblem):
             memory.MemoryStore(Path(__file__).resolve().parents[1] / "memory")
 
-    def test_shared_wording_task_completion_and_secret_request(self):
+    def test_retired_shared_wording_task_completion_and_secret_request(self):
         for question in (
             "Ajoute du lait à la liste de courses commune.",
             "Add milk to the shared shopping list.",
             "Note pour tout le monde : outils au garage.",
         ):
-            self.assertEqual(self.alice.scope(question), "shared")
+            self.assertTrue(self.alice.interested(question))
+            self.assertIn("n'est plus disponible", self.alice.handle(question)["display"])
+        self.model.plan.assert_not_called()
+        self.assertEqual(self.store.read(self.alice.key)["items"], [])
+        self.assertEqual(self.store.read("shared")["items"], [])
         self.plan("add", kind="task", text="Appeler le garage")
         self.assertIn(
             "Ajouté",

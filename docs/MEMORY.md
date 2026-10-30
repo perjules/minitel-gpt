@@ -1,21 +1,22 @@
 # Mémoire légère — 3615 IA
 
 > Multi-user profiles and Gmail/PRONOTE assignments: see [USERS.md](USERS.md).
-> Its migration and account-selection instructions supersede the old shared-mailbox setup below.
+> Les souvenirs restent dans les fichiers JSON propres à chaque profil.
 
 
 Sur le Minitel, appuyez sur **SOMMAIRE** après la mise sous tension : le démarrage
 fictif apparaît en français. **SUITE** ouvre immédiatement l'accueil; sans action,
 l'accueil apparaît 30 secondes après la fin du démarrage. Entrez alors un nom puis
-**ENVOI**. Laissez vide pour la
-mémoire commune. Le nom sélectionne des fichiers, **ce n'est pas une
+**ENVOI**. Laissez vide pour le profil MinitelGPT.
+Le nom sélectionne un profil, **ce n'est pas une
 authentification** : aucun mot de passe, ni contrôle d'accès supplémentaire.
-La casse ne distingue pas deux noms; revenez avec le même nom après un redémarrage.
+La casse ne distingue pas deux noms; les alias administratifs rejoignent le même
+profil et ses souvenirs. Revenez avec le même nom après un redémarrage.
 Choisissez ensuite la langue pour un nouveau nom : ce choix est enregistré dans
 son `memory.json` et repris automatiquement aux démarrages suivants, sans nouveau
 prompt de langue. Un nom existant sans langue enregistrée reçoit aussi ce prompt.
-Un nom vide ouvre directement une session commune en français, sans demander la
-langue ni conserver de préférence de langue globale.
+Un nom vide ouvre directement le profil MinitelGPT en français, sans demander la
+langue. Ce profil a sa propre mémoire, comme les profils nommés.
 Un timeout utilise le français sans enregistrer ce choix implicite. Pour refaire
 le choix d'un utilisateur connu, retirez le champ `language` de son `memory.json`
 pendant que les deux services sont arrêtés, puis redémarrez-les.
@@ -57,7 +58,6 @@ Il n'y a pas de nouvel organisateur ni d'arborescence.
 | « Rappelle la recette naan. » | Contenu enregistré, paginé si nécessaire |
 | « Qu'est-ce que tu sais sur moi ? » | Faits et préférences délibérément enregistrés |
 | « Oublie les décorations. » | Suppression de l'élément existant |
-| « Ajoute du lait à la liste commune. » | Entrée dans l'espace commun, même si un nom personnel est sélectionné |
 
 Les confirmations indiquent **ce qui a changé et où**. En cas de choix numéroté,
 répondez par le numéro, un ordinal (« le deuxième ») ou un nom distinctif.
@@ -66,10 +66,12 @@ précédent; une sélection devenue obsolète demande de reformuler.
 
 Deux raccourcis ne nécessitent pas de modèle : **MEMOIRE** montre les éléments de
 l'espace sélectionné; **LISTE courses** montre cette liste, y compris les entrées
-faites. Pour un autre espace, dites explicitement « mémoire commune », « notes
-partagées », « liste de courses commune » ou « shared shopping list ».
-Les éléments d'autres utilisateurs ne sont jamais consultés. Les espaces commun
-et personnel ne sont pas fusionnés automatiquement.
+faites. Toutes les opérations visent uniquement le profil sélectionné. Les
+demandes explicites de mémoire/liste partagée sont refusées, sans appel au modèle
+ni modification. Il n’existe pas de mémoire globale ni d’héritage entre profils.
+Les éléments d’autres profils ne sont jamais consultés dans cette session.
+Pour changer de profil, utilisez LOGOUT; les noms ne constituent toujours pas
+une authentification.
 
 La préférence et les faits pertinents sont proposés aux réponses ordinaires
 suivantes, y compris après redémarrage. Les souvenirs ne sont pas injectés
@@ -92,10 +94,18 @@ users/nom-empreinte/memory.json
 users/nom-empreinte/logs/date_session.jsonl
 ```
 
+Le dossier historique `shared/` appartient exclusivement au profil MinitelGPT.
+Il est conservé pour éviter de déplacer ou de perdre les données existantes; son
+nom ne désigne plus un espace commun accessible depuis un autre profil.
+Les anciens souvenirs partagés restent donc disponibles dans ce profil, sans
+copie vers les autres utilisateurs. Aucun souvenir ni journal n’est supprimé.
+
 Ce sont des fichiers texte UTF-8 lisibles : JSON indenté pour les éléments,
 JSONL pour les conversations. L'empreinte stabilise les noms de dossiers; elle
-ne protège pas leur contenu. Pas de base de données, d'index vectoriel ni de
-dépendance supplémentaire. Les verrous de fichier évitent les pertes entre
+ne protège pas leur contenu. SQLite conserve les identités, alias et droits
+d’accès aux services, ainsi que la clé stable du dossier mémoire. Le contenu
+des souvenirs reste en JSON, sans index vectoriel ni dépendance supplémentaire.
+Les verrous de fichier évitent les pertes entre
 admin et terminal; les écritures remplacent atomiquement un fichier synchronisé.
 Les notes ne sont pas chiffrées. Les credentials Gmail continuent à suivre leur
 stockage chiffré séparé existant.
@@ -153,8 +163,8 @@ Le modèle d'intention utilise la clé/modèle Mistral déjà configuré, même 
 fournisseur des réponses ordinaires est différent. Sans Mistral disponible,
 MEMOIRE et LISTE restent utilisables; une demande naturelle échouée ne change rien.
 
-Dans **Administration → Personnalités → Tester la personnalité**, saisissez un
-nom; vide sélectionne le commun. **SOMMAIRE / nouvelle session** réinitialise le
+Dans **Administration → Configuration IA → Tester**, saisissez un
+nom; vide sélectionne MinitelGPT. **SOMMAIRE / nouvelle session** réinitialise le
 test. Le champ est relu à chaque requête; changer de nom ferme l'ancienne session.
 La page Gmail admin utilise la même sélection, indiquée au-dessus des résultats.
 Les tests admin restent protégés par le login existant. Aucun souvenir n'est placé
@@ -165,8 +175,9 @@ avec cette conservation des textes visibles avant un usage par d'autres personne
    recette, liste et achat. Vérifier le contenu et la destination confirmés.
 2. Poser une question ordinaire : constater la préférence, puis rappeler le fait
    ou la recette complète. Tester deux cibles semblables et leur clarification.
-3. Changer de nom : aucune mémoire personnelle précédente. Ajouter du lait à la
-   liste commune, puis choisir vide et rappeler la liste. Revenir au premier nom.
+3. Changer de nom : aucune mémoire personnelle précédente. Ajouter un élément
+   sous MinitelGPT, puis revenir au premier nom : cet élément n’est pas visible.
+   Une demande de liste commune doit être refusée sans modification.
 4. SOMMAIRE puis redémarrer les deux services : les souvenirs restent, les choix
    en attente et conversations sont neufs. Examiner uniquement des journaux de
    test; vérifier leurs dates, leur séparation et le masquage avec un faux secret.

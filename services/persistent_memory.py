@@ -102,6 +102,7 @@ def user_key(name):
     name = unicodedata.normalize("NFKC", name or "")
     name = re.sub(r"\s+", " ", name.strip())
     if not name:
+        # Legacy directory of the reserved MinitelGPT profile, not a shared scope.
         return "shared", "MinitelGPT"
     name = clean_text(name, 60)
     if any(c in name for c in "/\\") or name in {".", ".."}:

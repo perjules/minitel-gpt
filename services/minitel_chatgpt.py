@@ -743,7 +743,7 @@ def show_home(t: Term, title_lines, title_msg, username=False):
     t.line()
     t.w(FG_WHITE)
     if username:
-        t.center("Nom / name (vide / blank = commun)")
+        t.center("Nom / name (vide / blank = MinitelGPT)")
         t.center("Sans mot de passe / no password")
         t.center("ENVOI: continuer / continue")
     else:
@@ -763,7 +763,7 @@ def select_memory_user(t, language="fr", title_lines=None, title_msg="3615 IA", 
     while True:
         if preserve_display:
             t.line()
-            t.line("Nom / name (vide / blank = commun)")
+            t.line("Nom / name (vide / blank = MinitelGPT)")
             preserve_display = False
         else:
             show_home(t, title_lines or [], title_msg, username=True)

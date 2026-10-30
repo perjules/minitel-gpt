@@ -9,6 +9,11 @@ profile with no Gmail or PRONOTE access. Existing name normalization and memory
 namespaces are retained. Display-name changes retain stable user and memory IDs.
 Aliases must be unique; a disabled identity does not become a new identity.
 
+Saved memory belongs only to the selected profile. There is no global/shared
+memory or cross-profile memory command. The reserved MinitelGPT profile keeps its
+legacy `shared/` directory to preserve existing data; other profiles cannot target
+it from their conversations. Selecting a profile is still not authentication.
+
 ## Data
 
 `users.sqlite3` lives under MINITEL_MEMORY_DIR, or

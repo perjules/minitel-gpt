@@ -48,6 +48,7 @@ class Registry:
                 if version not in (0, 1, 2):
                     raise GmailError("user_registry_version")
                 if version == 0:
+                    # Keep the default profile's legacy memory path to preserve its data.
                     db.executescript("""BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, display_name TEXT NOT NULL,
  memory_key TEXT NOT NULL UNIQUE, enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)), revision INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
