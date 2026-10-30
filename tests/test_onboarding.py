@@ -7,7 +7,6 @@ import pytest
 
 from services import memory_database as sql
 from services import memory_session as sessions
-from services import persistent_memory as memory
 from services.gmail_auth import GmailError
 
 
@@ -253,8 +252,7 @@ def test_other_user_isolated_and_version_mismatch_preserves_state(newcomer):
                 (other.user.id,),
             )
         assert not other.welcome.should_greet()
-        with pytest.raises(memory.MemoryProblem):
-            other.welcome.respond("Hello", "persona")
+        assert other.welcome.respond("Hello", "persona") is None
         assert newcomer.welcome.state()["history"]
     finally:
         other.close()

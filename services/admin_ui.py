@@ -1520,7 +1520,7 @@ def test_preset_route():
     j = request.json or {}
     key = (j.get("preset_key") or "").strip()
     msg = (j.get("message") or "").strip()
-    if not msg and not j.get("reset"):
+    if not msg and not j.get("reset") and not j.get("welcome_start"):
         return jsonify(ok=False, error="Question vide")
     data = load_prompts()
     if key not in data["presets"]:
@@ -1548,10 +1548,18 @@ def test_preset_route():
                 private_question = True
             language = selected.saved_language() or "fr"
             calc = selected.calculator
-            result = None
-            if calc.explicit(msg) or (not selected.pending and calculator.candidate(msg)):
+            result = (selected.welcome.respond("FAISONS CONNAISSANCE", system, language, start=True)
+                      if j.get("welcome_start") else None)
+            if j.get("welcome_start"):
+                calc.mode = False
+                if result is None:
+                    result = {"display": "Choisissez un profil nommé; l’accueil doit être activé.",
+                              "turn": None, "onboarding": True}
+            if result is None and (calc.explicit(msg) or (not selected.pending and calculator.candidate(msg))):
                 result = calc.handle(msg, language, generate=lambda expr, lang:
                                      calculator.generate_scene(expr, lang, mistral_key(), mistral_model()))
+            if result is None:
+                result = selected.welcome.respond(msg, system, language)
             if result is None:
                 result = selected.handle(msg, language) if selected.interested(msg) else {"passthrough": True}
             if result.get("passthrough"):
@@ -1563,9 +1571,12 @@ def test_preset_route():
             warning = selected.take_warning()
             if warning:
                 answer += "\n\n" + warning
+            if result.get("onboarding"):
+                private_question = False
             if not private_question and not selected.private_turn:
-                channel = "theatre" if result.get("calculator") else "chat" if result.get("passthrough") else "memory"
-                selected.record("user", msg, channel)
+                channel = "onboarding" if result.get("onboarding") else "theatre" if result.get("calculator") else "chat" if result.get("passthrough") else "memory"
+                if msg:
+                    selected.record("user", msg, channel)
                 selected.record("assistant", answer, channel, factual=result.get("factual"))
         # The browser preview retains exact URLs, including Unicode paths.
         conversations = (llm_provider() == "mistral" and

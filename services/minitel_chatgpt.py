@@ -541,8 +541,12 @@ def calculator_blocked(mail, memory):
 
 
 def call_answer(system_prompt, history, language, options, knowledge,
-                mail=None, review_ticket=None, memory=None, calc=None):
+                mail=None, review_ticket=None, memory=None, calc=None, welcome_start=False):
     api, web_search, timeout = options
+    welcome = getattr(memory, "welcome", None)
+    if welcome_start:
+        return (welcome.respond(None, system_prompt, language, timeout, start=True)
+                or {"display": "", "turn": None, "onboarding": True})
     question = history[-1]["content"]
     if memory is not None and hasattr(memory, "begin_turn"):
         memory.begin_turn()
@@ -550,6 +554,11 @@ def call_answer(system_prompt, history, language, options, knowledge,
     if calc is not None and calc.explicit(question):
         return calc.handle(question, language, generate=lambda expr, lang:
                            calculator.generate_scene(expr, lang, MISTRAL_KEY, MISTRAL_MODEL))
+    if (isinstance(welcome, memory_session.onboarding.Session)
+            and not (mail is not None and (mail.draft or mail.composition or mail.selected))):
+        response = welcome.respond(question, system_prompt, language, timeout)
+        if response is not None:
+            return response
     explicit_memory = memory_session.explicit_request(question)
     note_request = re.match(r"^note\b", question, re.IGNORECASE)
     school = pronote.backend() if PROVIDER == "mistral" and api == "conversations" else None
@@ -610,7 +619,7 @@ def call_answer(system_prompt, history, language, options, knowledge,
 
 
 def start_answer(system_prompt, history, language, options, knowledge,
-                 mail=None, review_ticket=None, memory=None, calc=None):
+                 mail=None, review_ticket=None, memory=None, calc=None, welcome_start=False):
     """One daemon worker; no UART access. File operations use the scoped memory guard."""
     output = Queue(maxsize=1)
 
@@ -621,6 +630,8 @@ def start_answer(system_prompt, history, language, options, knowledge,
                 optional["memory"] = memory
             if calc is not None:
                 optional["calc"] = calc
+            if welcome_start:
+                optional["welcome_start"] = True
             output.put((call_answer(system_prompt, history, language, options, knowledge, **optional), None))
         except Exception as error:  # noqa: BLE001 - Forward every worker failure to the UART owner.
             output.put((None, error))
@@ -1128,7 +1139,26 @@ def run_session(t):
         if language == "en":
             question_msg = UI[language]["question"]
             loading_msg = UI[language]["loading"]
-        if keep_bill:
+        greeted = False
+        if (isinstance(getattr(memory, "welcome", None), memory_session.onboarding.Session)
+                and memory.welcome.should_greet() and not (pending is not None and pending[0].is_alive())):
+            t.line()
+            t.center(loading_msg)
+            pending = start_answer(system_prompt, [], language, options, knowledge,
+                                   memory=memory, welcome_start=True)
+            t._pending = pending
+            introduction, action = wait_answer(t, pending, options[2])
+            if action in ("sommaire", "guide"):
+                if action == "guide":
+                    show_guide(t, language)
+                continue
+            if introduction and introduction["display"]:
+                memory.record("assistant", introduction["display"], "onboarding")
+                action = show_response(t, safe_display(introduction["display"]), language)
+                if action != "done":
+                    continue
+                greeted = True
+        if keep_bill or greeted:
             t.line()
             t.center(UI[language]["follow_up"])
             keep_bill = False
@@ -1372,7 +1402,10 @@ def run_session(t):
             warning = memory.take_warning()
             if warning:
                 answer += "\n\n" + warning
-            channel = ("theatre" if response and response.get("calculator") else
+            if response and response.get("onboarding"):
+                private_question = False  # Voluntary profile answers, not PRONOTE records.
+            channel = ("onboarding" if response and response.get("onboarding") else
+                       "theatre" if response and response.get("calculator") else
                        "memory" if response and response.get("memory") else
                        "gmail" if response and (response.get("gmail") or response.get("review_ticket")) else "chat")
             if not private_question and not (response and (response.get("turn") or {}).get("private")):

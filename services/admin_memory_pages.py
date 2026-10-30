@@ -25,6 +25,8 @@ Défaut MinitelGPT : apprentissage désactivé. Les opérations explicites reste
 <p>{{p.count}} éléments · {{p.bytes}} octets de texte · dernière modification : {{p.updated}}</p>
 <p>Vecteurs actuels : {{p.indexed}} / {{p.indexable}} · énoncés en attente : {{p.pending}}.
 Apprentissage : {{'actif' if p.auto_enabled and automatic and p.enabled else 'inactif'}} · état : {{p.processing}}.</p>
+{% if p.onboarding %}<p>Premier accueil : {{p.onboarding.status}} · {{p.onboarding.turns}} échanges.
+{% for topic,status in p.onboarding.topics.items() %}{{topic}} : {{status}}{{'; ' if not loop.last}}{% endfor %}</p>{% endif %}
 {% if p.retry_after %}<p>Une reprise est différée après un échec; une prochaine interaction relancera le travail.</p>{% endif %}
 {% if unlocked %}<p><a href="/maintenance/memory/{{p.user_id}}">Afficher les souvenirs</a> ·
 <a href="/maintenance/memory/export/{{p.user_id}}">Télécharger ce profil</a></p>{% endif %}
@@ -36,7 +38,7 @@ Apprentissage : {{'actif' if p.auto_enabled and automatic and p.enabled else 'in
 <p>{{item.kind}} · {{item.origin}} · {{item.updated}} · <code>{{item.id}}</code></p>
 <pre>{{item.text}}</pre>
 {% if item.source %}<details><summary>Origine de l’apprentissage</summary>
-{% for source in item.source %}<p>{{source.at}} · session {{source.session_id}} · énoncé {{source.event_id}}</p><pre>{{source.quote}}</pre>{% endfor %}
+{% for source in item.source %}<p>{{source.at}} · session {{source.session_id}} · énoncé {{source.event_id}}</p><pre>{{source.quote}}</pre>{% if source.question %}<p>Question à laquelle la réponse se rapporte :</p><pre>{{source.question}}</pre>{% endif %}{% endfor %}
 </details>{% endif %}<hr></article>{% else %}<p>Aucun souvenir enregistré.</p>{% endfor %}
 </section>{% endif %}
 {% if legacy %}<section><h2>Anciens dossiers sans profil enregistré</h2>

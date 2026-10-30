@@ -48,19 +48,19 @@ TEST_NAV = '''<nav><a href="/test?mode=conversation">Conversation</a> · <a href
 CHAT_TEST = r'''<p>Test de l’IA configurée. Les requêtes sont réelles et la conversation est journalisée dans la mémoire choisie.</p>
 <label>Utilisateur (vide = MinitelGPT)<input id=memoryUser maxlength=60 value="{{username}}" onchange="++testSequence;document.getElementById('testOut').textContent='';document.getElementById('testSpin').style.display='none'"></label>
 <textarea id=testMsg rows=4 placeholder="Votre question"></textarea>
-<button type=button onclick="testPreset(false)">Envoyer</button><button type=button onclick="testPreset(true)">SOMMAIRE / nouvelle session</button>
+<button type=button onclick="testPreset(false)">Envoyer</button><button type=button onclick="testPreset(false,true)">Faire connaissance / reprendre l’accueil</button><button type=button onclick="testPreset(true)">SOMMAIRE / nouvelle session</button>
 <span id=testSpin style="display:none">Consultation…</span><pre id=testOut role=status></pre>
 <script>
 const CSRF_TOKEN={{csrf_token()|tojson}}, PRESET={{preset|tojson}}, DRAFT_SYSTEM={{draft|tojson}};
 let testSequence=0;
-async function testPreset(reset=false){
+async function testPreset(reset=false,welcome=false){
  const msg=document.getElementById('testMsg').value.trim();
- if(!msg&&!reset)return;
+ if(!msg&&!reset&&!welcome)return;
  const sequence=++testSequence, spin=document.getElementById('testSpin'), out=document.getElementById('testOut');
  spin.style.display='block';out.textContent='Consultation…';
  try{
   const response=await fetch('/test-preset',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},
-   body:JSON.stringify({preset_key:PRESET,system:DRAFT_SYSTEM,message:msg,memory_user:document.getElementById('memoryUser').value,reset:reset})});
+   body:JSON.stringify({preset_key:PRESET,system:DRAFT_SYSTEM,message:msg,memory_user:document.getElementById('memoryUser').value,reset:reset,welcome_start:welcome})});
   const data=await response.json();if(sequence!==testSequence)return;
   if(data.ok&&data.scene){
    out.textContent='';const started=performance.now();

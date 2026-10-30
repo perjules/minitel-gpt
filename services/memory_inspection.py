@@ -35,7 +35,31 @@ def profile(store, user):
         pending = db.execute(
             "SELECT count(*) FROM memory_events WHERE user_id=?", (user["id"],)
         ).fetchone()[0]
+        onboarding = db.execute(
+            "SELECT version,status,turns,progress FROM user_onboarding WHERE user_id=?",
+            (user["id"],),
+        ).fetchone()
+        welcome = None
+        if onboarding:
+            try:
+                topics = json.loads(onboarding["progress"])
+                if not isinstance(topics, dict):
+                    raise TypeError()
+                if onboarding["version"] != 1:
+                    raise ValueError()
+                welcome = {
+                    "status": onboarding["status"],
+                    "turns": onboarding["turns"],
+                    "topics": topics,
+                }
+            except (ValueError, TypeError):
+                welcome = {
+                    "status": "unreadable",
+                    "turns": onboarding["turns"],
+                    "topics": {},
+                }
     return {
+        "onboarding": welcome,
         "user_id": user["id"],
         "name": user["display_name"],
         "enabled": bool(user["enabled"]),

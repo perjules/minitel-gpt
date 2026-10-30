@@ -158,7 +158,19 @@ class Session:
         requested = command in RESUME
         if not enabled():
             return None
-        state = self.state(create=requested)
+        try:
+            state = self.state(create=requested)
+        except memory.MemoryProblem as error:
+            self.selected.warning = str(error)
+            return (
+                self.result(
+                    "Accueil indisponible; nous pouvons converser librement."
+                    if language != "en"
+                    else "Introduction unavailable; we can chat freely."
+                )
+                if requested or start
+                else None
+            )
         if state is None:
             return None
         if requested:
