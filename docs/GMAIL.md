@@ -1,5 +1,7 @@
 # Gmail prototype — 3615 IA
 
+> Model selection and reasoning for Gmail tasks: see [GMAIL_MODELS.md](GMAIL_MODELS.md).
+
 > Multi-user profiles and Gmail/PRONOTE assignments: see [USERS.md](USERS.md).
 > Its migration and account-selection instructions supersede the old shared-mailbox setup below.
 

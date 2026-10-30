@@ -204,7 +204,7 @@ class MailModel:
             if error.response is not None and error.response.status_code in {400, 404, 422}:
                 raise GmailError("generation_configuration_rejected") from None
             raise GmailError("generation_unavailable") from None
-        except (requests.RequestException, ValueError, KeyError, TypeError, IndexError):
+        except (requests.RequestException, ValueError, KeyError, TypeError, IndexError, AttributeError):
             raise GmailError("generation_unavailable") from None
         finally:
             log.info("llm_call service=%s task=%s model=%s effort=%s elapsed=%.2f status=%s usage=%s",

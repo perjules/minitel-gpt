@@ -13,10 +13,20 @@ GMAIL_KEYS = (
     "MISTRAL_GMAIL_DRAFT_REASONING_EFFORT",
 )
 REASONING_MODELS = {
-    **{model: ("low", "medium", "high") for model in ("mistral-large-4", "mistral-large-4-0")},
-    **{model: ("none", "high") for model in (
-        "mistral-small-latest", "mistral-small-2603", "mistral-medium-latest",
-        "mistral-medium-3-5", "mistral-medium-2604")},
+    **{
+        model: ("low", "medium", "high")
+        for model in ("mistral-large-4", "mistral-large-4-0")
+    },
+    **{
+        model: ("none", "high")
+        for model in (
+            "mistral-small-latest",
+            "mistral-small-2603",
+            "mistral-medium-latest",
+            "mistral-medium-3-5",
+            "mistral-medium-2604",
+        )
+    },
 }
 
 
@@ -45,4 +55,8 @@ def resolve(env=None, *, service="general", draft=False):
         raise SettingsError("invalid_mistral_model")
     if effort and effort not in reasoning_options(model):
         raise SettingsError("invalid_gmail_draft_reasoning_effort")
-    return {"key": env.get("MISTRAL_KEY", ""), "model": model, "reasoning_effort": effort}
+    return {
+        "key": env.get("MISTRAL_KEY", ""),
+        "model": model,
+        "reasoning_effort": effort,
+    }

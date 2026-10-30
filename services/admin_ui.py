@@ -360,7 +360,7 @@ def mistral_key():
     return read_env().get("MISTRAL_KEY", os.getenv("MISTRAL_KEY", ""))
 
 def mistral_model():
-    return read_env().get("MISTRAL_MODEL", "mistral-small-latest")
+    return read_env().get("MISTRAL_MODEL", os.getenv("MISTRAL_MODEL", "mistral-small-latest"))
 
 
 def gmail_model_settings():
@@ -891,6 +891,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
         <details><summary>Identifiant manuel (facultatif)</summary><input name="{{field}}_custom" maxlength=200 placeholder="Vide = utiliser la sélection ci-dessus"></details>
         {% endfor %}
         <button class="btn btn-s" type=button onclick="loadModels('mistral',true)">Actualiser les modèles Mistral</button>
+        <p class=sub id=gmailCatalogueStatus role=status>Liste chargée à l’ouverture ; les choix enregistrés sont conservés.</p>
         <label for=gmail_draft_reasoning_effort>Effort de raisonnement pour la rédaction</label>
         <select name=gmail_draft_reasoning_effort id=gmail_draft_reasoning_effort>
           <option value="">Défaut du fournisseur</option>
@@ -1140,8 +1141,9 @@ async function loadModels(provider,force=false){
   modelLists.add(provider);
   const field=provider==='claude'?'anthropic':'mistral';
   const form=document.getElementById('llmForm');
-  const status=document.getElementById(provider+'ModelStatus');
-  status.textContent='Chargement…';
+  const statuses=[document.getElementById(provider+'ModelStatus'),provider==='mistral'?document.getElementById('gmailCatalogueStatus'):null].filter(Boolean);
+  const report=message=>statuses.forEach(status=>status.textContent=message);
+  report('Chargement…');
   try{
     const response=await fetch('/models',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},
       body:JSON.stringify({provider:provider,key:form.elements[field+'_key'].value,clear:form.elements[field+'_key_clear'].checked})});
@@ -1154,8 +1156,8 @@ async function loadModels(provider,force=false){
       data.models.forEach(m=>{if(!ids.has(m.id)){select.add(new Option(m.label===m.id?m.id:m.label+' · '+m.id,m.id));ids.add(m.id);}});
       select.value=selected;
     });
-    refreshGmailProfiles();status.textContent=data.models.length+' modèles disponibles. Les sélections sont conservées.';
-  }catch(error){status.textContent=error.message||'Liste indisponible ; modèle actuel conservé.';modelLists.delete(provider);}
+    refreshGmailProfiles();report(data.models.length+' modèles disponibles. Les sélections sont conservées.');
+  }catch(error){report(error.message||'Liste indisponible ; modèle actuel conservé.');modelLists.delete(provider);}
 }
 if(document.getElementById('ai').classList.contains('active'))loadModels(document.getElementById('providerSel').value);
 document.querySelectorAll('.provider-settings').forEach(d=>d.addEventListener('toggle',()=>{if(d.open&&document.getElementById('ai').classList.contains('active'))loadModels(d.dataset.provider);}));
