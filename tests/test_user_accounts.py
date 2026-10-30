@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import re
 import sqlite3
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -68,6 +69,92 @@ def test_concurrent_first_use_creates_one_identity(tmp_path):
     with ThreadPoolExecutor(max_workers=4) as executor:
         users = list(executor.map(lambda _: r.resolve("Concurrent"), range(12)))
     assert len({u.id for u in users}) == 1 and len(r.users()) == 2
+
+
+@pytest.mark.parametrize("name", ["MinitelGPT", "MINITELGPT", " minitelgpt ", "ＭinitelGPT"])
+def test_default_display_name_selects_reserved_profile_instead_of_creating_a_user(tmp_path, monkeypatch, name):
+    reports = Mock()
+    monkeypatch.setattr(user_registry.Registry, "report_event", reports)
+    registry = user_registry.Registry(tmp_path)
+    assert registry.resolve(name) == registry.resolve("")
+    assert registry.resolve(name).id == 1
+    assert registry.resolve(name).memory_key == "shared"
+    assert len(registry.users()) == 1
+    reports.assert_not_called()
+
+
+def test_reserved_name_cannot_be_claimed_by_another_profiles_name_or_alias(tmp_path):
+    registry = user_registry.Registry(tmp_path)
+    user = registry.resolve("Alice")
+    for name, aliases in [("MinitelGPT", []), ("Alice", [" MINITELGPT "])]:
+        with pytest.raises(auth.GmailError, match="reserved_user_name"):
+            registry.configure(user.id, name, True, aliases, None, False, [])
+        assert registry.get(user.id).display_name == "Alice"
+    registry.configure(1, "MinitelGPT", True, ["MinitelGPT"], None, False, [])
+    assert registry.resolve("minitelgpt").id == 1
+
+
+def test_existing_duplicate_remains_accessible_and_rename_preserves_its_data(console):
+    client, _headers, _ = console
+    registry = user_registry.Registry()
+    default = registry.resolve("")
+    key, name = user_registry.memory.user_key("MinitelGPT")
+    # Reproduce the rows written by the old resolver, without running a migration.
+    with registry.connection() as db:
+        db.execute("INSERT INTO users(id,display_name,memory_key) VALUES(6,?,?)", (name, key))
+        db.execute("INSERT INTO user_aliases VALUES('minitelgpt',6)")
+        db.execute("INSERT INTO user_onboarding(user_id) VALUES(6)")
+    folder = user_registry.memory.MemoryStore(registry.root).folder(key)
+    private = folder / "private-fixture.enc"
+    private.write_bytes(b"opaque private data")
+    registry.record_account(A, "old-profile@example.org", 1)
+    with registry.connection() as db:
+        db.execute("INSERT INTO user_gmail_access VALUES(6,?,1,1)", (A,))
+    assert registry.resolve("MinitelGPT").id == 6
+    assert registry.resolve("") == default
+    assert len(registry.users()) == 2
+    assert "Ce profil existant et ses données sont conservés" in client.get("/users").text
+    registry.configure(6, "Ancien test", True, [], A, True, [])
+    assert registry.resolve("MinitelGPT").id == 1
+    assert registry.resolve("Ancien test").id == 6
+    assert registry.resolve("Ancien test").memory_key == key
+    assert registry.gmail(6, "send")[1] == A
+    assert private.read_bytes() == b"opaque private data"
+
+
+def test_admin_selectors_leave_default_blank_and_keep_aliases_on_the_same_session(console):
+    client, headers, _ = console
+    registry = user_registry.Registry()
+    for url, selector in [("/test", 'id=memoryUser'), ("/test?mode=gmail", 'name=username'),
+                          ("/journal", 'id=username')]:
+        page = client.get(url).text
+        assert re.search(r'<input[^>]*' + selector + r'[^>]*value=""', page)
+    # A still-open older page can submit its automatically filled display label.
+    response = client.post("/test-preset", headers=headers,
+        json={"preset_key": "main", "message": "", "memory_user": "MinitelGPT", "reset": True})
+    assert response.status_code == 200 and response.json["ok"]
+    assert len(registry.users()) == 1
+    with admin.app.test_request_context():
+        first = admin.memory_entry("")
+        try:
+            assert admin.memory_entry("MINITELGPT") is first
+        finally:
+            admin.discard_memory(admin.session.get("memory_session"))
+    user = registry.resolve("Alice")
+    response = client.post("/users", headers=headers, data={
+        "action": "save", "user_id": user.id, "name": "MinitelGPT", "aliases": "Alice", "enabled": "on"})
+    assert response.status_code == 400
+    assert "réservés au profil #1" in response.text
+    assert registry.get(user.id).display_name == "Alice"
+    registry.configure(user.id, "Alicia", True, ["Alice"], None, False, [])
+    with admin.app.test_request_context():
+        first = admin.memory_entry("Alice")
+        try:
+            first.recent.append({"role": "user", "text": "Retain this turn"})
+            assert admin.memory_entry("Alicia") is first
+            assert first.recent[-1]["text"] == "Retain this turn"
+        finally:
+            admin.discard_memory(admin.session.get("memory_session"))
 
 
 def test_corrupt_database_is_preserved_and_never_replaced(tmp_path):

@@ -21,6 +21,17 @@ GMAIL = '''<section><h2>Comptes Gmail</h2><p>{{account}}</p>
 <button>Enregistrer et appliquer</button></form>
 <form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><label>Compte à vérifier<select name=account_id>{% for a in oauth_accounts %}<option value="{{a.id}}">{{a.email}}</option>{% endfor %}</select></label><button name=action value=check>Vérifier la connexion (lecture seule)</button></form>
 <a href="/test?mode=gmail">Tester Gmail</a></section>
+<section><h2>Rapports automatiques</h2>
+<p>Un email à chaque création ou suppression d’utilisateur : nom, identifiant, date et action.</p>
+{% if reports.ready %}<p>{{'Rapports actifs' if reports.recipient else 'Rapports désactivés'}}. Envoyés depuis le compte du profil par défaut : <strong>{{reports.sender}}</strong>.</p>
+<form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=reports>
+<label>Adresse de réception des rapports<input type=email name=report_recipient value="{{reports.recipient}}" maxlength=254 placeholder="vous@example.org"></label>
+<p>Cette adresse n’a pas à être connectée au Minitel ni vérifiée. Laissez vide pour désactiver les rapports.</p>
+<button>Enregistrer les rapports</button></form>
+{% else %}<p>Activez Gmail et attribuez un compte avec autorisation d’envoi au <a href=/users>profil par défaut</a> pour configurer les rapports.</p>
+{% if reports.recipient %}<p>Rapports suspendus. Destinataire enregistré : {{reports.recipient}}.</p>
+<form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=reports><input type=hidden name=report_recipient value=""><button>Désactiver les rapports</button></form>{% endif %}
+{% endif %}</section>
 <section><h2>Connexion Google</h2>
 <p>Autorisez le compte du profil sélectionné dans votre navigateur, puis appliquez l’autorisation aux deux services. Aucun tunnel SSH n’est nécessaire après la configuration initiale.</p>
 {% if oauth_uri %}<p>Retour Google enregistré : <code>{{oauth_uri}}</code></p>

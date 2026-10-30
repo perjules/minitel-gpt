@@ -402,6 +402,17 @@ On the physical Minitel check 39-column wrapping, accents/transliteration, 18-ro
 pages, function-key **SUITE**, **SOMMAIRE** during requests and ordinary web/PRONOTE
 queries after mail. Simulated UART tests do not replace this physical check.
 
+## Automatic user reports
+
+**Services → Gmail → Rapports automatiques** optionally sends fixed creation and
+deletion notices from the default profile's dedicated Gmail account to one
+configured address. The destination needs no Gmail enrollment or verification.
+The default account still needs send permission. A blank recipient disables this
+feature. These notifications do not go through the interactive draft review;
+ordinary user-written emails retain the existing ENVOYER gate. See
+[USERS.md](USERS.md#automatic-user-reports) for event scope, delivery behavior and
+the owner-controlled live check.
+
 ## 3. Reply, revise, cancel, review and explicitly send
 
 Select an owner-controlled test message, then:
@@ -419,7 +430,15 @@ Select an owner-controlled test message, then:
    revisions do not force the original name back in. The enrolled Gmail account's
    From address remains unchanged. Python always restores the automatic Minitel
    footer, including when an edit asks to remove or change it; the complete outgoing
-   body remains visible during review. After `MODIFIER`, the next
+   reply text remains visible during review. The original message is appended
+   automatically only after approved `ENVOYER`, beneath the reply and signature,
+   with its sender/date and plain-text `>` quotation markers. This includes the
+   full selected body and any earlier history already embedded in it, independently
+   of the model's shorter context limit. It is not shown again on the Minitel and
+   requires no extra model call or mailbox fetch. Earlier thread messages absent
+   from the selected body and attachments are not added. New messages never inherit
+   a selected email's history. `Re:`, In-Reply-To, References, Message-ID and the
+   Gmail thread ID are retained. After `MODIFIER`, the next
    editing instruction directly revises the existing draft instead of being
    classified as a new message. Failed edits retain this editing state and keep
    the previous review invalid; ANNULER/SOMMAIRE discards it.

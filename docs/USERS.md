@@ -15,6 +15,22 @@ profile with no Gmail or PRONOTE access. Existing name normalization and memory
 namespaces are retained. Display-name changes retain stable user and memory IDs.
 Aliases must be unique; a disabled identity does not become a new identity.
 
+The explicit name **MinitelGPT** (case-insensitive, normalized) also selects the
+reserved profile, unless that alias already belongs to an older duplicate. Other
+profiles cannot newly claim this name or alias. Admin selectors keep the default
+selection blank and compare resolved identities, rather than display-name-derived
+folder paths; submitting the test form or selecting another alias of the same
+user does not create a profile or reset its conversation.
+
+Older versions could create a separate named profile by submitting the default
+display label from an admin test form. Such a duplicate is not merged, deleted or
+silently redirected by this fix: its alias, memory path, grants and encrypted
+journal remain intact. In **Utilisateurs et accès**, rename that non-reserved
+profile and remove its `MinitelGPT` alias to distinguish it. The warning on its
+card identifies this case. Afterwards, blank input and the explicit default name
+both select #1. Inspect the duplicate's data and account assignments before
+choosing whether to delete it.
+
 Saved memory belongs only to the selected profile. There is no global/shared
 memory or cross-profile memory command. The reserved MinitelGPT profile keeps its
 legacy `shared/` directory to preserve existing data; other profiles cannot target
@@ -46,7 +62,8 @@ aliases, assignments, permissions and memory identifiers are retained. No mailbo
 is assigned automatically. New databases start directly at version 2.
 
 The existing memory files and saved language preferences are unchanged. No memory
-migration, user password UI, background synchronization or autonomous send is added.
+migration, user password UI or background synchronization is added. Optional
+creation/deletion email reports are configured separately below.
 
 Gmail credentials are in the root-only, host-encrypted
 `/etc/credstore.encrypted/minitel-gmail-accounts`, bounded to sixteen accounts.
@@ -104,6 +121,47 @@ numeric ID, preventing SQLite from reusing a deleted ID for an unrelated profile
 It contains no names or personal data and leaves schema versions unchanged.
 Explicitly entering a deleted name again creates a fresh, empty profile with a
 new numeric identity and no service access. Old sessions cannot bind to it.
+
+## Automatic user reports
+
+In **Services → Gmail → Rapports automatiques**, enter one destination address.
+Gmail must be active and the reserved default profile must have an assigned,
+enabled Gmail account with send permission. That dedicated account sends the
+reports; no other profile's mailbox is used as a fallback. The destination only
+needs to be a syntactically valid email address. It does not need to be connected,
+enrolled, present in recent correspondence, or verified. Saving it sends no test
+message. Clear the field to disable reporting.
+
+The setting lives in the private registry's additive `user_mail_reports` table,
+not in OAuth credentials, cookies or per-profile memory. It applies to creations
+from the terminal, console and admin UI, and to completed admin deletions. Reusing
+a name/alias, editing access, disabling a user, resetting welcome or a failed
+deletion sends no report. Initial creation of the reserved default profile does
+not report itself. Each report contains the action, display name, numeric user ID
+and event time in Europe/Paris; no memories, conversations or account secrets.
+
+A single lazy daemon sender per application process handles at most 32 pending
+events, outside user transactions. Profile changes do not wait for Gmail. Before
+each send it rechecks activation, the configured destination and the exact default
+profile/account binding. Removing send permission, disconnecting/reassigning the
+sender, clearing the destination or disabling Gmail stops affected pending reports.
+Changing the destination discards reports queued for the old address.
+
+Delivery is best-effort: the queue is in RAM and is lost on a process restart;
+full queues, unavailable accounts and failed/uncertain sends are recorded in the
+service logs without rolling back user changes. Each send has a 20-second deadline
+and is not automatically retried. Logs contain action/ID/status, not report names,
+destinations or bodies. The normal interactive email draft still requires review
+and literal ENVOYER; fixed creation/deletion reports are the sole opt-in automatic
+send path and do not use the model. Already delivered reports remain in the
+sender/recipient mailboxes after a profile is deleted.
+
+Offline checks use real registry transactions and synthetic mail clients, covering
+concurrent first use, deletion failures, permissions, arbitrary recipient addresses,
+configuration persistence, CSRF, the bounded queue and uncertain sends. On the Pi,
+configure an owner-controlled destination, create one disposable user, verify one
+creation email, then delete it and verify one deletion email. Reopening a user or
+leaving the report address blank should send nothing.
 
 ## Rollout on the Pi
 

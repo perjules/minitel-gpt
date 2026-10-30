@@ -236,9 +236,15 @@ class WorkflowTests(unittest.TestCase):
         session.acknowledge(ticket)
         calls = model.complete.call_count
         self.assertIn("confirme", session.handle("ENVOYER", ticket)["display"])
-        client.send.assert_called_once_with(
-            stored["raw"], "thread123", stored["message_id"], unittest.mock.ANY
-        )
+        client.send.assert_called_once()
+        raw, thread, message_id, _ = client.send.call_args.args
+        sent = BytesParser(policy=policy.default).parsebytes(raw)
+        self.assertEqual(thread, "thread123")
+        self.assertEqual(message_id, stored["message_id"])
+        self.assertEqual(sent["Message-ID"], mime["Message-ID"])
+        self.assertEqual(sent["In-Reply-To"], mime["In-Reply-To"])
+        self.assertEqual(sent["References"], mime["References"])
+        self.assertIn("> Bonjour", sent.get_content())
         self.assertEqual(model.complete.call_count, calls)
         self.assertIsNone(session.draft)
         self.assertIn(

@@ -98,6 +98,21 @@ def validate(text, adapt, *, procedure=False):
     """Reject commands/technical jargon; UART text stays bounded and inert."""
     if not isinstance(text, str) or len(text) > 6000:
         raise ValueError("Invalid maintenance text")
+    text = text.replace("\r\n", "\n")
+    # Check before trimming formatting: a tab or control must not disappear with it.
+    if any(c != "\n" and not c.isprintable() for c in text):
+        raise ValueError("Startup contains non-printable characters")
+    lines = text.strip(" \n").split("\n")
+    if (lines[0].strip() in {"```", "```text", "```plaintext"}
+            and len(lines) >= 3 and lines[-1].strip() == "```"):
+        lines = lines[1:-1]
+    text = "\n".join(lines)
+    # Models sometimes decorate otherwise usable narration despite the prompt.
+    # Remove common presentation markers, then run every normal content check.
+    text = re.sub(r"(?m)^ *#{1,6} +", "", text)
+    text = re.sub(r"(?m)^ *(?:[-*+]|\d+[.)]) +", "", text)
+    text = re.sub(r"(\*\*|__)(?=\S)([^\n]+?)(?<=\S)\1", r"\2", text)
+    text = re.sub(r"`([^`\n]+)`", r"\1", text)
     rows = adapt(text)
     if not 2 <= len(rows) <= (100 if procedure else 22):
         raise ValueError("Invalid maintenance length")
