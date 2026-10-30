@@ -183,9 +183,10 @@ def consolidate(snapshot, proposals, events, allowed_ids):
             if type(event_id) is not int or event_id not in evidence:
                 raise memory.MemoryProblem("Source de consolidation inconnue.")
             excerpt = memory.clean_text(quote["quote"], 2000)
-            if len(excerpt) < 8 or excerpt not in evidence[event_id]["text"]:
-                raise memory.MemoryProblem("Citation de consolidation non fondée.")
             event = evidence[event_id]
+            minimum = 1 if event.get("question") else 8
+            if len(excerpt) < minimum or excerpt not in event["text"]:
+                raise memory.MemoryProblem("Citation de consolidation non fondée.")
             sources.append(
                 {
                     "event_id": event_id,
@@ -194,6 +195,8 @@ def consolidate(snapshot, proposals, events, allowed_ids):
                     "quote": excerpt,
                 }
             )
+            if event.get("question"):
+                sources[-1]["question"] = memory.clean_text(event["question"], 1400)
         if proposal["operation"] == "replace":
             identifier = proposal["id"]
             if (

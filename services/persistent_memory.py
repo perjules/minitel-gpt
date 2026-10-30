@@ -443,7 +443,7 @@ class ConversationLog:
         if (
             role not in {"user", "assistant", "event"}
             or not isinstance(text, str)
-            or channel not in {"chat", "memory", "gmail", "session", "theatre"}
+            or channel not in {"chat", "memory", "gmail", "session", "theatre", "onboarding"}
         ):
             raise MemoryProblem("Journal: seuls les textes visibles sont acceptés.")
         record = {

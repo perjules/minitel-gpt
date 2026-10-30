@@ -46,3 +46,9 @@ def no_memory_background_network(monkeypatch):
     original = memory_automation.kick
     monkeypatch.setattr(memory_automation, "kick", lambda *args: None)
     return original
+
+
+@pytest.fixture(autouse=True)
+def optional_onboarding_off_by_default(monkeypatch):
+    # Dedicated welcome tests opt in with synthetic model responses.
+    monkeypatch.setenv("MINITEL_ONBOARDING", "0")

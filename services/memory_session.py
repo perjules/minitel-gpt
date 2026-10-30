@@ -7,7 +7,13 @@ import threading
 import time
 
 try:
-    from . import memory_automation, memory_database, memory_vectors, user_registry
+    from . import (
+        memory_automation,
+        memory_database,
+        memory_vectors,
+        onboarding,
+        user_registry,
+    )
     from . import persistent_memory as memory
     from .gmail_auth import GmailError
     from .gmail_mail import MailModel
@@ -15,6 +21,7 @@ except ImportError:
     import memory_automation
     import memory_database
     import memory_vectors
+    import onboarding
     import persistent_memory as memory
     import user_registry
     from gmail_auth import GmailError
@@ -145,6 +152,7 @@ class MemorySession:
             raise memory.MemoryProblem("Profil indisponible ou désactivé.") from None
         self.key, self.username = self.user.memory_key, self.user.display_name
         self.label = "mémoire de " + self.username
+        self.welcome = onboarding.Session(self)
         self.session_id = secrets.token_hex(12)
         self.turn_barrier = None
         self.model = model or MemoryModel()

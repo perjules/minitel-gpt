@@ -66,6 +66,13 @@ COMMIT;""")
                 elif version == 1:
                     self.migrate_shared_mailboxes(db)
                     db.commit()
+                # Additive feature state: old identities are deliberately not enrolled.
+                db.execute("""CREATE TABLE IF NOT EXISTS user_onboarding(
+ user_id INTEGER PRIMARY KEY REFERENCES users(id), version INTEGER NOT NULL DEFAULT 1,
+ status TEXT NOT NULL DEFAULT 'new', revision INTEGER NOT NULL DEFAULT 0,
+ progress TEXT NOT NULL DEFAULT '{}', history TEXT NOT NULL DEFAULT '[]',
+ asked TEXT NOT NULL DEFAULT '', turns INTEGER NOT NULL DEFAULT 0,
+ barrier INTEGER NOT NULL DEFAULT -1)""")
                 yield db
         except (sqlite3.Error, OSError):
             raise GmailError("user_registry_unavailable") from None
@@ -131,6 +138,7 @@ COMMIT;""")
                     db.execute(
                         "INSERT INTO user_aliases VALUES(?,?)", (canonical, user_id)
                     )
+                    db.execute("INSERT INTO user_onboarding(user_id) VALUES(?)", (user_id,))
                     row = db.execute(
                         "SELECT * FROM users WHERE id=?", (user_id,)
                     ).fetchone()

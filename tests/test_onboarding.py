@@ -1,0 +1,260 @@
+"""First conversations with synthetic users, structured replies and real SQLite."""
+
+import json
+from unittest.mock import Mock
+
+import pytest
+
+from services import memory_database as sql
+from services import memory_session as sessions
+from services import persistent_memory as memory
+from services.gmail_auth import GmailError
+
+
+@pytest.fixture
+def newcomer(tmp_path, monkeypatch):
+    monkeypatch.setenv("MINITEL_ONBOARDING", "1")
+    selected = sessions.MemorySession("Camille", model=Mock(), root=tmp_path)
+    yield selected
+    selected.close()
+
+
+def response(reply="Quel âge avez-vous ?", topic="age", **changes):
+    data = {
+        "reply": reply,
+        "action": "continue",
+        "asked_topic": topic,
+        "covered": [],
+        "skipped": [],
+        "memories": [],
+    }
+    data.update(changes)
+    return json.dumps(data, ensure_ascii=False)
+
+
+def run(selected, question=None, **changes):
+    selected.model.client.complete.return_value = response(**changes)
+    return selected.welcome.respond(
+        question, "OWNER PERSONA unchanged", start=question is None
+    )
+
+
+def fact(quote, text="User is 10 years old.", event_id=1):
+    return {
+        "operation": "save",
+        "kind": "fact",
+        "title": "age",
+        "text": text,
+        "id": None,
+        "evidence": [{"event_id": event_id, "quote": quote}],
+    }
+
+
+def test_only_new_named_profiles_enrolled_and_existing_can_opt_in(newcomer):
+    assert newcomer.welcome.should_greet()
+    default = sessions.MemorySession("", root=newcomer.store.root)
+    try:
+        assert not default.welcome.should_greet()
+        assert default.welcome.respond("FAISONS CONNAISSANCE", "persona") is None
+    finally:
+        default.close()
+    with newcomer.registry.connection() as db:
+        db.execute("DELETE FROM user_onboarding WHERE user_id=?", (newcomer.user.id,))
+    assert not newcomer.welcome.should_greet()
+    newcomer.model.client.complete.return_value = response()
+    assert newcomer.welcome.respond("FAISONS CONNAISSANCE", "persona")["onboarding"]
+
+
+def test_intro_uses_owner_persona_then_short_age_answer_has_question_provenance(
+    newcomer,
+):
+    intro = run(newcomer)
+    assert intro["display"] == "Quel âge avez-vous ?"
+    args = newcomer.model.client.complete.call_args.args
+    assert args[0].startswith("OWNER PERSONA unchanged")
+    assert "immense vintage mainframe" in args[0] and "NEVER employment" in args[0]
+    assert args[1]["phase"] == "first" and args[1]["username"] == "Camille"
+    result = run(
+        newcomer,
+        "10",
+        reply="Quelle matière aimez-vous à l’école ?",
+        topic="daily_life",
+        covered=["age"],
+        memories=[fact("10")],
+    )
+    assert "école" in result["display"]
+    item = newcomer.store.read(newcomer.key)["items"][0]
+    assert item["text"] == "User is 10 years old." and item["origin"] == "onboarding"
+    assert (
+        item["source"][0]["quote"] == "10"
+        and item["source"][0]["question"] == intro["display"]
+    )
+    assert newcomer.welcome.state()["progress"]["age"] == "covered"
+    assert not list(newcomer.store.root.glob("*.json"))
+    with sql.connection(newcomer.store) as db:
+        assert db.execute("SELECT count(*) FROM memory_events").fetchone()[0] == 0
+
+
+def test_skip_is_sticky_and_cannot_be_reasked_even_after_restart(newcomer):
+    run(newcomer, topic="household", reply="Avec qui vivez-vous ?")
+    run(
+        newcomer,
+        "PASSER",
+        topic="interests",
+        reply="Qu’aimez-vous faire pour vous amuser ?",
+    )
+    newcomer.close()
+    again = sessions.MemorySession("CAMILLE", root=newcomer.store.root, model=Mock())
+    try:
+        assert again.welcome.state()["progress"]["household"] == "skipped"
+        run(
+            again,
+            "Le dessin.",
+            topic="household",
+            reply="Parlez-moi de votre famille ?",
+        )
+        assert again.welcome.state()["status"] == "paused"
+        assert not again.store.read(again.key)["items"]
+    finally:
+        again.close()
+
+
+def test_natural_refusal_and_user_led_followup_are_tracked(newcomer):
+    run(newcomer, topic="household", reply="Souhaitez-vous parler de votre famille ?")
+    result = run(
+        newcomer,
+        "Je préfère ne pas parler de ma famille.",
+        skipped=["household"],
+        topic="interests",
+        reply="Quel loisir vous plaît ?",
+    )
+    assert (
+        result["onboarding"]
+        and newcomer.welcome.state()["progress"]["household"] == "skipped"
+    )
+    run(
+        newcomer,
+        "Je dessine des fusées et pourrais en parler des heures.",
+        covered=["interests"],
+        topic="interests",
+        reply="Qu’est-ce qui vous plaît dans le dessin de fusées ?",
+    )
+    assert newcomer.welcome.state()["asked"] == "interests"
+    assert "follow their enthusiasm" in newcomer.model.client.complete.call_args.args[0]
+
+
+def test_pause_stop_resume_and_completion_are_not_repeated(newcomer):
+    run(newcomer)
+    newcomer.model.client.complete.reset_mock()
+    result = newcomer.welcome.respond("PLUS TARD", "persona")
+    assert result["onboarding"] and not newcomer.welcome.should_greet()
+    newcomer.model.client.complete.assert_not_called()
+    assert newcomer.welcome.respond("Bonjour", "persona") is None
+    newcomer.model.client.complete.return_value = response()
+    newcomer.welcome.respond("REPRENDRE ACCUEIL", "persona")
+    assert newcomer.model.client.complete.call_args.args[1]["phase"] == "resume"
+    newcomer.welcome.respond("FIN ACCUEIL", "persona")
+    assert newcomer.welcome.state()["status"] == "skipped"
+    assert not newcomer.welcome.state()["history"]
+    newcomer.model.client.complete.return_value = response(
+        reply="Merci, mes banques sont à votre service.",
+        action="finish",
+        asked_topic=None,
+    )
+    newcomer.welcome.respond("REPRENDRE ACCUEIL", "persona")
+    assert newcomer.welcome.state()["status"] == "complete"
+    assert not newcomer.welcome.should_greet()
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"memories": [fact("invention")]},
+        {"memories": [fact("10", event_id=99)]},
+        {"asked_topic": "unrecognised"},
+        {"reply": "Votre âge ? Votre travail ?"},
+        {"owner": 999},
+        {"memories": [{"path": "/tmp/file"}]},
+    ],
+)
+def test_invalid_model_output_never_partially_writes(newcomer, changes):
+    run(newcomer)
+    newcomer.model.client.complete.return_value = response(**changes)
+    newcomer.welcome.respond("10", "persona")
+    assert not newcomer.store.read(newcomer.key)["items"]
+    assert newcomer.welcome.state()["status"] == "paused"
+
+
+def test_no_personal_facts_without_user_reply_and_no_save_refusal(newcomer):
+    run(newcomer, memories=[fact("Invented biography")])
+    assert not newcomer.store.read(newcomer.key)["items"]
+    newcomer.model.client.complete.return_value = response()
+    newcomer.welcome.respond("REPRENDRE ACCUEIL", "persona")
+    newcomer.model.client.complete.return_value = response(
+        reply="D’accord. Quel loisir vous plaît ?", topic="interests"
+    )
+    newcomer.welcome.respond("J’ai 10 ans, ne le mémorise pas.", "persona")
+    args = newcomer.model.client.complete.call_args.args[1]
+    assert args["current_reply"] == "PASSER"
+    assert "10 ans" not in str(args)
+    assert not newcomer.store.read(newcomer.key)["items"]
+
+
+def test_explicit_forget_and_close_during_call_invalidate_late_writes(newcomer):
+    run(newcomer)
+    item, _ = newcomer.store.apply(
+        newcomer.key, {"operation": "save", "kind": "fact", "text": "Old fact."}, {}
+    )
+    # This explicit write clears older welcome history before the next model call.
+    assert newcomer.welcome.state()["history"] == []
+
+    def late(*args, **kwargs):
+        newcomer.store.apply(
+            newcomer.key,
+            {"operation": "remove", "ids": [item["id"]]},
+            newcomer.store.read(newcomer.key),
+        )
+        return response(memories=[fact("I like rockets.", text="Likes rockets.")])
+
+    newcomer.model.client.complete.side_effect = late
+    newcomer.welcome.respond("I like rockets.", "persona")
+    assert not newcomer.store.read(newcomer.key)["items"]
+    assert newcomer.welcome.state()["history"] == []
+    newcomer.model.client.complete.side_effect = lambda *args, **kwargs: (
+        newcomer.close() or response()
+    )
+    newcomer.welcome.respond("REPRENDRE ACCUEIL", "persona")
+    with newcomer.registry.connection() as db:
+        assert (
+            db.execute(
+                "SELECT status FROM user_onboarding WHERE user_id=?",
+                (newcomer.user.id,),
+            ).fetchone()[0]
+            == "paused"
+        )
+
+
+def test_api_failure_pauses_without_blocking_ordinary_chat(newcomer):
+    newcomer.model.client.complete.side_effect = GmailError("PRIVATE PROVIDER RESPONSE")
+    result = newcomer.welcome.respond(None, "persona", start=True)
+    assert "PRIVATE" not in result["display"]
+    assert not newcomer.welcome.should_greet()
+    assert newcomer.welcome.respond("Hello", "persona") is None
+
+
+def test_other_user_isolated_and_version_mismatch_preserves_state(newcomer):
+    run(newcomer)
+    other = sessions.MemorySession("Bob", root=newcomer.store.root, model=Mock())
+    try:
+        assert other.welcome.state()["history"] == []
+        with other.registry.connection() as db:
+            db.execute(
+                "UPDATE user_onboarding SET version=999 WHERE user_id=?",
+                (other.user.id,),
+            )
+        assert not other.welcome.should_greet()
+        with pytest.raises(memory.MemoryProblem):
+            other.welcome.respond("Hello", "persona")
+        assert newcomer.welcome.state()["history"]
+    finally:
+        other.close()
