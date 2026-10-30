@@ -15,7 +15,12 @@ Implementation sequence:
 
 Contract: one optional question at a time. Use the selected personality unchanged;
 introduce its vintage mainframe resources enthusiastically while describing real
-capabilities truthfully. Follow the user's age/life stage and interests rather
+capabilities truthfully. Explicitly bridge into “faisons connaissance”, then lead
+with a broad personal question about who the user is, rather than asking them to
+choose a subject or repeat their name. Each continuing reply responds to their
+answer and ends with one concrete follow-up question; inviting them to elaborate
+on the same subject is welcome. A genuine finish, pause or handoff need not ask
+another question. Follow the user's age/life stage and interests rather
 than a fixed questionnaire. Suggested topics: age or optional birthday, family,
 school/work/daily life, friends, interests, preferences and desired help. No demand
 for full names, contact details, precise location, school identity or exact birth
