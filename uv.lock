@@ -670,6 +670,7 @@ name = "minitel-gpt"
 version = "0.0.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "flask" },
     { name = "pyfiglet" },
     { name = "pyserial" },
@@ -679,7 +680,6 @@ dependencies = [
 
 [package.optional-dependencies]
 gmail = [
-    { name = "cryptography" },
     { name = "google-auth" },
     { name = "google-auth-oauthlib" },
 ]
@@ -700,7 +700,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "bleak", marker = "extra == 'printer'", specifier = ">=1,<4" },
-    { name = "cryptography", marker = "extra == 'gmail'", specifier = ">=38" },
+    { name = "cryptography", specifier = ">=38" },
     { name = "flask", specifier = ">=3.1,<4" },
     { name = "google-auth", marker = "extra == 'gmail'", specifier = "==2.62.0" },
     { name = "google-auth-oauthlib", marker = "extra == 'gmail'", specifier = "==1.5.0" },
