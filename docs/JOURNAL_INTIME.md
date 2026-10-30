@@ -31,7 +31,8 @@ day is displayed, without an API call. An empty journal displays a short prompt.
 | `Montre-moi dimanche dernier` | Interpret only the date through AI, then read the day locally |
 | `EFFACER AUJOURD'HUI`, then `OUI` | Delete today's whole entry, preserving all other days |
 | `MOT DE PASSE` | Verify the current password; enter the new password twice; re-encrypt |
-| `QUITTER`, `LOGOUT`, SOMMAIRE, RETOUR | Close and clear the private mode; LOGOUT also leaves the profile |
+| `QUITTER`, `LOGOUT`, SOMMAIRE | Close and clear the private mode; LOGOUT also leaves the profile |
+| RETOUR | Previous document page; during password input or a pending request, leave the private mode |
 
 Colon shortcuts are accepted at the beginning of a submitted line:
 
@@ -57,7 +58,15 @@ Full command words remain valid. ENVOI submits input and does not approve a save
 by itself. ANNULATION clears the current input, including a hidden password
 field; it does not abandon the draft. `A:` explicitly cancels the pending draft.
 
-SUITE reads subsequent pages. Saving requires displaying all proposal pages;
+Every document page accepts commands immediately. SUITE goes forward; RETOUR
+goes backward, including from the last page. At a boundary the current page stays
+visible. A page counter identifies the current position. Partially typed input
+survives navigation; ANNULATION clears it. Navigation reuses loaded text and
+does not call Mistral or reload the file. The web console has the same next/
+previous navigation and command entry without disabling the field on early pages.
+
+Saving requires displaying all proposal pages, then explicitly entering E: or
+ENREGISTRER from any page. Returning to a previous page does not undo that review;
 revisions invalidate that review. A new proposal defaults to today's date even
 while viewing an older day. Each save appends a blank-line-separated paragraph
 under that date. Past days are read-only through the terminal or web console.

@@ -14,25 +14,25 @@ input,button{font:inherit;padding:.6em;max-width:100%;box-sizing:border-box}inpu
 <pre id=output role=status>Choisissez un profil et ouvrez son journal.</pre>
 <form id=commands autocomplete=off hidden>
 <label id=label for=field>Saisie</label><input id=field type=password autocomplete=off maxlength=2000>
-<button id=submit>ENVOI</button><button id=next type=button hidden>SUITE</button>
+<button id=submit>ENVOI</button><button id=previous type=button hidden>RETOUR</button><button id=next type=button hidden>SUITE</button>
 <button id=lock type=button>VERROUILLER</button></form>
 <script>
 const csrf={{csrf_token()|tojson}};
 let timer=null,epoch=0,busy=false,opened=false,lastTouch=0;
-const output=document.getElementById('output'),choose=document.getElementById('choose'),commands=document.getElementById('commands'),field=document.getElementById('field'),next=document.getElementById('next');
+const output=document.getElementById('output'),choose=document.getElementById('choose'),commands=document.getElementById('commands'),field=document.getElementById('field'),next=document.getElementById('next'),previous=document.getElementById('previous');
 function clearPrivate(){++epoch;opened=false;field.value='';field.type='password';output.textContent='Journal verrouillé.';commands.hidden=true;choose.hidden=false;clearTimeout(timer);}
 function lock(){clearPrivate();fetch('/journal-api',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({action:'lock'}),keepalive:true}).catch(()=>{});}
 function arm(ms){clearTimeout(timer);timer=setTimeout(lock,Math.max(0,ms));}
 async function send(action,text=''){
  if(busy&&action!=='lock')return;
- const ticket=epoch;busy=true;document.getElementById('submit').disabled=true;
+ const ticket=epoch,keepInput=action==='next'||action==='previous';busy=true;document.getElementById('submit').disabled=true;
  try{
   const response=await fetch('/journal-api',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({action:action,text:text,username:document.getElementById('username').value})});
   const data=await response.json();if(ticket!==epoch)return;
   if(!response.ok||data.closed){clearPrivate();output.textContent=data.display||'Journal indisponible.';return;}
-  opened=true;choose.hidden=true;commands.hidden=false;field.value='';field.type=data.secret?'password':'text';
+  opened=true;choose.hidden=true;commands.hidden=false;if(!keepInput)field.value='';field.type=data.secret?'password':'text';
   document.getElementById('label').textContent=data.secret?'Mot de passe (saisie masquée)':'Commande ou texte';
-  output.textContent=data.display;next.hidden=!data.more;field.disabled=!!data.more;
+  output.textContent=data.display;next.hidden=!data.more;previous.hidden=!data.previous;field.disabled=false;
   arm(data.expires_in);field.focus();
  }catch(error){if(ticket===epoch)lock();}
  finally{if(ticket===epoch){busy=false;document.getElementById('submit').disabled=false;}else busy=false;}
@@ -40,6 +40,7 @@ async function send(action,text=''){
 choose.addEventListener('submit',event=>{event.preventDefault();send('open');});
 commands.addEventListener('submit',event=>{event.preventDefault();const text=field.value;field.value='';send('command',text);});
 next.addEventListener('click',()=>send('next'));
+previous.addEventListener('click',()=>send('previous'));
 document.getElementById('lock').addEventListener('click',lock);
 field.addEventListener('input',()=>{
  if(!opened)return;arm(300000);

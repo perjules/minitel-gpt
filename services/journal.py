@@ -146,6 +146,7 @@ class Session:
         self.delete_pending = None
         self.deadline = 0
         self.pages, self.page, self.page_review = [], 0, None
+        self.page_seen = set()
 
     @property
     def secret(self):
@@ -188,6 +189,7 @@ class Session:
             self.days, self.draft, self.delete_pending = {}, None, None
             self.deadline = 0
             self.pages, self.page, self.page_review = [], 0, None
+            self.page_seen = set()
 
     def check(self):
         if self.stage == "closed" or self.clock() >= self.deadline:

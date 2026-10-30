@@ -57,11 +57,17 @@ except ImportError:
     )
 
 try:
-    from . import journal, journal_terminal, rose, rose_terminal
+    from . import journal, journal_terminal, rose, rose_terminal, terminal_documents
 except ImportError:
     # Direct systemd script: share the package identity with the rose adapter.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from services import journal, journal_terminal, rose, rose_terminal
+    from services import (
+        journal,
+        journal_terminal,
+        rose,
+        rose_terminal,
+        terminal_documents,
+    )
 
 # Translittération vers ASCII affichable sur Minitel (é→e, œ→oe, …) :
 # évite les « ? » que produisait encode('ascii','replace').
@@ -1356,9 +1362,14 @@ def run_session(t):
         else:
             show_question_prompt(t, question_msg)
 
+        queued_question = None
         while True:  # boucle conversation
-            question, action = read_question(t, calculator_mode=calc.mode or school_mode.mode,
-                                             navigation_mode=school_mode.grade_view)
+            if queued_question is not None:
+                question, action = queued_question, 'envoi'
+                queued_question = None
+            else:
+                question, action = read_question(t, calculator_mode=calc.mode or school_mode.mode,
+                                                 navigation_mode=school_mode.grade_view)
             if action == 'guide':
                 show_guide(t, language)
                 break          # retour au sommaire après l'écran d'aide
@@ -1641,8 +1652,19 @@ def run_session(t):
                 memory.record("assistant", answer, channel, factual=response.get("factual"))
             elif not (response and (response.get("turn") or {}).get("private")):
                 memory.record("assistant", answer, channel)
-            result = (show_calculator_scene(t, response["scene"], language)
-                      if response and response.get("scene") else show_response(t, safe_display(answer), language))
+            mail_document = channel == "gmail" and mail is not None and bool(
+                mail.items or mail.selected or mail.draft or mail.composition or mail.recipient_choices)
+            if mail_document:
+                ticket = response.get("review_ticket") if response else None
+                if ticket:
+                    review_ticket = ticket
+                queued_question, result = terminal_documents.read(
+                    t, answer, language,
+                    reviewed=(lambda mail=mail, ticket=ticket: mail.acknowledge(ticket)) if ticket else None,
+                )
+            else:
+                result = (show_calculator_scene(t, response["scene"], language)
+                          if response and response.get("scene") else show_response(t, safe_display(answer), language))
             if response and response.get('scene') and result != 'done':
                 memory.record('event', 'Scene CALC interrompue: ' + result, 'session')
             if result == 'guide':
@@ -1653,6 +1675,9 @@ def run_session(t):
                 show_response(t, safe_display(calculator.content(language)["cancelled"]), language)
             if result in ('sommaire', 'timeout'):
                 break
+
+            if queued_question is not None:
+                continue
 
             if mail is not None and response and response.get("review_ticket"):
                 review_ticket = response["review_ticket"]

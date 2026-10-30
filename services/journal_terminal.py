@@ -4,7 +4,14 @@ import threading
 import time
 from queue import Empty, Queue
 
-from . import journal, journal_store, persistent_memory, rose_terminal, terminal_link
+from . import (
+    journal,
+    journal_store,
+    persistent_memory,
+    rose_terminal,
+    terminal_documents,
+    terminal_link,
+)
 
 
 def read_field(term, session):
@@ -160,13 +167,34 @@ def interact(term, session):
     # Echo stays disabled from before the first password prompt to final clear.
     # Only nonsecret fields are echoed explicitly, once, by this adapter.
     pending = None
+
+    def check():
+        with session.lock:
+            session.check()
+
+    def touch():
+        with session.lock:
+            session.check()
+            session.touch()
+
     try:
         result = session.open()
         while True:
-            action = display(term, session, result)
-            if action != "done":
-                return action, pending
-            text, action = read_field(term, session)
+            if session.secret:
+                action = display(term, session, result)
+                if action != "done":
+                    return action, pending
+                text, action = read_field(term, session)
+            else:
+                token = result.get("review")
+                text, action = terminal_documents.read(
+                    term, result["display"], echo=True, check=check, touch=touch,
+                    reviewed=(lambda token=token: session.acknowledge(token)) if token else None,
+                )
+                if action == "guide":
+                    text, action = "AIDE", "submit"
+                elif action == "envoi":
+                    action = "submit"
             if action == "overflow":
                 result = session.result(
                     "Saisie trop longue. Recommencez (2000 caractères maximum)."

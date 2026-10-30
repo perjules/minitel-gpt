@@ -549,6 +549,11 @@ class MailSession:
             }
             if code in useful:
                 message = useful[code]
+            if code == "review_current_draft_first" and self.draft:
+                # Let an early send attempt return to the actual pending draft,
+                # rather than stranding its unread pages behind an error screen.
+                return {"display": message + "\n\n" + self.edit_preview(self.draft) + "\n\n" + DRAFT_ACTIONS,
+                        "turn": None, "review_ticket": self.draft["ticket"]}
             return {"display": message, "turn": None}
         finally:
             with self.lock:

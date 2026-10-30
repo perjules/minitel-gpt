@@ -37,6 +37,24 @@ account permissions, stale-ticket and duplicate-send checks as ENVOYER. The
 ANNULATION function key clears the current input; `A:` cancels the draft itself.
 Both the web test console and physical terminal use these same session rules.
 
+## Document navigation
+
+Mail lists, search results, selected messages and draft previews accept a command
+on every physical page: there is no need to finish the document before entering
+`L: 1`, `REPONDRE ...`, `M: ...`, `A:` or another supported command. SUITE moves
+forward and RETOUR moves backward, including from the last page. Boundaries stay
+on the current page. The page counter and input prompt remain available, and
+partially typed input survives page changes. SOMMAIRE leaves the session.
+
+Paging operates on the already loaded document: it does not refetch Gmail or call
+AI. Incoming mail/list pages need not all be read before selecting or replying.
+Outgoing drafts still require displaying every page of the current preview and
+explicit send approval; after full review, sending is permitted from any page.
+An early send refusal redisplays the pending draft so its remaining pages can be
+reviewed. Revisions retain their existing stale-ticket and review invalidation.
+The web mail console already provides previous/next buttons and command input
+on each page; these same approval rules continue to apply.
+
 ## Validation status
 
 The full suite passes **623 offline tests** (28 October 2026), including mocked REST/model responses,

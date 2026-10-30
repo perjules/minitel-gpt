@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const script = JSON.parse(fs.readFileSync(0, 'utf8')).script;
-const elements = Object.fromEntries(['output','choose','commands','field','next','submit','username','label','lock']
+const elements = Object.fromEntries(['output','choose','commands','field','next','previous','submit','username','label','lock']
  .map(id=>[id,{value:'',type:'password',hidden:false,disabled:false,textContent:'',events:{},
  addEventListener(event,fn){this.events[event]=fn;},focus(){}}]));
 global.document={getElementById:id=>elements[id]};
@@ -25,6 +25,17 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
  await privateSend('open');
  assert.equal(elements.field.type,'password');
  assert.equal(elements.commands.hidden,false);
+ nextResult={closed:false,secret:false,display:'FIRST PAGE',more:true,previous:false,expires_in:300000};
+ await privateSend('command','T: long text');
+ assert.equal(elements.field.disabled,false); // Commands are accepted before the last page.
+ elements.field.value='M: partially typed';
+ nextResult={closed:false,secret:false,display:'SECOND PAGE',more:false,previous:true,expires_in:300000};
+ await privateSend('next');
+ assert.equal(elements.field.value,'M: partially typed');
+ assert.equal(elements.previous.hidden,false);
+ nextResult={closed:false,secret:false,display:'FIRST PAGE',more:true,previous:false,expires_in:300000};
+ await privateSend('previous');
+ assert.equal(elements.field.value,'M: partially typed');
  elements.field.value='synthetic secret';
  nextResult={closed:false,secret:false,display:'PRIVATE DAY',expires_in:300000};
  elements.commands.events.submit({preventDefault(){}});

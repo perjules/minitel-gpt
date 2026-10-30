@@ -138,11 +138,40 @@ def test_browser_auth_csrf_transport_reopen_and_idle_expiry(console):
 def test_reading_another_screen_does_not_approve_an_unseen_draft(console):
     client, headers, _ = console
     private = create(client, headers)
-    result = api(client, headers, "command", text="TEXTE : " + "Private long text. " * 80)
+    result = api(
+        client, headers, "command", text="TEXTE : " + "Private long text. " * 80
+    )
     assert result.json["more"] and not private.draft["reviewed"]
     api(client, headers, "command", text="LIRE HIER")
     assert not private.draft["reviewed"]
-    assert "Relisez" in api(client, headers, "command", text="ENREGISTRER").json["display"]
+    assert (
+        "Relisez" in api(client, headers, "command", text="ENREGISTRER").json["display"]
+    )
+
+
+def test_browser_journal_commands_on_first_page_and_previous_after_last(console):
+    client, headers, _ = console
+    private = create(client, headers)
+    result = api(
+        client, headers, "command", text="T: " + "A long private paragraph. " * 65
+    )
+    assert result.json["more"] and not private.draft["reviewed"]
+    first = result.json["display"]
+    api(client, headers, "next")
+    result = api(client, headers, "previous")
+    assert result.json["display"] == first and result.json["page"] == 1
+    assert not private.draft["reviewed"]
+    assert "Relisez" in api(client, headers, "command", text="E:").json["display"]
+    while private.page < len(private.pages) - 1:
+        api(client, headers, "next")
+    assert private.draft["reviewed"]
+    api(client, headers, "previous")
+    assert "enregistrée" in api(client, headers, "command", text="E:").json["display"]
+    assert private.days
+    # Cancelling a different, unread proposal is also allowed on its first page.
+    api(client, headers, "command", text="T: " + "Another paragraph. " * 80)
+    api(client, headers, "command", text="A:")
+    assert private.draft is None
 
 
 def test_chat_keyword_routes_before_welcome_memory_or_ai(console, monkeypatch):

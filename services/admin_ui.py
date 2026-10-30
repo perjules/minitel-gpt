@@ -2495,7 +2495,7 @@ def journal_api():
     if not journal_transport():
         return journal_response({"closed": True, "display": "HTTPS ou localhost requis."}, 403)
     data = request.get_json(silent=True)
-    if not isinstance(data, dict) or data.get("action") not in {"open", "command", "next", "lock", "touch"}:
+    if not isinstance(data, dict) or data.get("action") not in {"open", "command", "next", "previous", "lock", "touch"}:
         return journal_response({"closed": True, "display": "Requête invalide."}, 400)
     action = data["action"]
     identifier = session.get("private_journal")
@@ -2532,8 +2532,8 @@ def journal_api():
                 if action == "touch":
                     item.touch()
                     return journal_response({"closed": False})
-                if action == "next":
-                    item.page = min(item.page + 1, len(item.pages) - 1)
+                if action in {"next", "previous"}:
+                    item.page = max(0, min(item.page + (1 if action == "next" else -1), len(item.pages) - 1))
                     item.touch()
                     result = None
             if action == "command":
@@ -2545,10 +2545,13 @@ def journal_api():
             if result is not None:
                 item.pages, item.page = gmail_mail.pages(result["display"]), 0
                 item.page_review = result.get("review")
-            if item.page_review and item.page == len(item.pages) - 1:
+                item.page_seen = set()
+            item.page_seen.add(item.page)
+            if item.page_review and len(item.page_seen) == len(item.pages):
                 item.acknowledge(item.page_review)
             return journal_response({"display": item.pages[item.page], "secret": item.secret,
                                      "closed": False, "more": item.page < len(item.pages) - 1,
+                                     "previous": item.page > 0, "page": item.page + 1, "pages": len(item.pages),
                                      "expires_in": max(0, int((item.deadline - item.clock()) * 1000))})
     except (journal.JournalError, memory_session.memory.MemoryProblem) as error:
         discard_journal(identifier)
