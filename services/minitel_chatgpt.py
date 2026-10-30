@@ -575,7 +575,7 @@ def call_answer(system_prompt, history, language, options, knowledge,
     if mail is not None and mail.interested(history[-1]["content"]):
         response = mail.handle(history[-1]["content"], review_ticket, timeout)
         if not response.get("passthrough"):
-            return response
+            return {**response, "gmail": True}
     if calc is not None and not blocked:
         result = calc.handle(question, language, generate=lambda expr, lang:
                              calculator.generate_scene(expr, lang, MISTRAL_KEY, MISTRAL_MODEL))
@@ -1371,9 +1371,9 @@ def run_session(t):
                 answer += "\n\n" + warning
             channel = ("theatre" if response and response.get("calculator") else
                        "memory" if response and response.get("memory") else
-                       "gmail" if response and response.get("review_ticket") else "chat")
+                       "gmail" if response and (response.get("gmail") or response.get("review_ticket")) else "chat")
             if not private_question and not (response and (response.get("turn") or {}).get("private")):
-                memory.record("user", question)
+                memory.record("user", question, channel)
             if response and response.get("calculator"):
                 memory.record("assistant", answer, channel, factual=response.get("factual"))
             elif not (response and (response.get("turn") or {}).get("private")):

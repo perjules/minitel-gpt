@@ -113,7 +113,7 @@ def seal_legacy(store, folder, user_id):
         if json.loads(raw).get("version") == 2:
             return
     except (ValueError, AttributeError):
-        raise memory.MemoryProblem("Ancien fichier mémoire illisible; fichier conservé.") from None
+        raise memory.MemoryProblem("Ancien fichier mémoire illisible. Les données existantes sont conservées.") from None
     backup = folder / "memory.before-sqlite.json"
     if backup.exists():
         if backup.is_symlink() or backup.read_bytes() != raw:

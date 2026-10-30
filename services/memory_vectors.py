@@ -129,7 +129,7 @@ def ordered(store, key, data, question, recent, embeddings):
             except ValueError:
                 continue
         if usable and memory.redact(question) == question:
-            context = "\n".join(r["text"][:500] for r in recent[-2:])
+            context = "\n".join(r["text"][:500] for r in recent[-2:] if r.get("channel", "chat") == "chat")
             query = question[:2000] + ("\nRecent context: " + context if context else "")
             vector = embeddings.embed([query])[0]
             for item, saved in usable:

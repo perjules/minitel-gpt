@@ -652,12 +652,15 @@ def llm_answer(system_prompt, user_message, knowledge="", selected=None):
     if selected is not None:
         school = user_services.ProfileSchool(school, selected.user, selected.registry)
         if school.denied(user_message):
+            selected.private_turn = True
             return 'PRONOTE: aucun accès attribué à ce profil.'
     options = mistral_answers.settings({**os.environ, **read_env()})
     if options[0] == "conversations":
         result = mistral_answers.answer(history, "fr", key, mistral_model(),
                                         options[1], options[2], knowledge,
                                         **({"pronote": school} if school.tools() else {}))
+        if selected is not None:
+            selected.private_turn = bool(result.get("private"))
         return (mistral_answers.notice(result["status"], "fr")
                 or pronote_answers.render(result, "fr", full_urls=True))
     messages = [{"role": "system", "content": system_prompt}] + history
@@ -1526,7 +1529,12 @@ def test_preset_route():
                 selected.close()
                 discard_memory(session.get("memory_session"))
                 return jsonify(ok=True, answer="Session effacée. Choisissez un nom ou laissez vide; la mémoire enregistrée est conservée.")
-            selected.record("user", msg)
+            selected.private_turn = False
+            try:
+                private_question = pronote_answers.school_question(
+                    [{"role": "user", "content": msg}], pronote.backend().config().get("children", {}))
+            except pronote.PronoteError:
+                private_question = True
             language = selected.saved_language() or "fr"
             calc = selected.calculator
             result = None
@@ -1536,7 +1544,7 @@ def test_preset_route():
             if result is None:
                 result = selected.handle(msg, language) if selected.interested(msg) else {"passthrough": True}
             if result.get("passthrough"):
-                remembered = selected.context(msg)
+                remembered = "" if private_question else selected.context(msg)
                 answer = llm_answer(system + "\n\n" + remembered, msg, knowledge=kb + "\n\n" + remembered, selected=selected)
             else:
                 answer = result["display"]
@@ -1544,10 +1552,10 @@ def test_preset_route():
             warning = selected.take_warning()
             if warning:
                 answer += "\n\n" + warning
-            if result.get("calculator"):
-                selected.record("assistant", answer, "theatre", factual=result.get("factual"))
-            else:
-                selected.record("assistant", answer, "chat" if result.get("passthrough") else "memory")
+            if not private_question and not selected.private_turn:
+                channel = "theatre" if result.get("calculator") else "chat" if result.get("passthrough") else "memory"
+                selected.record("user", msg, channel)
+                selected.record("assistant", answer, channel, factual=result.get("factual"))
         # The browser preview retains exact URLs, including Unicode paths.
         conversations = (llm_provider() == "mistral" and
                          mistral_answers.settings({**os.environ, **read_env()})[0] == "conversations")

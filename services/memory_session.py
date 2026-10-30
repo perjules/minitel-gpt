@@ -2,15 +2,17 @@
 
 import json
 import re
+import secrets
 import threading
 import time
 
 try:
-    from . import memory_vectors, user_registry
+    from . import memory_automation, memory_vectors, user_registry
     from . import persistent_memory as memory
     from .gmail_auth import GmailError
     from .gmail_mail import MailModel
 except ImportError:
+    import memory_automation
     import memory_vectors
     import persistent_memory as memory
     import user_registry
@@ -142,6 +144,7 @@ class MemorySession:
             raise memory.MemoryProblem("Profil indisponible ou désactivé.") from None
         self.key, self.username = self.user.memory_key, self.user.display_name
         self.label = "mémoire de " + self.username
+        self.session_id = secrets.token_hex(12)
         self.model = model or MemoryModel()
         self.embeddings = memory_vectors.Embeddings(lambda: self.model.client.profile()["key"])
         self.lock = threading.RLock()
@@ -160,6 +163,13 @@ class MemorySession:
             self.journal.append("event", "Session ouverte: " + self.label, "session")
         except memory.MemoryProblem as error:
             self.journal = None
+            self.warning = str(error)
+        try:
+            if self.store:
+                self.store.read(self.key)
+                memory_automation.ready(self.store, self.key, self.session_id)
+                memory_automation.kick(self.store, self.model, self.embeddings)
+        except memory.MemoryProblem as error:
             self.warning = str(error)
 
     def active(self):
@@ -180,6 +190,12 @@ class MemorySession:
         with self.lock:
             if not self.closed:
                 self.record("event", "Session terminée", "session")
+                try:
+                    if self.store:
+                        memory_automation.ready(self.store, self.key)
+                        memory_automation.kick(self.store, self.model, self.embeddings)
+                except memory.MemoryProblem as error:
+                    self.warning = str(error)
                 self.closed = True
                 self.pending, self.last_answer, self.recent = None, "", []
 
@@ -193,12 +209,19 @@ class MemorySession:
                     usable, self.journal.extra_secrets if self.journal else ()
                 )
                 if role in {"user", "assistant"}:
-                    self.recent.append({"role": role, "text": safe[:2000]})
+                    self.recent.append({"role": role, "text": safe[:2000], "channel": channel})
                     self.recent = self.recent[-6:]
                     if role == "assistant":
                         self.last_answer = safe
             elif role == "assistant":
                 self.last_answer = ""
+            if role == "user" and channel == "chat" and usable is not None:
+                try:
+                    if safe == usable and not explicit_request(safe) and not shared_request(safe):
+                        memory_automation.enqueue(self.store, self.key, self.session_id, safe)
+                        memory_automation.kick(self.store, self.model, self.embeddings)
+                except memory.MemoryProblem as error:
+                    self.warning = str(error)
             if self.journal:
                 try:
                     self.journal.append(role, text, channel)
@@ -579,6 +602,7 @@ class MemorySession:
                         "Le modèle n'a vu qu'un extrait de cette note longue. Donnez un remplacement complet : REMPLACE ENTIEREMENT la note nom par : texte."
                     )
             item, result = self.store.apply(self.key, proposal, snapshot)
+            memory_automation.kick(self.store, self.model, self.embeddings)
             self.pending = None
         return {
             "display": result

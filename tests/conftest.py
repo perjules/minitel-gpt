@@ -37,3 +37,10 @@ def console(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def isolated_user_registry(tmp_path, monkeypatch):
     monkeypatch.setenv('MINITEL_MEMORY_DIR',str(tmp_path / 'private-users'))
+
+
+@pytest.fixture(autouse=True)
+def no_memory_background_network(monkeypatch):
+    # Individual automation tests call the bounded worker synchronously with mocks.
+    from services import memory_automation
+    monkeypatch.setattr(memory_automation, "kick", lambda *args: None)
