@@ -4,6 +4,12 @@ Names select profiles; they do not authenticate the operator. Anyone knowing a
 name can select that profile until passwords are implemented. Administration
 continues to require ADMIN_PASSWORD and CSRF tokens.
 
+The [journal intime](JOURNAL_INTIME.md) has its own password-encrypted document
+and independent unlock, available to named profiles only. It creates no file
+until that user first sets up the feature. Neither selecting a profile nor the
+admin password grants decryption access. The confirmed whole-profile deletion
+also removes its encrypted journal; independent backups remain separate.
+
 Blank input selects the reserved MinitelGPT profile. An unfamiliar name creates a
 profile with no Gmail or PRONOTE access. Existing name normalization and memory
 namespaces are retained. Display-name changes retain stable user and memory IDs.

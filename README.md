@@ -235,6 +235,16 @@ connexion et n'est pas rejoué après SOMMAIRE ou LOGOUT. Les journaux de conver
 visibles sont conservés séparément sur le Pi, hors Git. Voir le guide pour
 le test admin, le stockage et l'acceptation avant validation physique.
 
+### Journal intime
+
+`JOURNAL INTIME` ouvre un [journal personnel chiffré](docs/JOURNAL_INTIME.md),
+avec son propre mot de passe saisi deux fois à la création, sans règle de force.
+L’IA propose des paragraphes à relire avant `ENREGISTRER`; `TEXTE :` permet une
+saisie exacte sans API. Lecture par date, modification/suppression d’aujourd’hui,
+changement de mot de passe et verrouillage après cinq minutes d’inactivité.
+Son contenu ne rejoint jamais les conversations ordinaires ni la mémoire.
+La console privée est accessible depuis Services → Journal intime.
+
 ### Mettre à jour le code (après installation)
 
 Le plus simple : depuis l'**admin web** → onglet **Paramètres** → *Vérifier les
