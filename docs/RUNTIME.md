@@ -199,8 +199,16 @@ Unexpected application errors still retain their traceback and systemd restart.
 
 An idle read is not an error. The powered USB adapter may remain usable while the
 Minitel is off: the program cannot infer screen power from a successful port open.
-No speculative presence probes are sent. Switch the Minitel on and use SOMMAIRE
-to redraw if its power cycle was invisible to the adapter.
+After the first SOMMAIRE, terminal-status queries can detect loss of a previously
+responsive terminal. Three missed replies retire that link; terminals that never
+answer retain keyboard operation without status-based power detection. These
+queries are paused while the boot screen and its thirty-second continuation wait
+are shown, then resume with a fresh reply deadline before login. A delayed status
+reply during boot must not abandon the screen and return to waiting for SOMMAIRE.
+Keyboard and partial-control-sequence deadlines use monotonic elapsed time so
+system clock synchronization cannot stretch or shorten that countdown. Physical
+serial I/O failures still use the normal recovery path. Use SOMMAIRE to redraw
+if a power cycle was invisible to the adapter.
 
 Detected transport loss discards the interactive session, invalidates Gmail
 review tickets, and closes the memory session. Late worker responses cannot

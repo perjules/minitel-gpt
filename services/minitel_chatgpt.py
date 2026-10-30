@@ -398,7 +398,15 @@ class Term:
 
     def start_presence(self):
         # Begin only after the first SOMMAIRE, never disturb the power-on screen.
+        self._presence_deadline = None
+        self._presence_misses = 0
         self._presence_due = time.monotonic()
+
+    def pause_presence(self):
+        # A busy terminal may defer status replies while rendering the boot screen.
+        self._presence_due = float("inf")
+        self._presence_deadline = None
+        self._presence_misses = 0
 
     def poll_presence(self):
         """STUM terminal status: PRO1 70 -> PRO2 71 status (no screen output).
@@ -432,7 +440,8 @@ class Term:
         self._presence_deadline = None
 
     def keyboard_activity(self):
-        if getattr(self, "_presence_enabled", False):
+        if (getattr(self, "_presence_enabled", False)
+                and self._presence_due != float("inf")):
             # A real key also proves liveness, including during slow page output.
             self._presence_deadline = None
             self._presence_misses = 0
@@ -481,8 +490,8 @@ class Term:
 
     def read_key(self, timeout):
         """Lit une touche. Retourne ('char', c) ou ('fn', code) ou ('timeout', None)."""
-        end = time.time() + timeout
-        while time.time() < end:
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
             terminal_link.check_worker(getattr(self, "_pending", None))
             self.poll_presence()
             b = self.read_byte()
@@ -491,8 +500,8 @@ class Term:
             if b == SEP:
                 # Mode Videotex (Minitel 1) : SEP + code touche
                 code = self.read_byte()
-                t2 = time.time() + 0.5
-                while code is None and time.time() < t2:
+                t2 = time.monotonic() + 0.5
+                while code is None and time.monotonic() < t2:
                     code = self.read_byte()
                 if code is None:
                     continue          # SEP parasite → ignorer, ne pas bloquer
@@ -502,8 +511,8 @@ class Term:
             if b == ESC:
                 # Mode péri-info (Minitel 2) : touche fonction en VT100 "ESC O x"
                 b2 = self.read_byte()
-                t2 = time.time() + 0.5
-                while b2 is None and time.time() < t2:
+                t2 = time.monotonic() + 0.5
+                while b2 is None and time.monotonic() < t2:
                     b2 = self.read_byte()
                 if b2 in (0x39, 0x3A, 0x3B):
                     # Consume complete PRO1/2/3 replies, including scroll ACKs.
@@ -511,8 +520,8 @@ class Term:
                     payload = []
                     for _ in range(b2 - 0x38):
                         reply = self.read_byte()
-                        t3 = time.time() + 0.5
-                        while reply is None and time.time() < t3:
+                        t3 = time.monotonic() + 0.5
+                        while reply is None and time.monotonic() < t3:
                             reply = self.read_byte()
                         if reply is None:
                             break
@@ -522,8 +531,8 @@ class Term:
                     continue
                 if b2 == 0x4F:        # 'O' → séquence SS3
                     code = self.read_byte()
-                    t3 = time.time() + 0.5
-                    while code is None and time.time() < t3:
+                    t3 = time.monotonic() + 0.5
+                    while code is None and time.monotonic() < t3:
                         code = self.read_byte()
                     if code in SS3_MAP:
                         self.keyboard_activity()
@@ -869,6 +878,7 @@ def prepare_boot(language):
 
 def show_boot(t: Term, language, lines=None):
     """Fictional diagnostics, then SUITE or 30 seconds opens login."""
+    t.pause_presence()
     t.clear()
     try:
         t.w(SCROLL_ON)
@@ -896,6 +906,7 @@ def show_boot(t: Term, language, lines=None):
     finally:
         # Restore page mode for the existing menus and paginated answers.
         t.w(SCROLL_OFF)
+        t.start_presence()
 
 
 def prepare_update_text(preview, language, *, procedure=False):

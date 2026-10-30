@@ -19,6 +19,66 @@ class ReadTimeout(Exception):
     """A simulated idle read, distinct from an OS transport failure."""
 
 
+@pytest.mark.parametrize("clock_jump", [0, -3600, 3600])
+@pytest.mark.parametrize("status_support", [True, False])
+def test_real_decoder_auto_boot_continues_despite_clock_adjustment_and_quiet_status(
+    monkeypatch, clock_jump, status_support
+):
+    """A live but busy terminal answers status once, then stays quiet through boot."""
+    now = [0.0]
+    monkeypatch.setattr(chat.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(chat.time, "time", lambda: 1_000_000 + now[0] + (clock_jump if now[0] >= 10 else 0))
+    monkeypatch.setattr(chat.time, "sleep", lambda seconds: now.__setitem__(0, now[0] + seconds))
+
+    class IdleSerial:
+        def __init__(self):
+            self.keys = deque(fn(chat.K_SOMMAIRE))
+            self.output = bytearray()
+            self.status_sent = False
+            self.probes = []
+            self.clears = []
+            self.countdown_at = None
+
+        def read(self, count):
+            if self.keys:
+                return bytes([self.keys.popleft()])
+            if status_support and now[0] >= 1 and not self.status_sent:
+                self.status_sent = True
+                self.keys.extend(b"\x1b\x3a\x71\x40")
+                return bytes([self.keys.popleft()])
+            if now[0] >= 32:
+                raise EndOfInput
+            now[0] += .1  # A real bounded serial read with no keyboard input.
+            return b""
+
+        def write(self, data):
+            self.output.extend(data)
+            if data == b"\x1b\x39\x70":
+                self.probes.append(now[0])
+            if data == bytes([chat.FF, chat.RS]):
+                self.clears.append(now[0])
+            if data == chat.BOOT_CONTINUE_PROMPT.encode():
+                self.countdown_at = now[0]
+
+    uart = IdleSerial()
+    term = chat.Term(uart)
+    term._presence_enabled = status_support
+    monkeypatch.setattr(chat, "prepare_boot", lambda language: chat.UI[language]["boot"])
+    monkeypatch.setattr(chat, "load_preset", lambda: ("persona", "MINITELGPT WELCOME", "Question", "Wait", None))
+    monkeypatch.setattr(chat, "build_title", lambda *args: ["LOGO"])
+    monkeypatch.setattr(chat.mainframe_update, "take_resume", lambda: False)
+    with pytest.raises(EndOfInput):
+        chat.run(term)
+    assert uart.countdown_at is not None
+    assert uart.clears[-1] - uart.countdown_at == pytest.approx(30, abs=.12)
+    assert "MINITELGPT WELCOME" in screen_text(uart.output)
+    assert "Nom / name" in screen_text(uart.output)
+    assert term._presence_enabled == status_support
+    assert term._presence_seen == status_support
+    assert all(instant >= uart.countdown_at + 30 for instant in uart.probes)
+    assert render_videotex(uart.output)[1] is False
+
+
 class FakeSerial:
     def __init__(self, keys):
         self.keys = deque(keys)

@@ -230,3 +230,20 @@ def test_status_reply_window_accounts_for_boot_bytes_still_queued_at_1200_baud(m
     assert term._presence_misses == 0
     term.presence_reply()
     assert term._presence_seen
+
+
+def test_paused_probe_stays_paused_on_keys_and_restarts_with_fresh_deadline(monkeypatch):
+    term, now, output = monitored_terminal(monkeypatch)
+    term._presence_seen = True
+    term._presence_deadline = 1
+    term._presence_misses = 2
+    term.pause_presence()
+    now[0] = 31
+    term.keyboard_activity()
+    term.poll_presence()
+    output.assert_not_called()
+    assert term._presence_deadline is None and term._presence_misses == 0
+    term.start_presence()
+    term.poll_presence()
+    output.assert_called_once_with(b"\x1b\x39\x70")
+    assert term._presence_seen and term._presence_deadline == 32
