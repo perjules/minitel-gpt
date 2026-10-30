@@ -57,6 +57,26 @@ restart automatically. MinitelGPT (blank name) is excluded.
 - `REPRENDRE ACCUEIL` / `RESUME INTRO` resumes a paused/declined phase.
 - CALC, MAIL, PRONOTE, printing and explicit memory commands keep their own routes.
 
+In **Services → Utilisateurs et accès**, each named profile has a confirmed
+**Réinitialiser l’accueil** button. It clears welcome completion, topic progress,
+turn count and the welcome model's dialogue history only. Saved memory, language,
+archives and access grants are preserved. The reserved blank-name MinitelGPT
+profile remains excluded. The welcome revision advances so an answer already in
+flight cannot overwrite the reset. No model call is made by the reset action.
+Reconnect the profile/use SOMMAIRE on the terminal, or press **Faire connaissance**
+in the test console, to receive a fresh introduction. REPRENDRE ACCUEIL by itself
+resumes existing progress; it does not reset a completed welcome.
+
+During the new welcome, clear current assertions take precedence over conflicting
+saved facts/preferences about the same detail, without requiring a correction
+keyword. The model proposes replacement using the supplied existing record ID
+and exact current-answer evidence; unrelated information is retained. Ambiguity
+calls for clarification. Python retains ownership/evidence checks and invalidates
+the changed text's vector. Accepted welcome memory changes also advance the memory
+barrier and discard older queued extraction work, preventing late learning from
+restoring a superseded fact. The welcome keeps its own dialogue history across
+that barrier change. The reset itself does not change this memory state.
+
 The optional directive uses the existing **general Mistral model/key**, with no
 web/tool access in the welcome call. Personality text is passed through unchanged;
 no owner preset/default text is edited. The structured output carries proposed

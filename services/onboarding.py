@@ -319,12 +319,18 @@ class Session:
                         "Accueil ou mémoire modifié; reformulez votre réponse."
                     )
                 memory_database.put_items(db, self.selected.user.id, data["items"])
+                barrier = state["barrier"]
+                if data["items"] != snapshot["items"]:
+                    # New personal assertions outrank older queued learning, as explicit edits do.
+                    barrier += 1
+                    db.execute(
+                        """UPDATE memory_state SET revision=revision+1,barrier=?,ready=0,
+ lease_until=0,lease_token='',retry_after=0,last_status='onboarding' WHERE user_id=?""",
+                        (barrier, self.selected.user.id),
+                    )
+                    db.execute("DELETE FROM memory_events WHERE user_id=?", (self.selected.user.id,))
                 db.execute(
-                    "UPDATE memory_state SET revision=revision+? WHERE user_id=?",
-                    (data["items"] != snapshot["items"], self.selected.user.id),
-                )
-                db.execute(
-                    """UPDATE user_onboarding SET status=?,revision=revision+1,progress=?,history=?,asked=?,turns=turns+? WHERE user_id=?""",
+                    """UPDATE user_onboarding SET status=?,revision=revision+1,progress=?,history=?,asked=?,turns=turns+?,barrier=? WHERE user_id=?""",
                     (
                         status,
                         json.dumps(progress),
@@ -336,6 +342,7 @@ class Session:
                         ),
                         plan["asked_topic"] or "",
                         bool(question),
+                        barrier,
                         self.selected.user.id,
                     ),
                 )
@@ -423,7 +430,14 @@ class Session:
             "preceding question, without inventing detail. Never memorize a refusal, an unasked "
             "inference, hypotheticals or anything the user says not to remember. No memories on "
             "greetings/skip controls. Preserve uncertainty/negation, avoid duplicates, use replace "
-            "only for clear corrections to supplied facts. "
+            "for a clear conflict with a supplied fact/preference about the SAME personal detail. "
+            "The newest clear personal assertion in current_reply takes precedence, including "
+            "during a restarted welcome: the user need not say 'actually' or explicitly request "
+            "a correction. Return replace with that saved record's actual ID, not a second "
+            "contradictory save. Preserve unrelated memories, notes and tasks. A new hobby can "
+            "coexist with older hobbies; do not treat every new detail as a contradiction. "
+            "If the conflict or who it refers to is ambiguous, ask for clarification instead "
+            "of guessing. Never change an older record without exact current-answer evidence. "
             "The supplied response_example and memory_item_example show the exact JSON layout. "
             "Always include every response key. A new memory uses operation save, id null and "
             "a verbatim quote copied from current_reply with current_event_id as an INTEGER. "

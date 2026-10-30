@@ -59,6 +59,15 @@ late enrollments and stale credential operations. OAuth attempts retain their
 user/account target, PKCE and state in bounded RAM. Reauthorization to a different
 Google mailbox is rejected; adding that mailbox requires a separate account.
 
+## Restart a profile's welcome
+
+**Services → Utilisateurs et accès → Réinitialiser l’accueil** restarts a named
+profile's welcome without deleting saved personal memory or changing access.
+Confirm the button, then reconnect/use SOMMAIRE or start Faire connaissance in
+the test console. New clear conflicting answers replace the corresponding older
+facts; unrelated memories remain. See [ONBOARDING.md](ONBOARDING.md) for the
+reset/resume distinction and handling of in-flight requests.
+
 ## Delete a test profile
 
 In **Services → Utilisateurs et accès**, expand **Supprimer le profil et toutes

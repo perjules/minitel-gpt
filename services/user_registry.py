@@ -195,6 +195,22 @@ COMMIT;""")
                 "Suppression incomplète : profil désactivé. Rechargez la page et réessayez."
             ) from None
 
+    def reset_onboarding(self, user_id, expected_revision):
+        """Restart only the optional welcome; preserve identity, grants and memory."""
+        if user_id == 1:
+            raise GmailError("reserved_user")
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT revision FROM users WHERE id=?", (user_id,)).fetchone()
+            if row is None:
+                raise GmailError("unknown_user")
+            if row[0] != expected_revision:
+                raise GmailError("user_changed")
+            # Never reuse a revision: a late answer from the previous welcome must lose.
+            db.execute("""INSERT INTO user_onboarding(user_id,revision) VALUES(?,1)
+ ON CONFLICT(user_id) DO UPDATE SET version=1,status='new',revision=revision+1,
+ progress='{}',history='[]',asked='',turns=0,barrier=-1""", (user_id,))
+
     @staticmethod
     def user(row):
         if row is None or not row["enabled"]:

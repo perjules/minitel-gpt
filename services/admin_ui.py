@@ -2018,6 +2018,12 @@ USERS_HTML = admin_service_pages.HEAD + """
 <label><input type=checkbox name=send {{'checked' if details[u.id].can_send}}> Autoriser aussi l’envoi (sinon lecture seule)</label>
 <p>PRONOTE : enfants autorisés</p>{% for child in children %}<label><input type=checkbox name=child value="{{child}}" {{'checked' if child in details[u.id].children}}> {{child}}</label>{% endfor %}
 <button>Enregistrer les accès</button></form>
+{% if u.id != 1 %}
+<form method=post action="/users/{{u.id}}/reset-onboarding" onsubmit="return confirm('Recommencer le premier accueil ? Les souvenirs personnels sont conservés.');">
+<input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=revision value="{{u.revision}}">
+<button>Réinitialiser l’accueil</button>
+<p>Recommence la présentation et les questions. Les souvenirs sont conservés ; les nouvelles réponses corrigeront les informations contradictoires.</p></form>
+{% endif %}
 {% if u.id != 1 %}<details><summary>Supprimer le profil et toutes ses mémoires</summary>
 <p>Suppression définitive des souvenirs, notes, listes, vecteurs, premier accueil, conversations et anciens JSON de ce profil, ainsi que de ses alias et accès.
 Les comptes Gmail/PRONOTE et les autres profils sont conservés. Les sauvegardes globales restent séparées.</p>
@@ -2077,6 +2083,18 @@ def delete_user(user_id):
             if isinstance(tokens, user_services.ProfileTokens) and tokens.registry.root == registry.root and tokens.user.id == user_id:
                 discard_mail(identifier)
     session['flash'], session['flash_ok'] = 'Profil, accès et données personnelles supprimés.', True
+    return redirect(url_for('users_admin'))
+
+
+@app.route('/users/<int:user_id>/reset-onboarding', methods=['POST'])
+@require_login
+def reset_user_onboarding(user_id):
+    try:
+        user_registry.Registry(inspection_store().root).reset_onboarding(
+            user_id, int(request.form.get('revision', '-1')))
+    except (gmail_auth.GmailError, ValueError) as error:
+        abort(409 if str(error) == 'user_changed' else 400, 'Réinitialisation refusée. Rechargez le profil.')
+    session['flash'] = 'Accueil réinitialisé. Souvenirs et accès conservés. Reconnectez le profil ou relancez Faire connaissance dans le test.'
     return redirect(url_for('users_admin'))
 
 
