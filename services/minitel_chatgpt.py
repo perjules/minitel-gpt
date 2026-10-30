@@ -57,11 +57,11 @@ except ImportError:
     )
 
 try:
-    from . import rose, rose_terminal
+    from . import journal, journal_terminal, rose, rose_terminal
 except ImportError:
     # Direct systemd script: share the package identity with the rose adapter.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from services import rose, rose_terminal
+    from services import journal, journal_terminal, rose, rose_terminal
 
 # Translittération vers ASCII affichable sur Minitel (é→e, œ→oe, …) :
 # évite les « ? » que produisait encode('ascii','replace').
@@ -1366,6 +1366,26 @@ def run_session(t):
                 t.line('Profil modifié. Reconnectez-vous.')
                 username = language = None
                 break
+
+            # Intercept before any ordinary model, history, transcript or tool.
+            if journal.entry(question):
+                if pending is not None and pending[0].is_alive():
+                    t.line("Requête précédente en cours. Réessayez bientôt.")
+                    continue
+                action, journal_pending = journal_terminal.run(t, memory.user, memory.registry)
+                if journal_pending is not None:
+                    pending = journal_pending
+                if action == "logout":
+                    username = language = None
+                    break
+                if action == "sommaire":
+                    break
+                if action.startswith("error:"):
+                    show_response(t, safe_display(action.removeprefix("error:")), language)
+                    t.line(UI[language]["follow_up"])
+                    continue
+                show_question_prompt(t, question_msg)
+                continue
 
             # Local maintenance commands: never send them to an LLM.
             maintenance = (question or "").strip().lower()

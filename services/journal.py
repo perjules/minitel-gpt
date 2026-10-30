@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import secrets
 import threading
 import time
 from datetime import datetime, timedelta
@@ -136,7 +137,7 @@ class Session:
         self.first_password = None
         self.delete_pending = None
         self.deadline = 0
-        self.pages, self.page = [], 0
+        self.pages, self.page, self.page_review = [], 0, None
 
     @property
     def secret(self):
@@ -178,7 +179,7 @@ class Session:
             self.key = self.salt = self.revision = self.first_password = None
             self.days, self.draft, self.delete_pending = {}, None, None
             self.deadline = 0
-            self.pages, self.page = [], 0
+            self.pages, self.page, self.page_review = [], 0, None
 
     def check(self):
         if self.stage == "closed" or self.clock() >= self.deadline:
@@ -280,8 +281,9 @@ class Session:
             "operation": operation,
             "day": day or self.date().isoformat(),
             "reviewed": False,
+            "id": secrets.token_hex(16),
         }
-        return self.result(self.preview_text(), review=True)
+        return self.result(self.preview_text(), review=self.draft["id"])
 
     def preview_text(self):
         draft = self.draft
@@ -290,10 +292,10 @@ class Session:
         )
         return f"Brouillon — {action}\n{draft['day']}\n\n{draft['text']}\n\nENREGISTRER / MODIFIER instructions / ANNULER"
 
-    def acknowledge(self):
+    def acknowledge(self, token=None):
         with self.lock:
             self.check()
-            if self.draft:
+            if self.draft and (token is None or token == self.draft["id"]):
                 self.draft["reviewed"] = True
 
     def requested_date(self, text):
@@ -355,16 +357,17 @@ class Session:
                         self.date().isoformat(),
                         False,
                     )
+                    self.draft["id"] = secrets.token_hex(16)
                     return self.result(
                         "La date a changé. Relisez le brouillon pour aujourd'hui.\n\n"
                         + self.preview_text(),
-                        review=True,
+                        review=self.draft["id"],
                     )
                 if not self.draft["reviewed"]:
                     return self.result(
                         "Relisez toutes les pages avant d'enregistrer.\n\n"
                         + self.preview_text(),
-                        review=True,
+                        review=self.draft["id"],
                     )
                 day, body = self.draft["day"], self.draft["text"]
                 if self.draft["operation"] == "append" and self.days.get(day):
@@ -405,15 +408,15 @@ class Session:
             if command == "aujourd'hui":
                 return self.result(self.read_day(self.date()))
             reading = command.startswith(("lire ", "montre", "affiche", "consulte"))
-            day = self.requested_date(text)
-            if reading and day:
-                return self.result(self.read_day(day))
             literal = re.match(r"^TEXTE\s*:\s?(.*)$", text, re.IGNORECASE | re.DOTALL)
             if literal:
                 return self.preview(literal[1], "append")
             modifying = command.startswith(
                 ("modifier", "modifie ", "corrige ", "reecris ", "reformule ")
             )
+            day = self.requested_date(text) if reading or modifying else None
+            if reading and day:
+                return self.result(self.read_day(day))
             if modifying and day is not None and day != self.date():
                 return self.result("Les journées précédentes sont en lecture seule.")
             if (
@@ -449,6 +452,11 @@ class Session:
                 if modifying and not previous:
                     return self.result(
                         "Aucune entrée aujourd'hui ni brouillon à modifier."
+                    )
+                if len(previous) > MAX_TEXT:
+                    return self.result(
+                        "Journée trop longue pour une réécriture IA (12000 caractères). "
+                        "Les ajouts et la lecture restent disponibles; utilisez l'outil local pour modifier le document complet."
                     )
                 # A stale draft must not carry yesterday's replacement authority.
                 current, epoch = self.date(), self.epoch

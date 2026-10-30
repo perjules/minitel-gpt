@@ -12,6 +12,7 @@ import re
 import secrets
 import stat
 import subprocess
+import sys
 import threading
 import time
 import unicodedata
@@ -49,6 +50,9 @@ try:
         gmail_mail,
         gmail_oauth,
         io_limits,
+        journal,
+        journal_page,
+        journal_store,
         memory_automation,
         memory_inspection,
         memory_session,
@@ -65,6 +69,7 @@ try:
         user_services,
     )
 except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     import admin_memory_pages
     import admin_service_pages
     import calculator
@@ -89,6 +94,8 @@ except ImportError:
     import system_health
     import user_registry
     import user_services
+
+    from services import journal, journal_page, journal_store
 
 PROJ_DIR = Path(__file__).parent.parent
 ASSETS_DIR = PROJ_DIR / "assets"
@@ -996,12 +1003,13 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 <p><a href=/users>Utilisateurs et accès</a></p>
   <div class=health-grid>{% for service in service_cards %}<div class=block>
     <h2>{{service.label}}</h2><p><span class="dot {{'on' if service.enabled else 'off'}}"></span>{{'Active' if service.enabled else 'Inactive'}}</p>
-    {% if service.placeholder %}<p class=sub>Administration en construction</p>
+    {% if service.private %}<p class=sub>Mot de passe propre à chaque journal. Aucun accès au contenu avec le mot de passe administrateur.</p>
+    {% elif service.placeholder %}<p class=sub>Administration en construction</p>
     <label><input type=checkbox disabled aria-label="Activer {{service.label}}"> Activer</label>
     {% else %}<form method=post action="/services/{{service.key}}/toggle"><input type=hidden name=csrf value="{{csrf_token()}}">
       <label><input type=checkbox name=enabled value=1 {{'checked' if service.enabled}}> Activer</label><button class="btn btn-s">Appliquer</button>
     </form>{% endif %}
-    <a class="btn btn-s" href="{{service.url}}">Configurer</a>
+    <a class="btn btn-s" href="{{service.url}}">{{'Ouvrir' if service.private else 'Configurer'}}</a>
   </div>{% endfor %}</div>
 </section>
 <section class="panel {{'active' if section=='maintenance'}}" id=maintenance>
@@ -1314,6 +1322,7 @@ def login():
     if request.method == "POST":
         if hmac.compare_digest(request.form.get("password", "").encode(errors="replace"), ADMIN_PASSWORD.encode()):
             gmail_oauth.cancel(session.get("gmail_oauth"))
+            discard_journal(session.get("private_journal"))
             session.clear()
             session["logged_in"] = True
             csrf_token()
@@ -1327,6 +1336,7 @@ def logout():
     gmail_oauth.cancel(session.get("gmail_oauth"))
     discard_mail(session.get("gmail_session"))
     discard_memory(session.get("memory_session"))
+    discard_journal(session.get("private_journal"))
     session.clear()
     return redirect(url_for("login"))
 
@@ -1501,6 +1511,9 @@ def test_preset_route():
     j = request.json or {}
     key = (j.get("preset_key") or "").strip()
     msg = (j.get("message") or "").strip()
+    if journal.entry(msg):
+        # No memory_entry, recorder, model or welcome workflow sees journal input.
+        return jsonify(ok=True, answer="Ouvrez le journal intime dans sa console privée.", journal_url="/journal")
     if not msg and not j.get("reset") and not j.get("welcome_start"):
         return jsonify(ok=False, error="Question vide")
     data = load_prompts()
@@ -1837,6 +1850,7 @@ def service_cards():
     return [
         {"key": "gmail", "label": "Gmail", "enabled": gmail_enabled(), "placeholder": False, "url": "/services/gmail"},
         {"key": "pronote", "label": "PRONOTE", "enabled": school_enabled, "placeholder": False, "url": "/pronote"},
+        {"key": "journal", "label": "Journal intime", "enabled": True, "placeholder": False, "private": True, "url": "/journal"},
         *({"key": key, "label": label, "enabled": False, "placeholder": True, "url": "/services/" + key}
           for key, label in (("alexa", "Alexa"), ("printer", "Imprimante"), ("smart-home", "Maison connectée"))),
     ]
@@ -2025,7 +2039,7 @@ USERS_HTML = admin_service_pages.HEAD + """
 <p>Recommence la présentation et les questions. Les souvenirs sont conservés ; les nouvelles réponses corrigeront les informations contradictoires.</p></form>
 {% endif %}
 {% if u.id != 1 %}<details><summary>Supprimer le profil et toutes ses mémoires</summary>
-<p>Suppression définitive des souvenirs, notes, listes, vecteurs, premier accueil, conversations et anciens JSON de ce profil, ainsi que de ses alias et accès.
+<p>Suppression définitive des souvenirs, notes, listes, vecteurs, premier accueil, conversations, journal intime chiffré et anciens JSON de ce profil, ainsi que de ses alias et accès.
 Les comptes Gmail/PRONOTE et les autres profils sont conservés. Les sauvegardes globales restent séparées.</p>
 <form method=post action="/users/{{u.id}}/delete"><input type=hidden name=csrf value="{{csrf_token()}}">
 <input type=hidden name=revision value="{{u.revision}}">
@@ -2382,6 +2396,10 @@ MEMORY_SESSIONS_LOCK = threading.RLock()
 
 
 def discard_memory(identifier):
+    with JOURNAL_SESSIONS_LOCK:
+        for journal_id, private in list(JOURNAL_SESSIONS.items()):
+            if getattr(private, "memory_id", None) == identifier:
+                discard_journal(journal_id)
     with MEMORY_SESSIONS_LOCK:
         item = MEMORY_SESSIONS.pop(identifier, None)
         if item:
@@ -2430,6 +2448,114 @@ def memory_entry(username=None, reset=False):
         item["used"] = now
         MEMORY_SESSIONS.move_to_end(identifier)
         return item["memory"]
+
+
+# This pool holds only opaque selectors in cookies. Session.close also clears
+# page buffers on an independent idle timer, without waiting for another request.
+JOURNAL_SESSIONS = OrderedDict()
+JOURNAL_SESSIONS_LOCK = threading.RLock()
+
+
+def discard_journal(identifier):
+    with JOURNAL_SESSIONS_LOCK:
+        item = JOURNAL_SESSIONS.pop(identifier, None)
+        if item is not None:
+            item.close()
+
+
+def journal_response(data, status=200):
+    response = jsonify(data)
+    response.status_code = status
+    response.headers.update({"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+                             "X-Content-Type-Options": "nosniff"})
+    return response
+
+
+def journal_transport():
+    # Direct HTTP is restricted to localhost (e.g. an SSH tunnel). Tailscale
+    # Serve terminates TLS locally; no passwords on an unencrypted LAN link.
+    return request.is_secure or request.remote_addr in {"127.0.0.1", "::1"}
+
+
+@app.route("/journal")
+@require_login
+def journal_console():
+    discard_journal(session.get("private_journal"))
+    if not journal_transport():
+        return "Ouvrez l’administration via HTTPS (Tailscale Serve) ou un tunnel localhost.", 403
+    selected = memory_entry()
+    response = app.make_response(render_template_string(journal_page.HTML, username=selected.username))
+    response.headers.update({"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+    return response
+
+
+@app.route("/journal-api", methods=["POST"])
+@require_login
+def journal_api():
+    if not journal_transport():
+        return journal_response({"closed": True, "display": "HTTPS ou localhost requis."}, 403)
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or data.get("action") not in {"open", "command", "next", "lock", "touch"}:
+        return journal_response({"closed": True, "display": "Requête invalide."}, 400)
+    action = data["action"]
+    identifier = session.get("private_journal")
+    if action == "lock":
+        discard_journal(identifier)
+        return journal_response({"closed": True, "display": "Journal verrouillé."})
+    try:
+        if action == "open":
+            name = data.get("username", "")
+            if not isinstance(name, str) or len(name) > 60:
+                raise journal.JournalError("Choisissez un profil nommé.")
+            discard_journal(identifier)
+            selected = memory_entry(name)
+            item = journal.Session(journal_store.Vault(selected.user, selected.registry),
+                                   model=journal.Model(lambda: (mistral_key(), mistral_model())))
+            item.memory_id = session.get("memory_session")
+            result = item.open()
+            with JOURNAL_SESSIONS_LOCK:
+                for old_id, old in list(JOURNAL_SESSIONS.items()):
+                    if old.stage == "closed":
+                        discard_journal(old_id)
+                while len(JOURNAL_SESSIONS) >= 8:
+                    discard_journal(next(iter(JOURNAL_SESSIONS)))
+                identifier = secrets.token_urlsafe(32)
+                session["private_journal"] = identifier
+                JOURNAL_SESSIONS[identifier] = item
+        else:
+            with JOURNAL_SESSIONS_LOCK:
+                item = JOURNAL_SESSIONS.get(identifier)
+            if item is None:
+                raise journal.JournalError("Journal verrouillé. Rouvrez-le.")
+            with item.lock:
+                item.check()
+                if action == "touch":
+                    item.touch()
+                    return journal_response({"closed": False})
+                if action == "next":
+                    item.page = min(item.page + 1, len(item.pages) - 1)
+                    item.touch()
+                    result = None
+            if action == "command":
+                result = item.handle(data.get("text", ""))
+        with item.lock:
+            if item.stage == "closed":
+                return journal_response({"closed": True, "display": "Journal verrouillé."})
+            item.check()
+            if result is not None:
+                item.pages, item.page = gmail_mail.pages(result["display"]), 0
+                item.page_review = result.get("review")
+            if item.page_review and item.page == len(item.pages) - 1:
+                item.acknowledge(item.page_review)
+            return journal_response({"display": item.pages[item.page], "secret": item.secret,
+                                     "closed": False, "more": item.page < len(item.pages) - 1,
+                                     "expires_in": max(0, int((item.deadline - item.clock()) * 1000))})
+    except (journal.JournalError, memory_session.memory.MemoryProblem) as error:
+        discard_journal(identifier)
+        return journal_response({"closed": True, "display": str(error)})
+    except Exception:  # noqa: BLE001 - Never expose/log private exception payloads.
+        discard_journal(identifier)
+        return journal_response({"closed": True, "display": "Journal indisponible. Session verrouillée."}, 503)
 
 
 # Mail bodies and drafts stay in bounded process memory, never Flask cookies.

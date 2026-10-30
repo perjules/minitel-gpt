@@ -6,6 +6,7 @@ import re
 import stat
 import struct
 import tempfile
+import threading
 from datetime import date
 
 from cryptography.exceptions import InvalidTag
@@ -20,6 +21,7 @@ HEADER = struct.Struct(">8sQ16s12s")
 MAX_BYTES = 2 * 1024 * 1024
 TITLE = "# Journal intime\n"
 FILENAME = "journal.md.enc"
+_DERIVATION_LOCK = threading.Lock()
 
 
 class JournalError(ValueError):
@@ -30,9 +32,11 @@ def derive(password, salt):
     # V1 fixes these parameters: 64 MiB, one lane. No attacker-controlled costs.
     if not isinstance(password, str) or not password or len(password) > 2000:
         raise JournalError("Saisissez un mot de passe (2000 caractères maximum).")
-    return Scrypt(salt=salt, length=32, n=2**16, r=8, p=1).derive(
-        password.encode("utf-8")
-    )
+    # Bound aggregate RAM per process when several web unlocks arrive together.
+    with _DERIVATION_LOCK:
+        return Scrypt(salt=salt, length=32, n=2**16, r=8, p=1).derive(
+            password.encode("utf-8")
+        )
 
 
 def parse(markdown):

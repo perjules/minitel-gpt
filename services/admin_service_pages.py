@@ -44,7 +44,7 @@ GMAIL = '''<section><h2>Comptes Gmail</h2><p>{{account}}</p>
 </details></section>'''
 PLACEHOLDER = '''<section><h2>En construction</h2><p>Administration inactive. Aucun réglage n’est appliqué depuis cette page.</p></section>'''
 
-TEST_NAV = '''<nav><a href="/test?mode=conversation">Conversation</a> · <a href="/test?mode=gmail">Gmail</a></nav>'''
+TEST_NAV = '''<nav><a href="/test?mode=conversation">Conversation</a> · <a href="/test?mode=gmail">Gmail</a> · <a href="/journal">Journal intime</a></nav>'''
 CHAT_TEST = r'''<p>Test de l’IA configurée. Les requêtes sont réelles et la conversation est journalisée dans la mémoire choisie.</p>
 <label>Utilisateur (vide = MinitelGPT)<input id=memoryUser maxlength=60 value="{{username}}" onchange="++testSequence;document.getElementById('testOut').textContent='';document.getElementById('testSpin').style.display='none'"></label>
 <textarea id=testMsg rows=4 placeholder="Votre question"></textarea>
@@ -62,6 +62,7 @@ async function testPreset(reset=false,welcome=false){
   const response=await fetch('/test-preset',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},
    body:JSON.stringify({preset_key:PRESET,system:DRAFT_SYSTEM,message:msg,memory_user:document.getElementById('memoryUser').value,reset:reset,welcome_start:welcome})});
   const data=await response.json();if(sequence!==testSequence)return;
+  if(data.ok&&data.journal_url){document.getElementById('testMsg').value='';location.assign(data.journal_url);return;}
   if(data.ok&&data.scene){
    out.textContent='';const started=performance.now();
    for(const line of data.scene){

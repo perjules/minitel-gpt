@@ -138,7 +138,7 @@ class Runtime:
                             capture_output=True, text=True).stdout.strip()
 
     def probe(self, environment, extras):
-        modules = ["sqlite3", "flask", "requests", "serial", "dotenv", "pyfiglet"]
+        modules = ["sqlite3", "flask", "requests", "serial", "dotenv", "pyfiglet", "cryptography"]
         for extra, names in {"gmail": ["google.auth", "google_auth_oauthlib", "cryptography"],
                              "pronote": ["pronotepy"], "printer": ["bleak", "PIL"]}.items():
             if extra in extras:

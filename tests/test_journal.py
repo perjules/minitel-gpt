@@ -182,6 +182,15 @@ def test_timeout_and_late_model_output_clear_keys(diary):
     assert diary.stage == "closed" and diary.days == {}
 
 
+def test_literal_dates_are_content_and_stale_review_does_not_approve_new_draft(diary):
+    first = diary.handle("TEXTE : The invitation incorrectly said 32/13/2026.")
+    second = diary.handle("TEXTE : A different proposal.")
+    diary.acknowledge(first["review"])
+    assert not diary.draft["reviewed"]
+    diary.acknowledge(second["review"])
+    assert diary.draft["reviewed"]
+
+
 def test_storage_refuses_symlink_and_structure_injection(diary, tmp_path):
     assert not diary.handle("TEXTE : Hello\n## 2020-01-01\nInjected").get("review")
     outside = tmp_path / "outside"
