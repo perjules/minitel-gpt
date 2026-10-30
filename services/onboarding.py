@@ -27,7 +27,13 @@ TOPICS = {
 RESUME = {"faisons connaissance", "reprendre accueil", "get to know me", "resume intro"}
 LATER = {"plus tard", "pas maintenant", "later", "not now"}
 STOP = {"fin accueil", "stop intro", "stop questions", "pas de questions"}
-SKIP = {"passer", "skip"}
+SKIP = {
+    "passer",
+    "skip",
+    "je prefere passer",
+    "je prefere ne pas repondre",
+    "rather not say",
+}
 
 
 def enabled():
@@ -252,8 +258,19 @@ class Session:
                 for r in snapshot["items"]
                 if r["kind"] in {"fact", "preference"}
             }
+            proposals = []
+            for proposal in plan["memories"]:
+                if (
+                    not isinstance(proposal, dict)
+                    or proposal.get("topic") not in TOPICS
+                ):
+                    raise memory.MemoryProblem("Sujet de souvenir invalide.")
+                if progress.get(proposal["topic"]) != "skipped":
+                    proposals.append(
+                        {k: v for k, v in proposal.items() if k != "topic"}
+                    )
             data = memory_automation.consolidate(
-                snapshot, plan["memories"], events, candidates
+                snapshot, proposals, events, candidates
             )
             for item in data["items"]:
                 if item not in snapshot["items"]:
@@ -353,7 +370,8 @@ class Session:
             "Explain naturally that any question may be skipped and the conversation can stop. "
             "On RESUME do not repeat the grand introduction. Ask at most ONE short question per turn, "
             "replying meaningfully to the user first. Questions are examples, not a fixed script. "
-            "Age OR birthday is optional; if age is given do not pursue exact birth date. A child "
+            "Age OR birthday is optional; if age is given do not pursue exact birth date. Use the "
+            "supplied current date when interpreting a volunteered birth date, never invent a year. A child "
             "such as a 10-year-old is asked about school/interests, NEVER employment. Do not assume "
             "an adult or occupation when age/life stage is unknown. Never seek contact information, "
             "full legal names, precise locations, school identity, credentials or identifying friends. "
@@ -363,14 +381,15 @@ class Session:
             "rushing to the next topic. Track the purpose: around 6-10 exchanges usually suffice, "
             "but do not cut off an engaged user. Finish gently once useful context exists, without "
             "requiring all subjects; ordinary chat can continue. Unrelated requests can use action "
-            "public with an empty reply to hand back to the normal assistant. "
+            "public with an empty reply to hand back to the normal assistant. Requests requiring "
+            "live information or real service actions must use public; never pretend to search or act. "
             "Return ONLY JSON with keys reply, action (continue|finish|pause|public), asked_topic "
             "(one catalogue ID or null), covered (catalogue IDs), skipped (catalogue IDs), memories. "
             "Only continue has a non-null asked_topic. Keep intro under 700 characters and other "
             "replies under 1000, without Markdown. For memories use at most THREE grounded facts/"
             "preferences (never tasks/notes), each at most 400 characters, from the CURRENT user "
             "reply only; not your fiction, guesses or earlier dialogue. Each memory has exactly "
-            "operation(save|replace), kind(fact|preference), title, text, id(null for save; an actual "
+            "topic(one catalogue ID, never a skipped topic), operation(save|replace), kind(fact|preference), title, text, id(null for save; an actual "
             "supplied ID for replace), evidence:[{event_id: CURRENT event ID, quote: exact short "
             "CURRENT user quote}]. Short answers like '10' can be interpreted using the actual "
             "preceding question, without inventing detail. Never memorize a refusal, an unasked "
@@ -384,6 +403,7 @@ class Session:
             instructions,
             {
                 "username": self.selected.username,
+                "today": memory.now()[:10],
                 "phase": "first"
                 if not state["history"] and state["turns"] == 0
                 else "resume"
@@ -400,6 +420,7 @@ class Session:
             },
             time.monotonic() + min(timeout, 30),
             structured=True,
+            character=True,
         )
         try:
             return json.loads(result)

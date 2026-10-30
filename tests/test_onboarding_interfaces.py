@@ -209,3 +209,34 @@ def test_default_admin_preview_has_no_empty_provider_call(
     assert response.json["ok"] and "profil nommé" in response.json["answer"]
     ordinary.assert_not_called()
     client.post("/logout", headers=headers)
+
+
+def test_admin_birthday_is_an_answer_not_automatic_arithmetic(
+    console, welcome_enabled, monkeypatch
+):
+    client, headers, _ = console
+    model = Mock()
+    model.client.complete.return_value = response()
+    monkeypatch.setattr(sessions, "MemoryModel", lambda **kwargs: model)
+    client.post(
+        "/test-preset",
+        json={
+            "preset_key": "main",
+            "message": "",
+            "memory_user": "Birthday",
+            "welcome_start": True,
+        },
+        headers=headers,
+    )
+    model.client.complete.return_value = response(
+        reply="Quelle matière aimez-vous ?", topic="daily_life", covered=["age"]
+    )
+    result = client.post(
+        "/test-preset",
+        json={"preset_key": "main", "memory_user": "Birthday", "message": "14/08/2016"},
+        headers=headers,
+    )
+    assert result.json["ok"] and "matière" in result.json["answer"]
+    assert model.client.complete.call_args.args[1]["current_reply"] == "14/08/2016"
+    assert len(model.client.complete.call_args.args[1]["today"]) == 10
+    client.post("/logout", headers=headers)

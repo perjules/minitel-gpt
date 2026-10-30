@@ -50,6 +50,15 @@ lorsque sa réponse termine plus tard. De nouveaux énoncés ultérieurs
 peuvent être appris. Supprimer un souvenir ne supprime pas ses anciennes
 conversations, ses sauvegardes ou les extraits déjà reçus par un modèle.
 
+## Premier accueil
+
+Les nouveaux profils nommés bénéficient d’un [accueil conversationnel](ONBOARDING.md)
+facultatif. Le modèle pose une question à la fois, suit les sujets abordés/refusés
+et propose directement des faits/préférences fondés sur les réponses. Ce canal
+ne passe pas par l’extraction générique ci-dessous. Une réponse courte conserve
+sa question comme contexte de source. Les faits sont inspectables avec l’origine
+`onboarding`; le suivi est dans la table additive `user_onboarding`.
+
 ## Traitement automatique, sans service supplémentaire
 
 Les données de travail sont des **énoncés utilisateur**, pas les affirmations de

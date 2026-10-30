@@ -1555,11 +1555,14 @@ def test_preset_route():
                 if result is None:
                     result = {"display": "Choisissez un profil nommé; l’accueil doit être activé.",
                               "turn": None, "onboarding": True}
-            if result is None and (calc.explicit(msg) or (not selected.pending and calculator.candidate(msg))):
+            if result is None and calc.explicit(msg):
                 result = calc.handle(msg, language, generate=lambda expr, lang:
                                      calculator.generate_scene(expr, lang, mistral_key(), mistral_model()))
             if result is None:
                 result = selected.welcome.respond(msg, system, language)
+            if result is None and not selected.pending and calculator.candidate(msg):
+                result = calc.handle(msg, language, generate=lambda expr, lang:
+                                     calculator.generate_scene(expr, lang, mistral_key(), mistral_model()))
             if result is None:
                 result = selected.handle(msg, language) if selected.interested(msg) else {"passthrough": True}
             if result.get("passthrough"):

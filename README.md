@@ -221,7 +221,10 @@ Préférences, notes,
 listes et tâches se gèrent en langage naturel. Les profils nommés bénéficient
 aussi d’un apprentissage périodique et d’un rappel sémantique Mistral; les commandes
 RETIENS/OUBLIE restent prioritaires. SQLite conserve les souvenirs et leurs vecteurs.
-Maintenance propose un inventaire et des exports après confirmation du mot de passe admin. Sur le Minitel, SOMMAIRE revient à
+Maintenance propose un inventaire et des exports après confirmation du mot de passe admin.
+Un [premier accueil conversationnel](docs/ONBOARDING.md) présente le Minitel aux
+nouveaux profils nommés et apprend quelques repères personnels, avec des questions
+adaptées et facultatives. PASSER, PLUS TARD et FIN ACCUEIL permettent de le guider. Sur le Minitel, SOMMAIRE revient à
 une conversation vide en conservant l'utilisateur et sa langue; LOGOUT puis ENVOI
 permet de changer d'utilisateur. Le démarrage fictif en français précède la
 connexion et n'est pas rejoué après SOMMAIRE ou LOGOUT. Les journaux de conversations

@@ -1362,7 +1362,9 @@ def run_session(t):
                 private_question = True
             t.w(bytes([CR, LF]))
             calculator_request = calc.explicit(question) or (
-                calculator.candidate(question) and not calculator_blocked(mail, memory))
+                calculator.candidate(question) and not calculator_blocked(mail, memory)
+                and not (isinstance(getattr(memory, "welcome", None), memory_session.onboarding.Session)
+                         and memory.welcome.should_greet()))
             t.w(FG_CYAN); t.line("")
             t.center(calculator.content(language)["loading"] if calculator_request else loading_msg)
             # Do not pile up paid calls while a locally abandoned HTTP request

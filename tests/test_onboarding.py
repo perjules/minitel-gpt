@@ -1,6 +1,7 @@
 """First conversations with synthetic users, structured replies and real SQLite."""
 
 import json
+import time
 from unittest.mock import Mock
 
 import pytest
@@ -40,6 +41,7 @@ def run(selected, question=None, **changes):
 
 def fact(quote, text="User is 10 years old.", event_id=1):
     return {
+        "topic": "age",
         "operation": "save",
         "kind": "fact",
         "title": "age",
@@ -256,3 +258,93 @@ def test_other_user_isolated_and_version_mismatch_preserves_state(newcomer):
         assert newcomer.welcome.state()["history"]
     finally:
         other.close()
+
+
+def test_skipped_topics_cannot_receive_new_facts_even_if_model_proposes_them(newcomer):
+    run(newcomer)
+    run(newcomer, "PASSER", reply="Quel loisir vous plaît ?", topic="interests")
+    result = run(
+        newcomer,
+        "I like drawing.",
+        reply="Que dessinez-vous ?",
+        topic="interests",
+        memories=[fact("I like drawing.", text="Unsupported age detail.")],
+    )
+    assert result["onboarding"] and newcomer.welcome.state()["status"] == "active"
+    assert not newcomer.store.read(newcomer.key)["items"]
+
+
+def test_natural_short_skip_is_applied_before_the_model_call(newcomer):
+    run(newcomer, topic="household", reply="Avec qui vivez-vous ?")
+    run(
+        newcomer,
+        "Je préfère ne pas répondre.",
+        topic="interests",
+        reply="Quel loisir vous plaît ?",
+    )
+    data = newcomer.model.client.complete.call_args.args[1]
+    assert data["progress"]["household"] == "skipped"
+    assert not newcomer.store.read(newcomer.key)["items"]
+
+
+def test_concurrent_welcome_cannot_overwrite_the_newer_answer(newcomer):
+    run(newcomer)
+    other = sessions.MemorySession("CAMILLE", root=newcomer.store.root, model=Mock())
+    try:
+
+        def delayed(*args, **kwargs):
+            run(
+                other,
+                "10",
+                topic="daily_life",
+                reply="Quelle matière aimez-vous ?",
+                memories=[fact("10")],
+            )
+            return response(
+                topic="daily_life",
+                reply="Quel cours préférez-vous ?",
+                memories=[fact("11", text="User is 11 years old.")],
+            )
+
+        newcomer.model.client.complete.side_effect = delayed
+        newcomer.welcome.respond("11", "persona")
+        items = newcomer.store.read(newcomer.key)["items"]
+        assert len(items) == 1 and items[0]["text"] == "User is 10 years old."
+        assert other.welcome.state()["status"] == "active"
+    finally:
+        other.close()
+
+
+def test_english_control_and_model_language(newcomer):
+    newcomer.model.client.complete.return_value = response(reply="How old are you ?")
+    newcomer.welcome.respond(None, "persona", language="en", start=True)
+    assert newcomer.model.client.complete.call_args.args[0].endswith("Speak English.")
+    assert (
+        "As you wish"
+        in newcomer.welcome.respond("LATER", "persona", language="en")["display"]
+    )
+
+
+def test_actual_http_prompt_preserves_character_only_for_welcome(newcomer, monkeypatch):
+    from services import gmail_mail
+
+    post = Mock()
+    post.return_value.json.return_value = {
+        "choices": [{"finish_reason": "stop", "message": {"content": response()}}]
+    }
+    monkeypatch.setattr(gmail_mail.requests, "post", post)
+    newcomer.model.client = gmail_mail.MailModel(
+        settings=lambda: ("synthetic-key", "synthetic-model"), service="general"
+    )
+    assert newcomer.welcome.respond(None, "OWNER PERSONA", start=True)["onboarding"]
+    instructions = post.call_args.kwargs["json"]["messages"][0]["content"]
+    assert instructions.startswith("OWNER PERSONA")
+    assert "no fictional banter" not in instructions
+    assert "real capabilities must remain truthful" in instructions
+    assert "tools" not in post.call_args.kwargs["json"]
+    newcomer.model.client.complete(
+        "Factual extraction", {}, time.monotonic() + 5
+    )
+    assert (
+        "no fictional banter" in post.call_args.kwargs["json"]["messages"][0]["content"]
+    )
