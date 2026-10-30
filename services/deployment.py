@@ -101,3 +101,20 @@ def queue_deployment(operation, payload=None):
     if result.returncode:
         return False, "Opération refusée ; consulter le journal minitel-deploy."
     return True, "Opération planifiée ; actualiser Maintenance pour suivre le résultat."
+
+
+def unchanged(project, preview, runtime=RUNTIME_STATE, deployment=DEPLOYMENT_STATUS):
+    """Recheck the displayed installation immediately before requesting an update."""
+    state = status(runtime)
+    active = state.get("active")
+    if (state.get("branch") != preview["branch"]
+            or not isinstance(active, dict) or active.get("commit") != preview["head"]
+            or status(deployment).get("phase") in BUSY):
+        return False
+    for args, expected in ((('branch', '--show-current'), preview['branch']),
+                           (('rev-parse', 'HEAD'), preview['head']),
+                           (('status', '--porcelain', '--untracked-files=no'), '')):
+        rc, value, _ = git(project, *args, timeout=5)
+        if rc or value != expected:
+            return False
+    return True

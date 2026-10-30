@@ -24,8 +24,10 @@ from dotenv import load_dotenv
 try:  # Support both systemd's direct script and package imports in tests.
     from . import (
         calculator,
+        deployment,
         gmail_mail,
         io_limits,
+        mainframe_update,
         memory_session,
         mistral_answers,
         printing_session,
@@ -40,8 +42,10 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from services import (
         calculator,
+        deployment,
         gmail_mail,
         io_limits,
+        mainframe_update,
         memory_session,
         mistral_answers,
         printing_session,
@@ -883,6 +887,159 @@ def show_boot(t: Term, language, lines=None):
         t.w(SCROLL_OFF)
 
 
+def prepare_update_text(preview, language, *, procedure=False):
+    """One optional call, independent of personal history and factual answers."""
+    words = mainframe_update.TEXT[language]
+    fallback = (words["procedure"] if procedure else
+                (words["announcement"] if preview["behind"] else words["current"]).splitlines())
+    generate, key = ((call_claude, ANTHROPIC_KEY) if PROVIDER == "claude" else
+                     (call_mistral, MISTRAL_KEY))
+    if PROVIDER not in {"mistral", "claude"} or not key or key == "...":
+        return list(fallback)
+    try:
+        prompt = mainframe_update.PROMPT.read_text(encoding="utf-8")
+        text = generate(prompt, [{"role": "user", "content": mainframe_update.request(
+            preview, language, procedure=procedure)}], timeout=BOOT_TIMEOUT, require_complete=True)
+        return mainframe_update.validate(text, validate_boot, procedure=procedure)
+    except Exception as error:  # noqa: BLE001 - Theatre must never block maintenance.
+        log.warning("Update theatre unavailable (%s); using static text", type(error).__name__)
+        return list(fallback)
+
+
+def start_update_request(language, preview=None):
+    """The worker only fetches/reads and writes text to its private queue, never UART or sudo."""
+    output = Queue(maxsize=1)
+
+    def request():
+        try:
+            if preview is None:
+                checked = deployment.preview(Path(__file__).resolve().parents[1])
+                words = mainframe_update.TEXT[language]
+                rows = (prepare_update_text(checked, language) if checked["ok"] else
+                        [words["busy"] if checked.get("busy") else words["unavailable"]])
+                result = {"display": "\n".join(rows), "preview": checked}
+            else:
+                result = {"rows": prepare_update_text(preview, language, procedure=True)}
+            output.put((result, None))
+        except Exception as error:  # noqa: BLE001 - Forward failures to the UART owner.
+            output.put((None, error))
+
+    worker = threading.Thread(target=request, daemon=True)
+    started = time.monotonic()
+    worker.start()
+    return worker, output, started
+
+
+def play_update(t, rows, preview, queued_at, language):
+    """Paced theatre until restart; real failure/status loss always ends the show."""
+    words = mainframe_update.TEXT[language]
+    deadline = time.monotonic() + 30 * 60
+    last_status = time.monotonic()
+    next_probe = next_line = 0
+    phase = None
+    index = cycle = 0
+    t.clear()
+    t.w(SCROLL_ON)
+    try:
+        t.w(FG_CYAN)
+        t.line(words["leaving"])
+        while time.monotonic() < deadline:
+            now = time.monotonic()
+            if now >= next_probe:
+                state = deployment.status()
+                stamp = state.get("time")
+                fresh = type(stamp) is int and stamp >= queued_at
+                current = state.get("phase") if fresh else None
+                if current in deployment.BUSY | {"ready", "failed"}:
+                    last_status = now
+                    if current == "failed":
+                        return "done", words["failed"]
+                    if current == "ready":
+                        commit = state.get("commit")
+                        if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+                            return "done", words["unknown"]
+                        return "done", words["current" if commit == preview["head"] else "finished"]
+                    if current != phase:
+                        t.line(words[{"queued": "queued", "preparing": "staging",
+                                      "activating": "activating"}[current]])
+                        phase = current
+                if now - last_status >= 10:
+                    return "done", words["unknown"]
+                next_probe = now + 1
+            if now >= next_line:
+                if index == len(rows):
+                    cycle += 1
+                    t.line(f"{words['cycle']} {cycle:03d}")
+                    index = 0
+                t.line(rows[index])
+                index += 1
+                next_line = now + 2.5
+            kind, code = t.read_key(0.2)
+            if kind == "fn" and code in (K_SOMMAIRE, K_GUIDE):
+                return ("sommaire" if code == K_SOMMAIRE else "guide"), ""
+        return "done", words["unknown"]
+    finally:
+        t.w(SCROLL_OFF)
+
+
+def terminal_update(t, language):
+    """Only a physical, explicit confirmation can reach the existing update helper."""
+    words = mainframe_update.TEXT[language]
+    t.line(words["checking"])
+    pending = start_update_request(language)
+    t._pending = pending
+    result, action = wait_answer(t, pending, 120)
+    if action in ("sommaire", "guide"):
+        return action, pending
+    if result is None:
+        return show_response(t, words["unavailable"], language), pending
+    action = show_response(t, result["display"], language)
+    preview = result["preview"]
+    if action != "done" or not preview["ok"] or not preview["behind"]:
+        return action, pending
+    while True:
+        t.line(words["confirm"])
+        answer, action = read_question(t, allow_empty=True)
+        if action in ("sommaire", "guide"):
+            return action, pending
+        answer = (answer or "").strip().upper()
+        if action == "timeout" or answer in {"NON", "NO", "ANNULER", "CANCEL"}:
+            t.line(words["cancelled"])
+            return "done", pending
+        if answer in {"OUI", "YES"}:
+            break
+        t.line(words["invalid"])
+    t.line(words["preparing"])
+    pending = start_update_request(language, preview)
+    t._pending = pending
+    result, action = wait_answer(t, pending, 20)
+    if action in ("sommaire", "guide"):
+        return action, pending
+    rows = result["rows"] if result else words["procedure"]
+    if result is None and pending[0].is_alive():
+        # A timed-out preparation remains tracked; it can never launch an update later.
+        return show_response(t, words["unavailable"], language), pending
+    if not deployment.unchanged(Path(__file__).resolve().parents[1], preview):
+        return show_response(t, words["unavailable"], language), pending
+    t.line(words["launching"])
+    queued_at = int(time.time())
+    try:
+        mainframe_update.arm_resume(queued_at)
+    except (OSError, ValueError, mainframe_update.config_store.StorageFailure,
+            memory_session.memory.MemoryProblem):
+        mainframe_update.clear_resume()
+        return show_response(t, words["unavailable"], language), pending
+    ok, _ = deployment.queue_deployment("update")
+    if not ok:
+        mainframe_update.clear_resume()
+        return show_response(t, words["failed"], language), pending
+    action, message = play_update(t, rows, preview, queued_at, language)
+    if message:
+        mainframe_update.clear_resume()
+        action = show_response(t, message, language)
+    return action, pending
+
+
 def wait_connection(t):
     """Leave the physical power-on screen alone until SOMMAIRE is pressed."""
     while True:
@@ -914,7 +1071,10 @@ def show_guide(t: Term, language="fr"):
         t.center(UI[language]["ip_unavailable"])
     t.w(bytes([CR, LF, CR, LF]))
     t.center(f"{UI[language]['password']} : {os.getenv('ADMIN_PASSWORD', 'mistral')}")
-    t.w(bytes([CR, LF, CR, LF, CR, LF]))
+    t.w(bytes([CR, LF, CR, LF]))
+    t.center("UPDATE / MAJ: mainframe maintenance" if language == "en" else
+             "UPDATE / MAJ: maintenance du mainframe")
+    t.line()
     t.w(FG_CYAN); t.center(UI[language]["guide_return"])
     t.read_key(120)
 
@@ -1079,7 +1239,8 @@ def run_session(t):
     username = None
     language = None
 
-    wait_connection(t)
+    if not mainframe_update.take_resume():
+        wait_connection(t)
     t.clear()
     t.center(UI["fr"]["boot_wait"])
     result = show_boot(t, "fr", prepare_boot("fr"))
@@ -1208,6 +1369,20 @@ def run_session(t):
                     return
                 t.line("Commande annulee.")
                 show_question_prompt(t, question_msg)
+                continue
+
+            if mainframe_update.command(question):
+                if pending is not None and pending[0].is_alive():
+                    t.line("Requete precedente en cours. Reessayez bientot.")
+                    continue
+                action, pending = terminal_update(t, language)
+                if action in ("sommaire", "guide", "timeout"):
+                    if action == "guide":
+                        show_guide(t, language)
+                    break
+                # Preserve the maintenance outcome while taking fresh input.
+                t.line()
+                t.center(UI[language]["follow_up"])
                 continue
 
             rose_test = rose.test_entry(question)
