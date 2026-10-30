@@ -375,14 +375,14 @@ def ranked(items, question):
     )
 
 
-def context(data, question, destination):
+def context(data, question, destination, retrieved=False):
     selected, used = [], 0
     words = tokens(question)
-    ordered = ranked(data["items"], question)
+    ordered = list(data["items"]) if retrieved else ranked(data["items"], question)
     ordered.sort(key=lambda item: item["kind"] != "preference")
     for item in ordered:
         relevant = bool(tokens(item["title"] + " " + item["text"]) & words)
-        if item["kind"] not in {"preference", "fact"} and not relevant:
+        if not retrieved and item["kind"] != "preference" and not relevant:
             continue
         if item["status"] == "done":
             continue
@@ -408,9 +408,9 @@ def context(data, question, destination):
     )
 
 
-def catalogue(data, question):
+def catalogue(data, question, ordered=None):
     result, used = [], 0
-    for item in ranked(data["items"], question):
+    for item in ordered if ordered is not None else ranked(data["items"], question):
         value = {k: item[k] for k in ("id", "kind", "title", "status")}
         value["text"] = item["text"][:CATALOGUE_EXCERPT]
         value["excerpt"] = len(item["text"]) > CATALOGUE_EXCERPT

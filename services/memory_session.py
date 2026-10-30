@@ -6,11 +6,12 @@ import threading
 import time
 
 try:
+    from . import memory_vectors, user_registry
     from . import persistent_memory as memory
-    from . import user_registry
     from .gmail_auth import GmailError
     from .gmail_mail import MailModel
 except ImportError:
+    import memory_vectors
     import persistent_memory as memory
     import user_registry
     from gmail_auth import GmailError
@@ -142,6 +143,7 @@ class MemorySession:
         self.key, self.username = self.user.memory_key, self.user.display_name
         self.label = "mémoire de " + self.username
         self.model = model or MemoryModel()
+        self.embeddings = memory_vectors.Embeddings(lambda: self.model.client.profile()["key"])
         self.lock = threading.RLock()
         self.turn_lock = threading.Lock()
         self.closed = False
@@ -233,7 +235,14 @@ class MemorySession:
         try:
             with self.lock:
                 self.active()
-                return memory.context(self.store.read(self.key), question, self.label)
+                data = self.store.read(self.key)
+            selected, _ = memory_vectors.ordered(self.store, self.key, data, question,
+                                                  self.recent, self.embeddings)
+            with self.lock:
+                self.active()
+                current = {item["id"]: item for item in self.store.read(self.key)["items"]}
+                selected = [item for item in selected if current.get(item["id"]) == item]
+                return memory.context({**data, "items": selected}, question, self.label, retrieved=True)
         except memory.MemoryProblem as error:
             self.warning = str(error)
             return ""
@@ -408,7 +417,9 @@ class MemorySession:
                 and memory.normalized(r["title"]) == memory.normalized(title)
             ]
             return {"display": self.display(items)}
-        candidates, partial = memory.catalogue(snapshot, question)
+        _, ordered = memory_vectors.ordered(self.store, self.key, snapshot, question,
+                                              self.recent, self.embeddings)
+        candidates, partial = memory.catalogue(snapshot, question, ordered=ordered)
         proposal = self.model.plan(
             question, candidates, partial, self.recent[-4:], language, deadline
         )
