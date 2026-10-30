@@ -168,7 +168,7 @@ class MemorySession:
         try:
             self.store = store or memory.MemoryStore(root)
             self.journal = memory.ConversationLog(
-                self.store, self.key, self.label, extra_secrets
+                self.store, self.key, self.label, extra_secrets, guard=self.active
             )
             self.journal.append("event", "Session ouverte: " + self.label, "session")
         except memory.MemoryProblem as error:
@@ -176,7 +176,7 @@ class MemorySession:
             self.warning = str(error)
         try:
             if self.store:
-                self.store.read(self.key)
+                self.store.read(self.key, guard=self.active)
                 memory_automation.ready(self.store, self.key, self.session_id)
                 memory_automation.kick(self.store, self.model, self.embeddings)
         except memory.MemoryProblem as error:
@@ -215,7 +215,7 @@ class MemorySession:
             self.turn_barrier = -1
             try:
                 self.active()
-                self.store.read(self.key)
+                self.store.read(self.key, guard=self.active)
                 with memory_database.connection(self.store) as db:
                     self.turn_barrier = db.execute(
                         "SELECT barrier FROM memory_state WHERE user_id=?", (self.user.id,)
@@ -226,6 +226,11 @@ class MemorySession:
     def record(self, role, text, channel="chat", factual=None):
         with self.lock:
             if self.closed:
+                return
+            try:
+                self.active()
+            except memory.MemoryProblem as error:
+                self.warning = str(error)
                 return
             usable = factual if channel == "theatre" else text
             if usable is not None:
@@ -243,7 +248,7 @@ class MemorySession:
                 try:
                     if safe == usable and not explicit_request(safe) and not shared_request(safe):
                         memory_automation.enqueue(self.store, self.key, self.session_id, safe,
-                                                  expected_barrier=self.turn_barrier)
+                                                  expected_barrier=self.turn_barrier, expected_user=self.user)
                         memory_automation.kick(self.store, self.model, self.embeddings)
                 except memory.MemoryProblem as error:
                     self.warning = str(error)
@@ -265,7 +270,7 @@ class MemorySession:
             with self.lock:
                 self.active()
                 return (
-                    self.store.read(self.key).get("language")
+                    self.store.read(self.key, guard=self.active).get("language")
                     if self.key != "shared"
                     else None
                 )
@@ -277,7 +282,7 @@ class MemorySession:
         try:
             with self.lock:
                 self.active()
-                self.store.set_language(self.key, language)
+                self.store.set_language(self.key, language, guard=self.active)
         except memory.MemoryProblem as error:
             self.warning = str(error)
 
@@ -285,12 +290,12 @@ class MemorySession:
         try:
             with self.lock:
                 self.active()
-                data = self.store.read(self.key)
+                data = self.store.read(self.key, guard=self.active)
             selected, _ = memory_vectors.ordered(self.store, self.key, data, question,
                                                   self.recent, self.embeddings)
             with self.lock:
                 self.active()
-                current = {item["id"]: item for item in self.store.read(self.key)["items"]}
+                current = {item["id"]: item for item in self.store.read(self.key, guard=self.active)["items"]}
                 selected = [item for item in selected if current.get(item["id"]) == item]
                 return memory.context({**data, "items": selected}, question, self.label, retrieved=True)
         except memory.MemoryProblem as error:
@@ -319,7 +324,7 @@ class MemorySession:
                     r["kind"] in {"list", "task"}
                     and r["status"] == "open"
                     and memory.tokens(r["text"]) & words
-                    for r in self.store.read(self.key)["items"]
+                    for r in self.store.read(self.key, guard=self.active)["items"]
                 )
             except (memory.MemoryProblem, AttributeError):
                 return False
@@ -454,7 +459,7 @@ class MemorySession:
                 )
             with self.lock:
                 self.pending = None
-        snapshot = self.store.read(self.key)
+        snapshot = self.store.read(self.key, guard=self.active)
         folded = memory.normalized(question)
         if folded in {"memoire", "memory"}:
             return {"display": self.display(snapshot["items"])}
@@ -628,7 +633,7 @@ class MemorySession:
                     raise memory.MemoryProblem(
                         "Le modèle n'a vu qu'un extrait de cette note longue. Donnez un remplacement complet : REMPLACE ENTIEREMENT la note nom par : texte."
                     )
-            item, result = self.store.apply(self.key, proposal, snapshot)
+            item, result = self.store.apply(self.key, proposal, snapshot, guard=self.active)
             memory_automation.kick(self.store, self.model, self.embeddings)
             self.pending = None
         return {

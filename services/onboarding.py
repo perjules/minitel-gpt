@@ -229,7 +229,7 @@ class Session:
         if private_answer:
             # Do not send the declined personal detail to the dialogue model.
             question = "PASSER" if language != "en" else "SKIP"
-        snapshot = self.selected.store.read(self.selected.key)
+        snapshot = self.selected.store.read(self.selected.key, guard=self.selected.active)
         event_id = state["turns"] + 1
         previous_question = next(
             (t["text"] for t in reversed(state["history"]) if t["role"] == "assistant"),
@@ -298,7 +298,7 @@ class Session:
             stage = "commit"
             with (
                 self.selected.lock,
-                self.selected.store.locked(self.selected.key),
+                self.selected.store.locked(self.selected.key, guard=self.selected.active),
                 memory_database.connection(self.selected.store) as db,
             ):
                 self.selected.active()

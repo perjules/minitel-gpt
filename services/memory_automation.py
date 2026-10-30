@@ -31,7 +31,7 @@ def enabled():
     return os.getenv("MINITEL_MEMORY_AUTO", "1").strip() != "0"
 
 
-def enqueue(store, key, session_id, text, expected_barrier=None):
+def enqueue(store, key, session_id, text, expected_barrier=None, expected_user=None):
     if (
         not enabled()
         or not text.strip()
@@ -43,6 +43,8 @@ def enqueue(store, key, session_id, text, expected_barrier=None):
     with sql.connection(store) as db:
         user = sql.owner(db, key)
         if user is None or user["id"] == 1 or not user["enabled"]:
+            return
+        if expected_user is not None and (user["id"] != expected_user.id or user["revision"] != expected_user.revision):
             return
         state = db.execute(
             "SELECT * FROM memory_state WHERE user_id=?", (user["id"],)

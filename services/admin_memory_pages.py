@@ -2,6 +2,7 @@
 
 BODY = '''
 <p><a href="/?section=maintenance#memory">Retour à Maintenance</a></p>
+<p><a href=/users>Gérer les profils / supprimer un utilisateur et ses mémoires</a></p>
 <p>Souvenirs propres à chaque profil. Les noms ne sont pas une authentification.
 Les conversations et sauvegardes héritées restent séparées. Aucun appel IA depuis cette page.</p>
 <p>Apprentissage automatique global : <b>{{'actif' if automatic else 'en pause'}}</b>.

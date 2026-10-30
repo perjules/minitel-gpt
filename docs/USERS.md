@@ -59,6 +59,37 @@ late enrollments and stale credential operations. OAuth attempts retain their
 user/account target, PKCE and state in bounded RAM. Reauthorization to a different
 Google mailbox is rejected; adding that mailbox requires a separate account.
 
+## Delete a test profile
+
+In **Services → Utilisateurs et accès**, expand **Supprimer le profil et toutes
+ses mémoires** for a named user. Retype its displayed name exactly and submit.
+Maintenance → Mémoire des utilisateurs also links to this page. The reserved
+MinitelGPT profile cannot be deleted. Authenticated POST, CSRF, exact confirmation
+and the current profile revision are checked on the server.
+
+This deliberately removes the named identity, aliases, Gmail assignment and
+PRONOTE grants, saved memories/notes/lists/tasks, vectors, pending learning events,
+welcome progress/history and that profile's complete archive directory, including
+old JSON backups. It does not disconnect shared Gmail accounts, erase their
+credentials, change PRONOTE account configuration, or affect other profiles.
+Independent whole-database backups, exported files and operational journals are
+outside this per-profile deletion; manage those separately when needed.
+
+The profile is disabled and its revision advanced before cleanup, so active
+sessions and late writes lose access. Cleanup holds the existing profile lock and
+a short database transaction. If archive removal fails, the profile remains
+disabled; reload and retry rather than assuming deletion succeeded. The name
+remains reserved until cleanup completes. SQLite and the filesystem do not share
+an atomic transaction: a disk/database error may leave partially removed files
+and a disabled profile requiring retry. Archive removal does not follow links
+outside the validated profile folder.
+
+A small additive `user_identity_sequence` counter retains the highest allocated
+numeric ID, preventing SQLite from reusing a deleted ID for an unrelated profile.
+It contains no names or personal data and leaves schema versions unchanged.
+Explicitly entering a deleted name again creates a fresh, empty profile with a
+new numeric identity and no service access. Old sessions cannot bind to it.
+
 ## Rollout on the Pi
 
 Use the complete release on develop, not an intermediate implementation commit.

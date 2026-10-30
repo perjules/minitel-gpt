@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import shutil
 import sqlite3
 import tempfile
 import unicodedata
@@ -131,10 +132,10 @@ COMMIT;""")
                     ).fetchone()
                     if existing is not None:
                         raise GmailError("user_alias_conflict")
-                    user_id = db.execute(
-                        "INSERT INTO users(display_name,memory_key) VALUES(?,?)",
-                        (label, key),
-                    ).lastrowid
+                    self.retain_user_ids(db)
+                    db.execute("UPDATE user_identity_sequence SET last_id=last_id+1 WHERE id=1")
+                    user_id = db.execute("SELECT last_id FROM user_identity_sequence WHERE id=1").fetchone()[0]
+                    db.execute("INSERT INTO users(id,display_name,memory_key) VALUES(?,?,?)", (user_id, label, key))
                     db.execute(
                         "INSERT INTO user_aliases VALUES(?,?)", (canonical, user_id)
                     )
@@ -143,6 +144,56 @@ COMMIT;""")
                         "SELECT * FROM users WHERE id=?", (user_id,)
                     ).fetchone()
             return self.user(row)
+
+    @staticmethod
+    def retain_user_ids(db):
+        # SQLite otherwise reuses the highest deleted id, reviving stale sessions.
+        # Only creation/deletion initializes this additive counter, never read guards.
+        db.execute("CREATE TABLE IF NOT EXISTS user_identity_sequence(id INTEGER PRIMARY KEY CHECK(id=1),last_id INTEGER NOT NULL)")
+        db.execute("INSERT OR IGNORE INTO user_identity_sequence SELECT 1,coalesce(max(id),1) FROM users")
+        db.execute("UPDATE user_identity_sequence SET last_id=max(last_id,(SELECT coalesce(max(id),1) FROM users)) WHERE id=1")
+
+    def delete(self, user_id, expected_revision, confirmation):
+        """Disable first, then purge this profile only; failed cleanup stays disabled."""
+        if user_id == 1:
+            raise GmailError("reserved_user")
+        store = memory.MemoryStore(self.root)
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+            if row is None:
+                raise GmailError("unknown_user")
+            if row["revision"] != expected_revision:
+                raise GmailError("user_changed")
+            if confirmation != row["display_name"]:
+                raise GmailError("user_confirmation_required")
+            key = row["memory_key"]
+            store.folder(key)  # Validate fixed paths before changing any permissions.
+            if key == "shared":
+                raise GmailError("reserved_user")
+            self.retain_user_ids(db)
+            db.execute("UPDATE users SET enabled=0,revision=revision+1 WHERE id=?", (user_id,))
+        try:
+            # The disabled row keeps aliases reserved throughout physical cleanup.
+            with store.locked(key) as folder, self.connection() as db:
+                db.execute("BEGIN IMMEDIATE")
+                row = db.execute("SELECT revision,enabled FROM users WHERE id=?", (user_id,)).fetchone()
+                if row is None or row["revision"] != expected_revision + 1 or row["enabled"]:
+                    raise GmailError("user_changed")
+                tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                for table in ("user_onboarding", "user_aliases", "user_gmail_access", "user_pronote_children",
+                              "memory_events", "memory_items", "memory_state"):
+                    if table in tables:
+                        db.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+                # rmtree does not follow links inside the validated profile folder.
+                shutil.rmtree(folder)
+                db.execute("DELETE FROM users WHERE id=?", (user_id,))
+        except (OSError, memory.MemoryProblem, GmailError) as error:
+            if isinstance(error, GmailError) and str(error) == "user_changed":
+                raise
+            raise memory.MemoryProblem(
+                "Suppression incomplète : profil désactivé. Rechargez la page et réessayez."
+            ) from None
 
     @staticmethod
     def user(row):

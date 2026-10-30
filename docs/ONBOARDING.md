@@ -63,8 +63,16 @@ no owner preset/default text is edited. The structured output carries proposed
 facts with catalogue topics and exact current-answer quotes. Python drops any
 proposal belonging to a skipped topic, applies the remaining validated batch
 atomically, and marks its origin `onboarding`. Sources retain the actual preceding
-question so a short reply such as `10` remains understandable. Invalid output or
-an API error pauses the optional phase and ordinary chat remains available.
+question so a short reply such as `10` remains understandable. An invalid dialogue
+envelope or an API error pauses the optional phase; ordinary chat remains available.
+Invalid memory proposals are rejected as a complete batch without discarding an
+otherwise valid reply or pausing the conversation. Missing save IDs default to
+null and absent titles to empty text; evidence, ownership and replacement IDs
+remain validated. The model receives explicit JSON examples. The single-question
+rule guides the prose, rather than treating a second question mark as a failed
+conversation. The journal logs `onboarding status=memory_rejected` or
+`status=paused stage=generation|dialogue_validation|commit` with the exception class,
+never the personal answer, provider response or memory text.
 
 These exchanges use a separate `onboarding` archive channel and do not enter the
 generic background memory queue. A request not to memorize the current answer is

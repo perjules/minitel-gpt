@@ -157,14 +157,18 @@ class MemoryStore:
         return folder
 
     @contextmanager
-    def locked(self, key):
+    def locked(self, key, guard=None):
         try:
+            if guard:
+                guard()
             folder = self.folder(key)
             descriptor = os.open(
                 folder / ".lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600
             )
             with os.fdopen(descriptor, "a+") as stream:
                 fcntl.flock(stream, fcntl.LOCK_EX)
+                if guard:
+                    guard()
                 yield folder
         except OSError:
             raise MemoryProblem(
@@ -227,12 +231,12 @@ class MemoryStore:
             import memory_database
         memory_database.write(self, folder, data)
 
-    def read(self, key):
-        with self.locked(key) as folder:
+    def read(self, key, guard=None):
+        with self.locked(key, guard=guard) as folder:
             return self._read(folder)
 
-    def apply(self, key, proposal, snapshot):
-        with self.locked(key) as folder:
+    def apply(self, key, proposal, snapshot, guard=None):
+        with self.locked(key, guard=guard) as folder:
             data = self._read(folder)
             operation = proposal.get("operation")
             if not isinstance(operation, str) or operation not in {
@@ -323,12 +327,12 @@ class MemoryStore:
             }[operation]
             return item, label
 
-    def set_language(self, key, language):
+    def set_language(self, key, language, guard=None):
         if key == "shared":
             return
         if language not in ("fr", "en"):
             raise MemoryProblem("Langue invalide.")
-        with self.locked(key) as folder:
+        with self.locked(key, guard=guard) as folder:
             data = self._read(folder)
             if data.get("language") == language:
                 return
@@ -428,8 +432,9 @@ def catalogue(data, question, ordered=None):
 
 
 class ConversationLog:
-    def __init__(self, store, key, label, extra_secrets=()):
+    def __init__(self, store, key, label, extra_secrets=(), guard=None):
         self.store, self.key, self.label = store, key, label
+        self.guard = guard
         self.extra_secrets = extra_secrets
         self.filename = (
             datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d_%H%M%S")
@@ -453,7 +458,7 @@ class ConversationLog:
             "text": redact(text, self.extra_secrets),
         }
         try:
-            with self.lock, self.store.locked(self.key) as folder:
+            with self.lock, self.store.locked(self.key, guard=self.guard) as folder:
                 logs = folder / "logs"
                 logs.mkdir(exist_ok=True)
                 descriptor = os.open(

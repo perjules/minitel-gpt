@@ -2017,15 +2017,23 @@ USERS_HTML = admin_service_pages.HEAD + """
 <label>Compte Gmail<select name=account_id><option value="">Aucun accès</option>{% for a in accounts %}<option value="{{a.id}}" {{'selected' if details[u.id].account_id==a.id}}>{{a.email}} {{'(désactivé)' if not a.enabled}}</option>{% endfor %}</select></label>
 <label><input type=checkbox name=send {{'checked' if details[u.id].can_send}}> Autoriser aussi l’envoi (sinon lecture seule)</label>
 <p>PRONOTE : enfants autorisés</p>{% for child in children %}<label><input type=checkbox name=child value="{{child}}" {{'checked' if child in details[u.id].children}}> {{child}}</label>{% endfor %}
-<button>Enregistrer les accès</button></form></section>{% endfor %}
+<button>Enregistrer les accès</button></form>
+{% if u.id != 1 %}<details><summary>Supprimer le profil et toutes ses mémoires</summary>
+<p>Suppression définitive des souvenirs, notes, listes, vecteurs, premier accueil, conversations et anciens JSON de ce profil, ainsi que de ses alias et accès.
+Les comptes Gmail/PRONOTE et les autres profils sont conservés. Les sauvegardes globales restent séparées.</p>
+<form method=post action="/users/{{u.id}}/delete"><input type=hidden name=csrf value="{{csrf_token()}}">
+<input type=hidden name=revision value="{{u.revision}}">
+<label>Retapez exactement {{u.display_name}} pour confirmer<input name=confirmation required autocomplete=off maxlength=60></label>
+<button class="btn btn-d">Supprimer définitivement ce profil et ses données</button></form></details>
+{% else %}<p>Le profil réservé MinitelGPT ne peut pas être supprimé.</p>{% endif %}</section>{% endfor %}
 """
 
 
 @app.route('/users',methods=['GET','POST'])
 @require_login
 def users_admin():
-    registry = user_registry.Registry()
-    message = ''
+    registry = user_registry.Registry(inspection_store().root)
+    message = session.pop('flash', '')
     try:
         if request.method == 'POST':
             if request.form.get('action') == 'create':
@@ -2048,6 +2056,28 @@ def users_admin():
     except (gmail_auth.GmailError,ValueError,KeyError) as error:
         return render_template_string(admin_service_pages.HEAD,title='Utilisateurs et accès',
                                       message='Modification refusée : '+str(error)),400
+
+
+@app.route('/users/<int:user_id>/delete', methods=['POST'])
+@require_login
+def delete_user(user_id):
+    registry = user_registry.Registry(inspection_store().root)
+    try:
+        registry.delete(user_id, int(request.form.get('revision', '-1')), request.form.get('confirmation', ''))
+    except (gmail_auth.GmailError, ValueError) as error:
+        abort(409 if str(error) == 'user_changed' else 400, 'Suppression refusée. Rechargez le profil et vérifiez le nom de confirmation.')
+    with MEMORY_SESSIONS_LOCK:
+        for identifier, item in list(MEMORY_SESSIONS.items()):
+            selected = item['memory']
+            if selected.registry.root == registry.root and selected.user.id == user_id:
+                discard_memory(identifier)
+    with MAIL_SESSIONS_LOCK:
+        for identifier, item in list(MAIL_SESSIONS.items()):
+            tokens = getattr(item['mail'].client, 'tokens', None)
+            if isinstance(tokens, user_services.ProfileTokens) and tokens.registry.root == registry.root and tokens.user.id == user_id:
+                discard_mail(identifier)
+    session['flash'], session['flash_ok'] = 'Profil, accès et données personnelles supprimés.', True
+    return redirect(url_for('users_admin'))
 
 
 @app.route('/services/gmail/accounts',methods=['POST'])

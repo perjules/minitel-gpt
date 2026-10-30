@@ -50,6 +50,12 @@ lorsque sa réponse termine plus tard. De nouveaux énoncés ultérieurs
 peuvent être appris. Supprimer un souvenir ne supprime pas ses anciennes
 conversations, ses sauvegardes ou les extraits déjà reçus par un modèle.
 
+Pour effacer un profil de test avec ses souvenirs et toutes ses archives locales,
+utilisez **Services → Utilisateurs et accès → Supprimer le profil et toutes ses
+mémoires**, puis retapez son nom pour confirmer. Cela retire aussi les vecteurs,
+l’accueil et les accès de ce profil. Les comptes externes, autres utilisateurs et
+sauvegardes globales sont conservés. Voir [USERS.md](USERS.md#delete-a-test-profile).
+
 ## Premier accueil
 
 Les nouveaux profils nommés bénéficient d’un [accueil conversationnel](ONBOARDING.md)
