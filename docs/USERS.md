@@ -13,11 +13,23 @@ Aliases must be unique; a disabled identity does not become a new identity.
 
 `users.sqlite3` lives under MINITEL_MEMORY_DIR, or
 `/home/minitel/.local/share/3615-ia`, outside Git. The database is private (0600),
-uses SQLite foreign keys and short transactions, and schema version 1. It contains
+uses SQLite foreign keys and short transactions, and schema version 2. It contains
 profiles, aliases, Gmail metadata, one-mailbox assignments, read/send permissions
 and PRONOTE child grants. No OAuth secrets, passwords, mail bodies or memory
 contents are stored there. Connections are short-lived with a three-second lock
 wait. An invalid database is reported, not silently replaced.
+
+Each user has at most one assigned mailbox. Several users may explicitly share
+the same mailbox, with separate read/send permissions. An unassigned profile never
+inherits the default profile's mailbox. The account list shows each mailbox once
+and lists all assigned profiles. Disabling or disconnecting an account affects all
+its users; removing one profile's assignment affects only that profile.
+
+Version 1 upgrades automatically on first database access. The migration backs up
+the old database once as `users.before-shared-gmail.sqlite3`, then removes the
+mailbox's reverse uniqueness constraint in a transaction. Existing profiles,
+aliases, assignments, permissions and memory identifiers are retained. No mailbox
+is assigned automatically. New databases start directly at version 2.
 
 The existing memory files and saved language preferences are unchanged. No memory
 migration, user password UI, background synchronization or autonomous send is added.
@@ -55,8 +67,11 @@ The runtime checks that the interpreter imports sqlite3.
    the dedicated device Gmail account, then Apply. Apply assigns read-only access
    unless **Autoriser aussi l’envoi** is checked. Both services restart after the
    response so systemd delivers the updated credential bundle.
-5. Connect additional users in the same way. Each account belongs to one profile
-   in this release. Configure allowed PRONOTE child aliases in Utilisateurs et accès.
+5. Connect additional mailboxes in the same way. To share an already connected
+   mailbox (including the dedicated device account), select it for each intended
+   profile in Utilisateurs et accès and save. No new Google authorization is needed;
+   choose read-only or read/send separately for each profile. Configure allowed
+   PRONOTE child aliases there as well.
 6. Check each mailbox using the explicit account selector and read-only connection
    check. The user-mode Gmail console honors the selected user's grants.
 
@@ -72,6 +87,8 @@ account. Use **Synchroniser les comptes enregistrés** to recover its metadata,
 then explicitly assign it. Synchronization does not grant access. If Apply fails,
 retry Apply. A local disconnect removes grants first; failure to erase ciphertext
 leaves a disabled account, not restored access. It does not revoke Google's grant.
+Reauthorization of a shared account replaces its credentials for all assigned
+profiles and invalidates their old sessions; it preserves each profile's grants.
 
 ## Recovery and downgrade
 
@@ -87,6 +104,9 @@ SQLite and encrypted account bundle, restore matching old data and legacy
 credential delivery under root, and only then deploy the old release. Removing
 or renaming the account bundle without restoring matching code/units is unsafe.
 Do not downgrade merely to regain automatic shared-mailbox access.
+Schema-version-1 code cannot open a version-2 database. Returning to that code
+requires restoring matching database data with both services stopped; a normal
+code rollback does not restore the pre-migration database backup.
 
 ## Acceptance
 
@@ -106,3 +126,11 @@ focused account tests exercise real SQLite transactions/concurrency and mocked
 private-service boundaries, including stale-result rejection and migration backup.
 No live Google requests, real email sends, Pi deployment, systemd commands or
 physical Minitel checks were performed as part of this implementation.
+
+## Shared-mailbox correction — 30 October 2026
+
+The complete suite passed: **658 tests**. Ruff, requirements export freshness and
+git whitespace checks passed. Added coverage includes concurrent version-1
+migration and backup, shared assignments, one-mailbox-per-user enforcement,
+independent send permissions, session invalidation, account-wide controls and
+reauthorization targeting. No live Google requests or Pi deployment were performed.

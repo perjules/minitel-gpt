@@ -11,9 +11,9 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}summary{cursor:pointer}input:dis
 {% if message %}<p role=status>{{message}}</p>{% endif %}'''
 GMAIL = '''<section><h2>Comptes Gmail</h2><p>{{account}}</p>
 <p><a href=/users>Utilisateurs et accès</a></p>
-{% for a in oauth_accounts %}<p>{{a.email}} · profil #{{a.user_id or 'non attribué'}}</p>
+{% for a in oauth_accounts %}<p>{{a.email}} · {% for u in a.users %}{{u.display_name}} (#{{u.user_id}}, {{'lecture et envoi' if u.can_send else 'lecture seule'}}){{', ' if not loop.last}}{% else %}non attribué{% endfor %}</p>
 <form method=post action=/services/gmail/accounts><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=disable><input type=hidden name=account_id value="{{a.id}}"><label><input type=checkbox name=enabled {{'checked' if a.enabled}}> Compte actif</label><button>Appliquer</button></form>
-<form method=post action=/services/gmail/accounts onsubmit="return confirm('Déconnecter ce compte et retirer ses accès locaux ?')"><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=disconnect><input type=hidden name=account_id value="{{a.id}}"><button>Déconnecter localement</button></form>{% endfor %}
+<form method=post action=/services/gmail/accounts onsubmit="return confirm('Déconnecter ce compte et retirer les accès de tous les profils qui l’utilisent ?')"><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=disconnect><input type=hidden name=account_id value="{{a.id}}"><button>Déconnecter localement</button></form>{% endfor %}
 <form method=post action=/services/gmail/accounts><input type=hidden name=csrf value="{{csrf_token()}}"><button name=action value=migrate>Importer l’ancien compte partagé sans l’attribuer</button><button name=action value=sync>Synchroniser les comptes enregistrés</button></form>
 <p>Intégration : {{'active' if enabled else 'inactive'}}. La configuration locale ne confirme pas la connexion.</p>
 <form method=post action=/services/gmail/toggle><input type=hidden name=csrf value="{{csrf_token()}}">

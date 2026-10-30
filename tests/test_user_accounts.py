@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import sqlite3
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -47,12 +48,12 @@ def test_identity_memory_aliases_and_grants_survive_restart(tmp_path):
     assert r.path.stat().st_mode & 0o777 == 0o600
     with r.connection() as db:
         assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
 
 
 def test_failed_alias_or_account_assignment_rolls_back(tmp_path):
     r, a, _b = setup_registry(tmp_path)
-    for aliases, account in [(["Bob"], A), (["Alice"], B), (["Alice"], "c" * 32)]:
+    for aliases, account in [(["Bob"], A), (["Alice"], "c" * 32)]:
         with pytest.raises(auth.GmailError):
             r.configure(a.id, "Alice", True, aliases, account, True, [])
         assert r.gmail(a.id)[1] == A and r.children(a.id) == {"Alex"}
@@ -139,10 +140,15 @@ def test_admin_profile_routes_enforce_csrf_and_transactional_assignments(console
         "name": "Alice",
         "aliases": "Alice",
         "enabled": "on",
-        "account_id": B,
+        "account_id": "c" * 32,
     }
     assert client.post("/users", data=form, headers=headers).status_code == 400
     assert r.gmail(a.id)[1] == A
+    form["account_id"] = B
+    assert client.post("/users", data=form, headers=headers).status_code == 200
+    assert r.gmail(a.id)[1] == r.gmail(_b.id)[1] == B
+    page = client.get("/users").text
+    assert page.count(f'<option value="{B}" selected>') == 2
     assert "alice@example.org" in client.get("/users").text
 
 
@@ -333,7 +339,164 @@ def test_migration_retains_unassigned_account_and_backs_up_registry(
     )
     assert response.status_code == 303
     r = user_registry.Registry()
-    assert r.accounts()[0]["user_id"] is None
+    assert r.accounts()[0]["users"] == []
     assert r.path.with_name("users.before-multi.sqlite3").is_file()
     with pytest.raises(auth.GmailError):
         r.gmail(1)
+
+
+def test_shared_mailbox_keeps_independent_permissions_and_no_implicit_access(tmp_path):
+    r, a, b = setup_registry(tmp_path)
+    r.configure(b.id, "Bob", True, ["Bob"], A, False, ["Sam"])
+    default = r.resolve("")
+    r.configure(default.id, default.display_name, True, [], A, True, [])
+    assert r.gmail(a.id, "send")[1] == r.gmail(b.id)[1] == r.gmail(1, "send")[1] == A
+    with pytest.raises(auth.GmailError):
+        r.gmail(b.id, "send")
+    with pytest.raises(auth.GmailError):
+        r.gmail(r.resolve("New").id)
+    accounts = r.accounts()
+    assert len(accounts) == 2
+    shared = next(account for account in accounts if account["id"] == A)
+    assert {u["user_id"] for u in shared["users"]} == {1, a.id, b.id}
+    assert r.details(b.id)["can_send"] == 0
+    with r.connection() as db, pytest.raises(sqlite3.IntegrityError):
+        db.execute("INSERT INTO user_gmail_access VALUES(?,?,1,0)", (a.id, B))
+    # Replacing one user's mailbox leaves all other users on the shared account.
+    r.configure(b.id, "Bob", True, ["Bob"], B, False, [])
+    assert r.gmail(b.id)[1] == B and r.gmail(a.id)[1] == r.gmail(1)[1] == A
+
+
+def test_shared_mailbox_session_revocation_is_per_user_but_reauthorization_is_global():
+    r, a, b = setup_registry()
+    r.configure(b.id, "Bob", True, ["Bob"], A, False, [])
+    alice = user_services.ProfileTokens(a, r)
+    bob = user_services.ProfileTokens(r.get(b.id), r)
+    alice.guard("send")
+    bob.guard()
+    r.configure(b.id, "Bob", True, ["Bob"], None, False, [])
+    with pytest.raises(auth.GmailError):
+        bob.guard()
+    alice.guard("send")
+    r.configure(b.id, "Bob", True, ["Bob"], A, False, [])
+    bob = user_services.ProfileTokens(r.get(b.id), r)
+    bob.guard()
+    r.record_account(A, "alice@example.org", 2)
+    for tokens in (alice, bob):
+        with pytest.raises(auth.GmailError, match="changed"):
+            tokens.guard()
+    assert r.gmail(a.id)[2] == r.gmail(b.id)[2] == 2
+
+
+@pytest.mark.parametrize("action", ["disable", "disconnect"])
+def test_account_controls_affect_all_explicitly_assigned_users(
+    console, monkeypatch, action
+):
+    client, headers, _ = console
+    r, a, b = setup_registry()
+    r.configure(b.id, "Bob", True, ["Bob"], A, False, [])
+    page = client.get("/services/gmail").text
+    assert "Alice (#" in page and "Bob (#" in page
+    assert (
+        page.count("alice@example.org") == 2
+    )  # One account card and one check option.
+    helper = Mock(
+        side_effect=lambda request: (
+            {"status": "saved"}
+            if request["operation"] == "forget"
+            else (
+                {A: {"email": "alice@example.org", "revision": 1}}
+                if action == "disable"
+                else {}
+            )
+        )
+    )
+    monkeypatch.setattr(auth, "credential_helper", helper)
+    response = client.post(
+        "/services/gmail/accounts",
+        headers=headers,
+        data={"action": action, "account_id": A},
+    )
+    assert response.status_code == 303
+    for user in (a, b):
+        with pytest.raises(auth.GmailError):
+            r.gmail(user.id)
+        assert r.get(user.id).revision > user.revision
+
+
+def test_shared_mailbox_oauth_targets_existing_enrollment(console, monkeypatch):
+    client, headers, _ = console
+    r, _a, b = setup_registry()
+    r.configure(b.id, "Bob", True, ["Bob"], A, False, [])
+    origin = "https://pi.synthetic.ts.net:9443"
+    with client.session_transaction(base_url=origin) as state:
+        state.update(logged_in=True, csrf_token="test-token")
+    monkeypatch.setattr(
+        admin.gmail_oauth,
+        "configuration",
+        lambda: {"redirect_uri": origin + auth.OAUTH_CALLBACK},
+    )
+    begin = Mock(return_value=("attempt", "https://accounts.google.com/synthetic"))
+    monkeypatch.setattr(admin.gmail_oauth, "begin", begin)
+    result = client.post(
+        "/services/gmail/oauth/start",
+        headers=headers,
+        base_url=origin,
+        data={"user_id": b.id},
+    )
+    assert result.status_code == 303
+    target = begin.call_args.args[1]
+    assert (
+        target["account_id"] == A
+        and target["user_id"] == b.id
+        and target["revision"] == 1
+    )
+
+
+def test_version_one_upgrade_preserves_data_and_backup_under_concurrent_use(tmp_path):
+    r, a, b = setup_registry(tmp_path)
+    # Recreate the exact restriction shipped in schema v1, with real existing grants.
+    with sqlite3.connect(r.path) as db:
+        db.executescript("""
+ALTER TABLE user_gmail_access RENAME TO access_current;
+CREATE TABLE user_gmail_access(user_id INTEGER PRIMARY KEY REFERENCES users(id),
+ account_id TEXT NOT NULL UNIQUE REFERENCES gmail_accounts(id),
+ can_read INTEGER NOT NULL CHECK(can_read IN (0,1)),
+ can_send INTEGER NOT NULL CHECK(can_send IN (0,1) AND can_send<=can_read));
+INSERT INTO user_gmail_access SELECT * FROM access_current;
+DROP TABLE access_current;
+PRAGMA user_version=1;
+""")
+        before = {
+            name: db.execute("SELECT * FROM " + name).fetchall()
+            for name in (
+                "users",
+                "user_aliases",
+                "gmail_accounts",
+                "user_gmail_access",
+                "user_pronote_children",
+            )
+        }
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        list(
+            executor.map(
+                lambda _: user_registry.Registry(tmp_path).resolve("Alice"), range(4)
+            )
+        )
+    backup = tmp_path / "users.before-shared-gmail.sqlite3"
+    assert backup.stat().st_mode & 0o777 == 0o600
+    with sqlite3.connect(backup) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert {
+            name: db.execute("SELECT * FROM " + name).fetchall() for name in before
+        } == before
+    with r.connection() as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert {
+            name: [tuple(row) for row in db.execute("SELECT * FROM " + name)]
+            for name in before
+        } == before
+        assert not db.execute("PRAGMA foreign_key_check").fetchall()
+    assert r.get(a.id).memory_key == a.memory_key and r.get(b.id).revision == b.revision
+    r.configure(b.id, "Bob", True, ["Bob"], A, False, ["Sam"])
+    assert r.gmail(b.id)[1] == r.gmail(a.id)[1] == A

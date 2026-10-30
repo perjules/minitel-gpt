@@ -1786,7 +1786,7 @@ def service_configuration(feature):
         context = {}
     else:
         body = admin_service_pages.GMAIL
-        account = "Chaque profil utilise uniquement le compte qui lui est attribué."
+        account = "Un seul compte par profil ; un même compte peut être attribué explicitement à plusieurs profils. Aucun compte de secours automatique."
         if request.method == "POST":
             if request.form.get("action") != "check":
                 abort(400)
@@ -1805,7 +1805,7 @@ def service_configuration(feature):
             oauth_uri = gmail_oauth.configuration()["redirect_uri"]
         except gmail_auth.GmailError:
             oauth_uri = ""
-        context = {"account": account, "enabled": gmail_enabled(), "single_account": True,
+        context = {"account": account, "enabled": gmail_enabled(),
                    "oauth_users": user_registry.Registry().users(), "oauth_accounts": user_registry.Registry().accounts(),
                    "oauth_uri": oauth_uri, "oauth_ready": session.get("gmail_oauth_saved", False),
                    "oauth_console": oauth_uri.removesuffix(gmail_auth.OAUTH_CALLBACK) + "/services/gmail" if oauth_uri else ""}
@@ -1852,7 +1852,8 @@ def gmail_oauth_action(action):
             registry = user_registry.Registry()
             selected = registry.get(int(request.form.get('user_id', '1')))
             accounts = registry.accounts()
-            existing = next((a for a in accounts if a['user_id'] == selected.id), None)
+            assigned = registry.details(selected.id)['account_id']
+            existing = next((a for a in accounts if a['id'] == assigned), None)
             target = {'user_id':selected.id,'user_revision':selected.revision,
                       'account_id':existing['id'] if existing else secrets.token_hex(16),
                       'revision':existing['revision'] if existing else 0}
@@ -1915,6 +1916,7 @@ def gmail_oauth_callback():
 
 USERS_HTML = admin_service_pages.HEAD + """
 <p>Un nom choisit un profil, sans authentification. <a href=/services/gmail>Comptes Gmail</a></p>
+<p>Un seul compte Gmail par profil. Plusieurs profils peuvent partager le même compte, avec des droits d’envoi distincts. Chaque attribution reste explicite.</p>
 <form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=create>
 <label>Nouveau nom<input name=name required maxlength=60></label><button>Créer le profil</button></form>
 {% for u in users %}<section><h2>{{u.display_name}} · #{{u.id}}</h2><form method=post>
@@ -1922,8 +1924,8 @@ USERS_HTML = admin_service_pages.HEAD + """
 <label>Nom affiché<input name=name value="{{u.display_name}}" required maxlength=60></label>
 <label>Alias (un par ligne)<textarea name=aliases>{{details[u.id].aliases|join('\n')}}</textarea></label>
 <label><input type=checkbox name=enabled {{'checked' if u.enabled}}> Profil actif (le profil commun reste actif)</label>
-<label>Compte Gmail<select name=account_id><option value="">Aucun accès</option>{% for a in accounts %}<option value="{{a.id}}" {{'selected' if a.user_id==u.id}}>{{a.email}} {{'(désactivé)' if not a.enabled}}</option>{% endfor %}</select></label>
-<label><input type=checkbox name=send {{'checked' if senders.get(u.id)}}> Autoriser aussi l’envoi (sinon lecture seule)</label>
+<label>Compte Gmail<select name=account_id><option value="">Aucun accès</option>{% for a in accounts %}<option value="{{a.id}}" {{'selected' if details[u.id].account_id==a.id}}>{{a.email}} {{'(désactivé)' if not a.enabled}}</option>{% endfor %}</select></label>
+<label><input type=checkbox name=send {{'checked' if details[u.id].can_send}}> Autoriser aussi l’envoi (sinon lecture seule)</label>
 <p>PRONOTE : enfants autorisés</p>{% for child in children %}<label><input type=checkbox name=child value="{{child}}" {{'checked' if child in details[u.id].children}}> {{child}}</label>{% endfor %}
 <button>Enregistrer les accès</button></form></section>{% endfor %}
 """
@@ -1952,7 +1954,7 @@ def users_admin():
         accounts = registry.accounts()
         return render_template_string(USERS_HTML,title='Utilisateurs et accès',message=message,users=users,
             accounts=accounts,details={u['id']:registry.details(u['id']) for u in users},
-            senders={a['user_id']:a['can_send'] for a in accounts},children=pronote.backend().config()['children'])
+            children=pronote.backend().config()['children'])
     except (gmail_auth.GmailError,ValueError,KeyError) as error:
         return render_template_string(admin_service_pages.HEAD,title='Utilisateurs et accès',
                                       message='Modification refusée : '+str(error)),400

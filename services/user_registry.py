@@ -4,8 +4,9 @@ import json
 import logging
 import os
 import sqlite3
+import tempfile
 import unicodedata
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 
 try:
@@ -44,7 +45,7 @@ class Registry:
             db.execute("PRAGMA foreign_keys=ON")
             with db:
                 version = db.execute("PRAGMA user_version").fetchone()[0]
-                if version not in (0, 1):
+                if version not in (0, 1, 2):
                     raise GmailError("user_registry_version")
                 if version == 0:
                     db.executescript("""BEGIN IMMEDIATE;
@@ -54,18 +55,55 @@ CREATE TABLE IF NOT EXISTS user_aliases(alias TEXT PRIMARY KEY, user_id INTEGER 
 CREATE TABLE IF NOT EXISTS gmail_accounts(id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE,
  enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)), revision INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS user_gmail_access(user_id INTEGER PRIMARY KEY REFERENCES users(id),
- account_id TEXT NOT NULL UNIQUE REFERENCES gmail_accounts(id), can_read INTEGER NOT NULL CHECK(can_read IN (0,1)),
+ account_id TEXT NOT NULL REFERENCES gmail_accounts(id), can_read INTEGER NOT NULL CHECK(can_read IN (0,1)),
  can_send INTEGER NOT NULL CHECK(can_send IN (0,1) AND can_send<=can_read));
 CREATE TABLE IF NOT EXISTS user_pronote_children(user_id INTEGER NOT NULL REFERENCES users(id), child TEXT NOT NULL,
  PRIMARY KEY(user_id,child));
 INSERT OR IGNORE INTO users(id,display_name,memory_key) VALUES(1,'MinitelGPT','shared');
-PRAGMA user_version=1;
+PRAGMA user_version=2;
 COMMIT;""")
+                elif version == 1:
+                    self.migrate_shared_mailboxes(db)
+                    db.commit()
                 yield db
         except (sqlite3.Error, OSError):
             raise GmailError("user_registry_unavailable") from None
         finally:
             db.close()
+
+    def migrate_shared_mailboxes(self, db):
+        """Remove only the reverse uniqueness rule, preserving all existing grants."""
+        db.execute("BEGIN IMMEDIATE")
+        # Another process may have upgraded while this connection waited for the lock.
+        if db.execute("PRAGMA user_version").fetchone()[0] != 1:
+            return
+        backup = self.path.with_name("users.before-shared-gmail.sqlite3")
+        if not backup.exists():
+            fd, temporary = tempfile.mkstemp(
+                prefix=".users-before-shared-", dir=self.root
+            )
+            os.close(fd)
+            # A separate reader can back up the committed version while this connection
+            # holds the writer reservation; backing up the writer itself would wait.
+            try:
+                with (
+                    closing(sqlite3.connect(self.path)) as source,
+                    closing(sqlite3.connect(temporary)) as target,
+                ):
+                    source.backup(target)
+                os.replace(temporary, backup)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+        db.execute("""CREATE TABLE user_gmail_access_v2(
+ user_id INTEGER PRIMARY KEY REFERENCES users(id),
+ account_id TEXT NOT NULL REFERENCES gmail_accounts(id),
+ can_read INTEGER NOT NULL CHECK(can_read IN (0,1)),
+ can_send INTEGER NOT NULL CHECK(can_send IN (0,1) AND can_send<=can_read))""")
+        db.execute("INSERT INTO user_gmail_access_v2 SELECT * FROM user_gmail_access")
+        db.execute("DROP TABLE user_gmail_access")
+        db.execute("ALTER TABLE user_gmail_access_v2 RENAME TO user_gmail_access")
+        db.execute("PRAGMA user_version=2")
 
     def resolve(self, name=""):
         key, label = memory.user_key(name)
@@ -115,12 +153,17 @@ COMMIT;""")
 
     def accounts(self):
         with self.connection() as db:
-            return [
+            accounts = [
                 dict(r)
-                for r in db.execute(
-                    "SELECT a.*,g.user_id,g.can_read,g.can_send FROM gmail_accounts a LEFT JOIN user_gmail_access g ON a.id=g.account_id ORDER BY email"
-                )
+                for r in db.execute("SELECT * FROM gmail_accounts ORDER BY email")
             ]
+            assignments = {}
+            for row in db.execute("""SELECT g.*,u.display_name FROM user_gmail_access g
+ JOIN users u ON u.id=g.user_id ORDER BY u.id"""):
+                assignments.setdefault(row["account_id"], []).append(dict(row))
+            for account in accounts:
+                account["users"] = assignments.get(account["id"], [])
+            return accounts
 
     def record_account(
         self, account_id, email, revision, target_user=None, expected_revision=None
@@ -198,7 +241,16 @@ COMMIT;""")
 
     def details(self, user_id):
         with self.connection() as db:
+            gmail = db.execute(
+                "SELECT account_id,can_read,can_send FROM user_gmail_access WHERE user_id=?",
+                (user_id,),
+            ).fetchone()
             return {
+                **(
+                    dict(gmail)
+                    if gmail
+                    else {"account_id": None, "can_read": False, "can_send": False}
+                ),
                 "aliases": [
                     r[0]
                     for r in db.execute(
