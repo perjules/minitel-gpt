@@ -240,3 +240,38 @@ def test_admin_birthday_is_an_answer_not_automatic_arithmetic(
     assert model.client.complete.call_args.args[1]["current_reply"] == "14/08/2016"
     assert len(model.client.complete.call_args.args[1]["today"]) == 10
     client.post("/logout", headers=headers)
+
+
+def test_admin_continues_after_intro_with_real_http_adapter_and_imperfect_memory(
+    console, welcome_enabled, monkeypatch
+):
+    client, headers, _ = console
+    monkeypatch.setattr(admin, "mistral_key", lambda: "synthetic-key")
+
+    def post(*args, **kwargs):
+        import json
+        data = json.loads(kwargs["json"]["messages"][1]["content"])
+        assert data["memory_item_example"]["evidence"][0]["event_id"] == data["current_event_id"]
+        if data["phase"] == "first":
+            text = response(reply="Faisons connaissance. Qui es-tu dans la vie ?", topic="daily_life")
+        elif data["current_reply"] == "J'ai 10 ans.":
+            proposal = fact("J'ai 10 ans.", event_id=data["current_event_id"])
+            del proposal["id"], proposal["title"]
+            text = response(reply="Quelle matière aimes-tu ?", topic="daily_life", memories=[proposal])
+        else:
+            text = response(reply="Qu'est-ce qui te plaît dans le dessin ?", topic="interests",
+                            memories=[fact("invented evidence", event_id=999)])
+        result = Mock()
+        result.json.return_value = {"choices": [{"finish_reason": "stop", "message": {"content": text}}]}
+        return result
+
+    monkeypatch.setattr(gmail_mail.requests, "post", post)
+    for message, expected in (("", "connaissance"), ("J'ai 10 ans.", "matière"), ("Le dessin.", "dessin")):
+        result = client.post("/test-preset", headers=headers, json={"preset_key": "main",
+            "memory_user": "Flow test", "message": message, "welcome_start": not message})
+        assert result.json["ok"] and expected in result.json["answer"]
+    with client.session_transaction() as cookie:
+        selected = admin.MEMORY_SESSIONS[cookie["memory_session"]]["memory"]
+    assert selected.welcome.state()["status"] == "active"
+    assert len(selected.store.read(selected.key)["items"]) == 1
+    client.post("/logout", headers=headers)

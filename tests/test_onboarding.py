@@ -170,12 +170,8 @@ def test_pause_stop_resume_and_completion_are_not_repeated(newcomer):
 @pytest.mark.parametrize(
     "changes",
     [
-        {"memories": [fact("invention")]},
-        {"memories": [fact("10", event_id=99)]},
         {"asked_topic": "unrecognised"},
-        {"reply": "Votre âge ? Votre travail ?"},
         {"owner": 999},
-        {"memories": [{"path": "/tmp/file"}]},
     ],
 )
 def test_invalid_model_output_never_partially_writes(newcomer, changes):
@@ -184,6 +180,30 @@ def test_invalid_model_output_never_partially_writes(newcomer, changes):
     newcomer.welcome.respond("10", "persona")
     assert not newcomer.store.read(newcomer.key)["items"]
     assert newcomer.welcome.state()["status"] == "paused"
+
+
+@pytest.mark.parametrize("memories", [[fact("invention")], [fact("10", event_id=99)],
+                                      [{"path": "/tmp/file"}], None])
+def test_invalid_memory_does_not_break_a_valid_conversation(newcomer, caplog, memories):
+    run(newcomer)
+    result = run(newcomer, "10", topic="daily_life", reply="Quelle matière aimez-vous ?",
+                 memories=memories)
+    assert result["display"] == "Quelle matière aimez-vous ?"
+    assert newcomer.welcome.state()["status"] == "active"
+    assert not newcomer.store.read(newcomer.key)["items"]
+    assert "onboarding status=memory_rejected" in caplog.text
+    assert "10" not in caplog.text and "/tmp/file" not in caplog.text
+
+
+def test_safe_save_defaults_and_conversational_punctuation_are_not_fatal(newcomer):
+    run(newcomer)
+    proposal = fact("10")
+    del proposal["id"], proposal["title"]
+    result = run(newcomer, "10", topic="daily_life", memories=[proposal],
+                 reply="Qu'aimez-vous à l'école ? Ou voulez-vous m'en dire plus ?")
+    assert "école" in result["display"]
+    assert newcomer.welcome.state()["status"] == "active"
+    assert newcomer.store.read(newcomer.key)["items"][0]["text"] == "User is 10 years old."
 
 
 def test_no_personal_facts_without_user_reply_and_no_save_refusal(newcomer):
