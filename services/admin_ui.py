@@ -49,6 +49,7 @@ try:
         io_limits,
         memory_session,
         mistral_answers,
+        mistral_settings,
         model_catalogue,
         pronote,
         pronote_answers,
@@ -70,6 +71,7 @@ except ImportError:
     import io_limits
     import memory_session
     import mistral_answers
+    import mistral_settings
     import model_catalogue
     import pronote
     import pronote_answers
@@ -359,6 +361,21 @@ def mistral_key():
 
 def mistral_model():
     return read_env().get("MISTRAL_MODEL", "mistral-small-latest")
+
+
+def gmail_model_settings():
+    env = {**os.environ, **read_env()}
+    result = {"configured": {k: env.get(k, "") for k in mistral_settings.GMAIL_KEYS},
+              "error": "", "general": {}, "draft": {}, "efforts": ()}
+    try:
+        for purpose in ("general", "draft"):
+            # Never put API keys into the template context.
+            profile = mistral_settings.resolve(env, service="gmail", draft=purpose == "draft")
+            result[purpose] = {k: profile[k] for k in ("model", "reasoning_effort")}
+        result["efforts"] = mistral_settings.reasoning_options(result["draft"]["model"])
+    except mistral_settings.SettingsError:
+        result["error"] = "Réglages Gmail incompatibles. Choisissez un modèle et un effort compatibles, puis enregistrez."
+    return result
 
 def anthropic_key():
     return read_env().get("ANTHROPIC_KEY", os.getenv("ANTHROPIC_KEY", ""))
@@ -815,7 +832,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
         <p class=sub style=margin:6px 0 0>Pas encore de clé ?
           <a href="https://admin.mistral.ai/organization/api-keys" target=_blank rel=noopener>Créer une clé API Mistral &#8599;</a></p>
         <label>Modèle Mistral</label>
-        <select name=mistral_model id=mistralModels>
+        <select name=mistral_model id=mistralModels data-model-provider=mistral>
           {% for mid,desc in mistral_models %}
           <option value="{{mid}}" {{'selected' if mid==mistral_model}}>{{desc}}</option>
           {% endfor %}
@@ -835,7 +852,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
         <p class=sub style=margin:6px 0 0>Pas encore de clé ?
           <a href="https://platform.claude.com/" target=_blank rel=noopener>Créer une clé API Claude &#8599;</a></p>
         <label>Modèle Claude</label>
-        <select name=claude_model id=claudeModels>
+        <select name=claude_model id=claudeModels data-model-provider=claude>
           {% for cid,desc in claude_models %}
           <option value="{{cid}}" {{'selected' if cid==claude_model}}>{{desc}}</option>
           {% endfor %}
@@ -862,6 +879,28 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
         </select>
       </details>
 
+      <details id=gmailModelSettings><summary>Gmail — modèles par tâche (Mistral)</summary>
+        <input type=hidden name=gmail_overrides value=1>
+        <p class=sub>Utilise la clé Mistral ci-dessus. Les modèles hérités suivent le réglage général ; les choix explicites restent fixes.</p>
+        {% for field,key,label in [('gmail_model','MISTRAL_GMAIL_MODEL','Opérations Gmail : recherche, destinataires, résumés'),('gmail_draft_model','MISTRAL_GMAIL_DRAFT_MODEL','Rédaction : nouveaux mails, réponses et révisions')] %}
+        <label for="{{field}}">{{label}}</label>
+        <select name="{{field}}" id="{{field}}" data-model-provider=mistral data-inherit=1>
+          <option value="">Hériter du {{'modèle Mistral général' if field=='gmail_model' else 'modèle des opérations Gmail'}}</option>
+          {% if gmail_models.configured[key] %}<option value="{{gmail_models.configured[key]}}" selected>{{gmail_models.configured[key]}}</option>{% endif %}
+        </select>
+        <details><summary>Identifiant manuel (facultatif)</summary><input name="{{field}}_custom" maxlength=200 placeholder="Vide = utiliser la sélection ci-dessus"></details>
+        {% endfor %}
+        <button class="btn btn-s" type=button onclick="loadModels('mistral',true)">Actualiser les modèles Mistral</button>
+        <label for=gmail_draft_reasoning_effort>Effort de raisonnement pour la rédaction</label>
+        <select name=gmail_draft_reasoning_effort id=gmail_draft_reasoning_effort>
+          <option value="">Défaut du fournisseur</option>
+          {% for effort in gmail_models.efforts %}<option value="{{effort}}" {{'selected' if effort==gmail_models.configured.MISTRAL_GMAIL_DRAFT_REASONING_EFFORT}}>{{effort}}</option>{% endfor %}
+          {% if gmail_models.configured.MISTRAL_GMAIL_DRAFT_REASONING_EFFORT and gmail_models.configured.MISTRAL_GMAIL_DRAFT_REASONING_EFFORT not in gmail_models.efforts %}<option selected value="{{gmail_models.configured.MISTRAL_GMAIL_DRAFT_REASONING_EFFORT}}">{{gmail_models.configured.MISTRAL_GMAIL_DRAFT_REASONING_EFFORT}} (incompatible)</option>{% endif %}
+        </select>
+        <p id=gmailModelPreview role=status>Enregistré : opérations {{gmail_models.general.get('model','indisponible')}} ; rédaction {{gmail_models.draft.get('model','indisponible')}} ; effort {{gmail_models.draft.get('reasoning_effort') or 'défaut fournisseur'}}.</p>
+        {% if gmail_models.error %}<p role=alert>{{gmail_models.error}}</p>{% endif %}
+        <p class=sub>Premier essai conseillé : mistral-large-4-0, effort medium pour la rédaction. Température conservée à 0,2. Les destinataires et l’envoi restent contrôlés par l’application.</p>
+      </details>
       <hr>
       <button class="btn btn-p">Enregistrer et appliquer</button>
     </form>
@@ -1082,26 +1121,48 @@ document.querySelectorAll('nav.tabs a').forEach(a=>a.addEventListener('click',e=
 }));
 if(document.getElementById('maintenance').classList.contains('active'))loadStorage();
 const modelLists=new Set();
+const reasoningProfiles={{reasoning_profiles|tojson}};
+function refreshGmailProfiles(){
+  const f=document.getElementById('llmForm').elements;
+  const chosen=name=>f[name+'_custom'].value.trim()||f[name].value;
+  const general=chosen('mistral_model'), mail=chosen('gmail_model')||general, draft=chosen('gmail_draft_model')||mail;
+  const effort=f.gmail_draft_reasoning_effort, selected=effort.value, allowed=reasoningProfiles[draft]||[];
+  effort.replaceChildren(new Option('Défaut du fournisseur',''));
+  allowed.forEach(value=>effort.add(new Option(value,value)));
+  const invalid=selected&&!allowed.includes(selected);
+  if(invalid)effort.add(new Option(selected+' (incompatible)',selected));
+  effort.value=selected;
+  effort.setCustomValidity(invalid?'Choisissez un effort compatible avec ce modèle.':'');
+  document.getElementById('gmailModelPreview').textContent='Aperçu : opérations '+mail+' ; rédaction '+draft+' ; effort '+(selected||'défaut fournisseur')+'. Enregistrer pour appliquer.';
+}
 async function loadModels(provider,force=false){
   if(!['mistral','claude'].includes(provider)||(!force&&modelLists.has(provider)))return;
   modelLists.add(provider);
   const field=provider==='claude'?'anthropic':'mistral';
-  const form=document.getElementById('llmForm'), select=document.getElementById(provider+'Models');
+  const form=document.getElementById('llmForm');
   const status=document.getElementById(provider+'ModelStatus');
-  const selected=select.value;
   status.textContent='Chargement…';
   try{
     const response=await fetch('/models',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},
       body:JSON.stringify({provider:provider,key:form.elements[field+'_key'].value,clear:form.elements[field+'_key_clear'].checked})});
     const data=await response.json();
     if(!data.ok)throw new Error(data.error);
-    const ids=new Set([selected]);select.replaceChildren(new Option(selected,selected));
-    data.models.forEach(m=>{if(!ids.has(m.id)){select.add(new Option(m.label,m.id));ids.add(m.id);}});
-    select.value=selected;status.textContent=data.models.length+' modèles disponibles. La sélection est conservée.';
+    document.querySelectorAll('select[data-model-provider="'+provider+'"]').forEach(select=>{
+      const selected=select.value, ids=new Set([selected]);
+      select.replaceChildren(new Option(select.dataset.inherit?'Hériter du modèle précédent':selected,select.dataset.inherit?'':selected));
+      if(select.dataset.inherit&&selected)select.add(new Option(selected,selected));
+      data.models.forEach(m=>{if(!ids.has(m.id)){select.add(new Option(m.label===m.id?m.id:m.label+' · '+m.id,m.id));ids.add(m.id);}});
+      select.value=selected;
+    });
+    refreshGmailProfiles();status.textContent=data.models.length+' modèles disponibles. Les sélections sont conservées.';
   }catch(error){status.textContent=error.message||'Liste indisponible ; modèle actuel conservé.';modelLists.delete(provider);}
 }
 if(document.getElementById('ai').classList.contains('active'))loadModels(document.getElementById('providerSel').value);
 document.querySelectorAll('.provider-settings').forEach(d=>d.addEventListener('toggle',()=>{if(d.open&&document.getElementById('ai').classList.contains('active'))loadModels(d.dataset.provider);}));
+document.getElementById('gmailModelSettings').addEventListener('toggle',e=>{if(e.target.open)loadModels('mistral');});
+['mistral_model','mistral_model_custom','gmail_model','gmail_model_custom','gmail_draft_model','gmail_draft_model_custom','gmail_draft_reasoning_effort'].forEach(name=>{
+  ['input','change'].forEach(event=>document.getElementById('llmForm').elements[name].addEventListener(event,refreshGmailProfiles));
+});
 // Les brouillons restent en mémoire seulement ; avertir avant de les perdre.
 const editForm=document.getElementById('editForm'), llmForm=document.getElementById('llmForm');
 let editBaseline='', llmBaseline='', selectedPreset=document.getElementById('presetSel').value;
@@ -1313,6 +1374,7 @@ def index():
         claude_key_masked=mask_key(anthropic_key()), claude_model=claude_model(),
         linkup_key_masked=mask_key(linkup_key()), linkup_depth=linkup_depth(),
         mistral_models=[(mistral_model(), mistral_model())],
+        gmail_models=gmail_model_settings(), reasoning_profiles=mistral_settings.REASONING_MODELS,
         claude_models=[(claude_model(), claude_model())],
         linkup_depths=LINKUP_DEPTHS,
         version=current_version(), update_log=session.get("update_log"),
@@ -1535,6 +1597,18 @@ def save_llm():
     depth = request.form.get("linkup_depth", "").strip()
     if depth in LINKUP_DEPTH_IDS:
         updates["LINKUP_DEPTH"] = depth
+    if request.form.get('gmail_overrides') == '1':
+        for field, key in zip(('gmail_model','gmail_draft_model'), mistral_settings.GMAIL_KEYS[:2]):
+            value = request.form.get(field+'_custom','').strip() or request.form.get(field,'').strip()
+            if value and not model_catalogue.valid_id(value):
+                abort(400, 'Identifiant de modèle Gmail invalide')
+            updates[key] = value
+        updates[mistral_settings.GMAIL_KEYS[2]] = request.form.get('gmail_draft_reasoning_effort','').strip()
+    try:
+        # Validate the effective model too when an inherited general setting changes.
+        mistral_settings.resolve({**os.environ, **read_env(), **updates}, service='gmail', draft=True)
+    except mistral_settings.SettingsError:
+        abort(400, 'Modèle ou effort Gmail incompatible ; aucune modification enregistrée.')
     config_store.update_env(ENV_FILE, updates)
     saved_feedback("Configuration IA enregistrée.", True)
     selected_key = {"claude": anthropic_key, "linkup": linkup_key, "mistral": mistral_key}[provider]()

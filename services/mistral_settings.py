@@ -12,6 +12,12 @@ GMAIL_KEYS = (
     "MISTRAL_GMAIL_DRAFT_MODEL",
     "MISTRAL_GMAIL_DRAFT_REASONING_EFFORT",
 )
+REASONING_MODELS = {
+    **{model: ("low", "medium", "high") for model in ("mistral-large-4", "mistral-large-4-0")},
+    **{model: ("none", "high") for model in (
+        "mistral-small-latest", "mistral-small-2603", "mistral-medium-latest",
+        "mistral-medium-3-5", "mistral-medium-2604")},
+}
 
 
 class SettingsError(ValueError):
@@ -20,12 +26,7 @@ class SettingsError(ValueError):
 
 def reasoning_options(model):
     # Deliberately explicit: an API-wide enum does not mean every model accepts it.
-    if model in {"mistral-large-4", "mistral-large-4-0"}:
-        return ("low", "medium", "high")
-    if model in {"mistral-small-latest", "mistral-small-2603",
-                 "mistral-medium-latest", "mistral-medium-3-5", "mistral-medium-2604"}:
-        return ("none", "high")
-    return ()
+    return REASONING_MODELS.get(model, ())
 
 
 def resolve(env=None, *, service="general", draft=False):
