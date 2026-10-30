@@ -20,8 +20,11 @@ it from their conversations. Selecting a profile is still not authentication.
 `/home/minitel/.local/share/3615-ia`, outside Git. The database is private (0600),
 uses SQLite foreign keys and short transactions, and schema version 2. It contains
 profiles, aliases, Gmail metadata, one-mailbox assignments, read/send permissions
-and PRONOTE child grants. No OAuth secrets, passwords, mail bodies or memory
-contents are stored there. Connections are short-lived with a three-second lock
+and PRONOTE child grants. Memory tables now hold per-user saved content, embeddings
+and bounded pending user statements; see [MEMORY.md](MEMORY.md). Their independent
+`memory_schema` version is 1; the identity/grant schema remains version 2. No OAuth
+secrets, passwords or mailbox bodies are stored by the account registry.
+Connections are short-lived with a three-second lock
 wait. An invalid database is reported, not silently replaced.
 
 Each user has at most one assigned mailbox. Several users may explicitly share

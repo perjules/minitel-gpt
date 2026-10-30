@@ -19,18 +19,38 @@ except ImportError:
 def profile(store, user):
     data = store.read(user["memory_key"])
     with sql.connection(store) as db:
-        state = dict(db.execute("SELECT * FROM memory_state WHERE user_id=?", (user["id"],)).fetchone())
-        rows = db.execute("SELECT * FROM memory_items WHERE user_id=?", (user["id"],)).fetchall()
-        indexed = sum(row["embedding"] is not None and row["embedding_model"] == memory_vectors.MODEL
-                      and row["embedding_hash"] == sql.fingerprint(dict(row)) for row in rows if row["status"] != "done")
-        pending = db.execute("SELECT count(*) FROM memory_events WHERE user_id=?", (user["id"],)).fetchone()[0]
-    return {"user_id": user["id"], "name": user["display_name"], "enabled": bool(user["enabled"]),
-            "memory_key": user["memory_key"], "count": len(data["items"]),
-            "bytes": sum(len(r["text"].encode()) for r in data["items"]),
-            "updated": max((r["updated"] for r in data["items"]), default="—"),
-            "indexed": indexed, "indexable": sum(r["status"] != "done" for r in data["items"]),
-            "pending": pending, "auto_enabled": bool(state["auto_enabled"]),
-            "processing": state["last_status"], "retry_after": state["retry_after"], "data": data}
+        state = dict(
+            db.execute(
+                "SELECT * FROM memory_state WHERE user_id=?", (user["id"],)
+            ).fetchone()
+        )
+        rows = db.execute(
+            "SELECT * FROM memory_items WHERE user_id=?", (user["id"],)
+        ).fetchall()
+        indexed = sum(
+            memory_vectors.current_vector(dict(row))
+            for row in rows
+            if row["status"] != "done"
+        )
+        pending = db.execute(
+            "SELECT count(*) FROM memory_events WHERE user_id=?", (user["id"],)
+        ).fetchone()[0]
+    return {
+        "user_id": user["id"],
+        "name": user["display_name"],
+        "enabled": bool(user["enabled"]),
+        "memory_key": user["memory_key"],
+        "count": len(data["items"]),
+        "bytes": sum(len(r["text"].encode()) for r in data["items"]),
+        "updated": max((r["updated"] for r in data["items"]), default="—"),
+        "indexed": indexed,
+        "indexable": sum(r["status"] != "done" for r in data["items"]),
+        "pending": pending,
+        "auto_enabled": bool(state["auto_enabled"]),
+        "processing": state["last_status"],
+        "retry_after": state["retry_after"],
+        "data": data,
+    }
 
 
 def inventory(store):
@@ -39,8 +59,15 @@ def inventory(store):
         try:
             results.append(profile(store, user))
         except memory.MemoryProblem as error:
-            results.append({"user_id": user["id"], "name": user["display_name"],
-                            "enabled": bool(user["enabled"]), "memory_key": user["memory_key"], "error": str(error)})
+            results.append(
+                {
+                    "user_id": user["id"],
+                    "name": user["display_name"],
+                    "enabled": bool(user["enabled"]),
+                    "memory_key": user["memory_key"],
+                    "error": str(error),
+                }
+            )
     return results
 
 
@@ -69,9 +96,14 @@ def export(store, user_id=None):
         if not profiles:
             raise KeyError(user_id)
     legacy = unassigned(store, profiles, contents=True) if user_id is None else []
-    return {"format": "3615-memory-export", "version": 1, "exported_at": memory.now(),
-            "complete": not any(p.get("error") for p in [*profiles, *legacy]),
-            "profiles": profiles, "unassigned_legacy": legacy}
+    return {
+        "format": "3615-memory-export",
+        "version": 1,
+        "exported_at": memory.now(),
+        "complete": not any(p.get("error") for p in [*profiles, *legacy]),
+        "profiles": profiles,
+        "unassigned_legacy": legacy,
+    }
 
 
 def encode_export(value):
@@ -79,7 +111,9 @@ def encode_export(value):
 
 
 def storage_paths(store):
-    return {"database": str(store.root / "users.sqlite3"),
-            "archives": str(store.root / "users" / "<profil>" / "logs"),
-            "default_archives": str(store.root / "shared" / "logs"),
-            "legacy_backup": str(Path("<profil>") / "memory.before-sqlite.json")}
+    return {
+        "database": str(store.root / "users.sqlite3"),
+        "archives": str(store.root / "users" / "<profil>" / "logs"),
+        "default_archives": str(store.root / "shared" / "logs"),
+        "legacy_backup": str(Path("<profil>") / "memory.before-sqlite.json"),
+    }

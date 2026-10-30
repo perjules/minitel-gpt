@@ -23,7 +23,7 @@ new dependency, daemon, polling service or change to Gmail/PRONOTE access rights
    operations stay offline. Embeddings are rebuildable, never authoritative text.
 4. **Automatic consolidation**: persist eligible user statements, not model
    claims, in bounded batches. Trigger after six ordinary user turns, on close,
-   and on a later interaction/startup for interrupted work. One bounded worker
+   and on a later interaction/startup for interrupted work. One worker (at most two bounded passes)
    per process and a database lease prevent duplicate processing across terminal
    and admin. No perpetual worker loop. Extract only grounded facts/preferences,
    with evidence from supplied user statements; validate IDs and source quotes.
@@ -61,3 +61,26 @@ new dependency, daemon, polling service or change to Gmail/PRONOTE access rights
 - Physical acceptance: existing memories survive update; two named users remain
   isolated; reworded recall works; explicit forgetting survives pending work;
   SOMMAIRE/LOGOUT stay responsive; phone viewer/export and offline behavior work.
+
+## Implementation acceptance
+
+Completed in the six milestone sequence. The implementation uses exact cosine
+scans and a local lexical fallback rather than an extra vector/search package.
+The memory sub-schema is independently versioned inside users.sqlite3, leaving
+the identity/grant schema at v2. Legacy JSON bytes are archived atomically and
+markers prevent silent divergence with old JSON-only code.
+
+The final offline checks and physical limitations are reported with the delivery.
+Pi acceptance must measure real extraction quality, the initial cosine threshold,
+embedding latency and phone layout. No user-password or memory-editor work is
+included. Read-only exports do not restore account credentials or replace a full
+data-directory backup. Detailed operation/recovery instructions: MEMORY.md.
+
+Final offline validation (30 October 2026): locked all-extras environment sync;
+750 tests and 400 subtests passed; Ruff, requirements-export freshness and
+whitespace checks passed. Browser binaries were unavailable, so responsive phone
+layout remains a manual acceptance check. No live embedding/extraction calls,
+Google operations, email sends, Pi deployment or physical validation were run.
+The final regression cases include a delayed ordinary answer arriving after an
+explicit forget, corrupt-vector reconstruction, interrupted legacy sealing,
+non-regular source files, processing leases and web PRONOTE transcript exclusion.

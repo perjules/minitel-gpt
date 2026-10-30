@@ -544,6 +544,8 @@ def call_answer(system_prompt, history, language, options, knowledge,
                 mail=None, review_ticket=None, memory=None, calc=None):
     api, web_search, timeout = options
     question = history[-1]["content"]
+    if memory is not None and hasattr(memory, "begin_turn"):
+        memory.begin_turn()
     blocked = calculator_blocked(mail, memory)
     if calc is not None and calc.explicit(question):
         return calc.handle(question, language, generate=lambda expr, lang:
@@ -1326,7 +1328,8 @@ def run_session(t):
                                                                    pronote.backend().config().get("children", {}))
                 private_question = private_question and pronote.backend().config().get("enabled", False)
             except pronote.PronoteError:
-                private_question = False
+                # A broken school configuration must not feed private input to learning.
+                private_question = True
             t.w(bytes([CR, LF]))
             calculator_request = calc.explicit(question) or (
                 calculator.candidate(question) and not calculator_blocked(mail, memory))

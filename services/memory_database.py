@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import tempfile
 from contextlib import contextmanager
 
 try:
@@ -26,7 +27,9 @@ def connection(store):
     try:
         with Registry(store.root).connection() as db:
             db.execute("BEGIN IMMEDIATE")
-            db.execute("CREATE TABLE IF NOT EXISTS memory_schema(version INTEGER NOT NULL)")
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS memory_schema(version INTEGER NOT NULL)"
+            )
             version = db.execute("SELECT version FROM memory_schema").fetchone()
             if version is None:
                 statements = (
@@ -40,7 +43,7 @@ def connection(store):
  status TEXT NOT NULL, updated TEXT NOT NULL, origin TEXT NOT NULL,
  source TEXT NOT NULL DEFAULT '[]', embedding BLOB, embedding_model TEXT,
  embedding_hash TEXT, PRIMARY KEY(user_id,id))""",
-                    """CREATE TABLE memory_events(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL
+                    """CREATE TABLE memory_events(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL
  REFERENCES users(id), session_id TEXT NOT NULL, text TEXT NOT NULL, created TEXT NOT NULL,
  barrier INTEGER NOT NULL)""",
                     "CREATE INDEX memory_events_owner ON memory_events(user_id,id)",
@@ -49,10 +52,14 @@ def connection(store):
                 for statement in statements:
                     db.execute(statement)
             elif version[0] != SQL_MEMORY_SCHEMA:
-                raise memory.MemoryProblem("Version de mémoire SQL non prise en charge.")
+                raise memory.MemoryProblem(
+                    "Version de mémoire SQL non prise en charge."
+                )
             yield db
     except (GmailError, sqlite3.Error, OSError):
-        raise memory.MemoryProblem("Stockage mémoire SQL indisponible; aucune donnée effacée.") from None
+        raise memory.MemoryProblem(
+            "Stockage mémoire SQL indisponible; aucune donnée effacée."
+        ) from None
 
 
 def owner(db, key):
@@ -69,33 +76,71 @@ def fingerprint(item):
 
 def put_items(db, user_id, items):
     ids = {item["id"] for item in items}
-    for row in db.execute("SELECT id FROM memory_items WHERE user_id=?", (user_id,)).fetchall():
+    for row in db.execute(
+        "SELECT id FROM memory_items WHERE user_id=?", (user_id,)
+    ).fetchall():
         if row[0] not in ids:
-            db.execute("DELETE FROM memory_items WHERE user_id=? AND id=?", (user_id, row[0]))
+            db.execute(
+                "DELETE FROM memory_items WHERE user_id=? AND id=?", (user_id, row[0])
+            )
     for item in items:
-        previous = db.execute("SELECT kind,title,text FROM memory_items WHERE user_id=? AND id=?",
-                              (user_id, item["id"])).fetchone()
-        changed = previous is not None and fingerprint(dict(previous)) != fingerprint(item)
-        db.execute("""INSERT INTO memory_items(user_id,id,kind,title,text,status,updated,origin,source)
+        previous = db.execute(
+            "SELECT kind,title,text FROM memory_items WHERE user_id=? AND id=?",
+            (user_id, item["id"]),
+        ).fetchone()
+        changed = previous is not None and fingerprint(dict(previous)) != fingerprint(
+            item
+        )
+        db.execute(
+            """INSERT INTO memory_items(user_id,id,kind,title,text,status,updated,origin,source)
  VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,id) DO UPDATE SET kind=excluded.kind,
  title=excluded.title,text=excluded.text,status=excluded.status,updated=excluded.updated,
  origin=excluded.origin,source=excluded.source""",
-                   (user_id, item["id"], item["kind"], item["title"], item["text"],
-                    item["status"], item.get("updated", memory.now()),
-                    item.get("origin", "explicit"), json.dumps(item.get("source", []), ensure_ascii=False)))
+            (
+                user_id,
+                item["id"],
+                item["kind"],
+                item["title"],
+                item["text"],
+                item["status"],
+                item.get("updated", memory.now()),
+                item.get("origin", "explicit"),
+                json.dumps(item.get("source", []), ensure_ascii=False),
+            ),
+        )
         if changed:
-            db.execute("UPDATE memory_items SET embedding=NULL,embedding_model=NULL,embedding_hash=NULL WHERE user_id=? AND id=?",
-                       (user_id, item["id"]))
+            db.execute(
+                "UPDATE memory_items SET embedding=NULL,embedding_model=NULL,embedding_hash=NULL WHERE user_id=? AND id=?",
+                (user_id, item["id"]),
+            )
 
 
 def read_data(db, user_id):
-    state = db.execute("SELECT * FROM memory_state WHERE user_id=?", (user_id,)).fetchone()
+    state = db.execute(
+        "SELECT * FROM memory_state WHERE user_id=?", (user_id,)
+    ).fetchone()
     data = {"version": 1, "revision": state["revision"], "items": []}
     if state["language"]:
         data["language"] = state["language"]
-    for row in db.execute("SELECT id,kind,title,text,status,updated,origin,source FROM memory_items WHERE user_id=? ORDER BY rowid", (user_id,)):
+    for row in db.execute(
+        "SELECT id,kind,title,text,status,updated,origin,source FROM memory_items WHERE user_id=? ORDER BY rowid",
+        (user_id,),
+    ):
         item = dict(row)
-        item["source"] = json.loads(item["source"])
+        try:
+            item["source"] = json.loads(item["source"])
+            if (
+                not isinstance(item["source"], list)
+                or item["kind"] not in memory.KINDS
+                or item["status"] not in {"", "open", "done"}
+            ):
+                raise ValueError()
+            memory.clean_text(item["title"], 160, allow_empty=True)
+            memory.clean_text(item["text"])
+        except (ValueError, TypeError):
+            raise memory.MemoryProblem(
+                "Souvenir SQL illisible; données conservées."
+            ) from None
         data["items"].append(item)
     return data
 
@@ -104,28 +149,50 @@ def seal_legacy(store, folder, user_id):
     """Keep original bytes; make old JSON-only code fail visibly instead of forking data."""
     path = folder / "memory.json"
     if not path.exists():
-        store._write_json(folder, {"version": 2, "storage": "users.sqlite3", "user_id": user_id})
+        store._write_json(
+            folder, {"version": 2, "storage": "users.sqlite3", "user_id": user_id}
+        )
         return
     if path.stat().st_size > memory.MAX_FILE:
-        raise memory.MemoryProblem("Ancien fichier mémoire trop volumineux; fichier conservé.")
+        raise memory.MemoryProblem(
+            "Ancien fichier mémoire trop volumineux; fichier conservé."
+        )
     raw = path.read_bytes()
     try:
         if json.loads(raw).get("version") == 2:
             return
     except (ValueError, AttributeError):
-        raise memory.MemoryProblem("Ancien fichier mémoire illisible. Les données existantes sont conservées.") from None
+        raise memory.MemoryProblem(
+            "Ancien fichier mémoire illisible. Les données existantes sont conservées."
+        ) from None
     backup = folder / "memory.before-sqlite.json"
     if backup.exists():
         if backup.is_symlink() or backup.read_bytes() != raw:
-            raise memory.MemoryProblem("Sauvegarde mémoire existante différente; fichiers conservés.")
+            raise memory.MemoryProblem(
+                "Sauvegarde mémoire existante différente; fichiers conservés."
+            )
     else:
-        fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(raw)
-            stream.flush()
-            os.fsync(stream.fileno())
-    store._write_json(folder, {"version": 2, "storage": "users.sqlite3", "user_id": user_id,
-                               "legacy_backup": "memory.before-sqlite.json"})
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=folder, delete=False) as stream:
+                temporary = stream.name
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, backup)
+            temporary = None
+        finally:
+            if temporary:
+                os.unlink(temporary)
+    store._write_json(
+        folder,
+        {
+            "version": 2,
+            "storage": "users.sqlite3",
+            "user_id": user_id,
+            "legacy_backup": "memory.before-sqlite.json",
+        },
+    )
 
 
 def read(store, folder):
@@ -134,14 +201,29 @@ def read(store, folder):
         user = owner(db, key)
         if user is None:
             if (folder / "memory.json").exists():
-                raise memory.MemoryProblem("Sélectionnez d'abord le profil pour importer sa mémoire.")
+                raise memory.MemoryProblem(
+                    "Sélectionnez d'abord le profil pour importer sa mémoire."
+                )
             return {"version": 1, "revision": 0, "items": []}
-        state = db.execute("SELECT 1 FROM memory_state WHERE user_id=?", (user["id"],)).fetchone()
+        state = db.execute(
+            "SELECT 1 FROM memory_state WHERE user_id=?", (user["id"],)
+        ).fetchone()
         if state is None:
             legacy = store._read_legacy(folder)
-            db.execute("INSERT INTO memory_state(user_id,revision,language,auto_enabled) VALUES(?,?,?,?)",
-                       (user["id"], legacy["revision"], legacy.get("language"), user["id"] != 1))
-            put_items(db, user["id"], [{**item, "origin": "legacy"} for item in legacy["items"]])
+            db.execute(
+                "INSERT INTO memory_state(user_id,revision,language,auto_enabled) VALUES(?,?,?,?)",
+                (
+                    user["id"],
+                    legacy["revision"],
+                    legacy.get("language"),
+                    user["id"] != 1,
+                ),
+            )
+            put_items(
+                db,
+                user["id"],
+                [{**item, "origin": "legacy"} for item in legacy["items"]],
+            )
         data = read_data(db, user["id"])
     # Only seal after the import transaction has committed. A retry is idempotent.
     seal_legacy(store, folder, user["id"])
@@ -151,16 +233,24 @@ def read(store, folder):
 def write(store, folder, data):
     key = str(folder.relative_to(store.root))
     if len(json.dumps(data, ensure_ascii=False).encode()) > memory.MAX_FILE:
-        raise memory.MemoryProblem("Mémoire pleine (1 Mio). Aucun élément tronqué ni fichier modifié.")
+        raise memory.MemoryProblem(
+            "Mémoire pleine (1 Mio). Aucun élément tronqué ni fichier modifié."
+        )
     with connection(store) as db:
         user = owner(db, key)
         if user is None:
             raise memory.MemoryProblem("Profil mémoire inconnu.")
-        state = db.execute("SELECT revision FROM memory_state WHERE user_id=?", (user["id"],)).fetchone()
+        state = db.execute(
+            "SELECT revision FROM memory_state WHERE user_id=?", (user["id"],)
+        ).fetchone()
         if state is None or state[0] != data["revision"] - 1:
-            raise memory.MemoryProblem("La mémoire a changé depuis la sélection. Reformulez la demande.")
+            raise memory.MemoryProblem(
+                "La mémoire a changé depuis la sélection. Reformulez la demande."
+            )
         put_items(db, user["id"], data["items"])
-        db.execute("UPDATE memory_state SET revision=?,language=?,barrier=barrier+1,ready=0 WHERE user_id=?",
-                   (data["revision"], data.get("language"), user["id"]))
+        db.execute(
+            "UPDATE memory_state SET revision=?,language=?,barrier=barrier+1,ready=0,lease_until=0,lease_token='',retry_after=0,last_status='explicit' WHERE user_id=?",
+            (data["revision"], data.get("language"), user["id"]),
+        )
         # Explicit saves/corrections/forgetting override every older queued extraction.
         db.execute("DELETE FROM memory_events WHERE user_id=?", (user["id"],))

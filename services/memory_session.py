@@ -7,12 +7,13 @@ import threading
 import time
 
 try:
-    from . import memory_automation, memory_vectors, user_registry
+    from . import memory_automation, memory_database, memory_vectors, user_registry
     from . import persistent_memory as memory
     from .gmail_auth import GmailError
     from .gmail_mail import MailModel
 except ImportError:
     import memory_automation
+    import memory_database
     import memory_vectors
     import persistent_memory as memory
     import user_registry
@@ -39,7 +40,7 @@ def shared_request(question):
 def explicit_request(question):
     return bool(
         re.search(
-            r"memoire|liste|tache|preference|retiens|souviens|oublie|remember|saved|recette",
+            r"memoire|liste|tache|preference|retiens|souviens|oublie|remember|forget|saved|recette",
             memory.normalized(question),
         )
     )
@@ -145,6 +146,7 @@ class MemorySession:
         self.key, self.username = self.user.memory_key, self.user.display_name
         self.label = "mémoire de " + self.username
         self.session_id = secrets.token_hex(12)
+        self.turn_barrier = None
         self.model = model or MemoryModel()
         self.embeddings = memory_vectors.Embeddings(lambda: self.model.client.profile()["key"])
         self.lock = threading.RLock()
@@ -199,6 +201,20 @@ class MemorySession:
                 self.closed = True
                 self.pending, self.last_answer, self.recent = None, "", []
 
+    def begin_turn(self):
+        """Fence delayed ordinary answers against an explicit edit in another session."""
+        with self.lock:
+            self.turn_barrier = -1
+            try:
+                self.active()
+                self.store.read(self.key)
+                with memory_database.connection(self.store) as db:
+                    self.turn_barrier = db.execute(
+                        "SELECT barrier FROM memory_state WHERE user_id=?", (self.user.id,)
+                    ).fetchone()[0]
+            except memory.MemoryProblem as error:
+                self.warning = str(error)
+
     def record(self, role, text, channel="chat", factual=None):
         with self.lock:
             if self.closed:
@@ -218,10 +234,13 @@ class MemorySession:
             if role == "user" and channel == "chat" and usable is not None:
                 try:
                     if safe == usable and not explicit_request(safe) and not shared_request(safe):
-                        memory_automation.enqueue(self.store, self.key, self.session_id, safe)
+                        memory_automation.enqueue(self.store, self.key, self.session_id, safe,
+                                                  expected_barrier=self.turn_barrier)
                         memory_automation.kick(self.store, self.model, self.embeddings)
                 except memory.MemoryProblem as error:
                     self.warning = str(error)
+            if role == "user":
+                self.turn_barrier = None
             if self.journal:
                 try:
                     self.journal.append(role, text, channel)

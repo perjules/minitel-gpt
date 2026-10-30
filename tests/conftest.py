@@ -43,4 +43,6 @@ def isolated_user_registry(tmp_path, monkeypatch):
 def no_memory_background_network(monkeypatch):
     # Individual automation tests call the bounded worker synchronously with mocks.
     from services import memory_automation
+    original = memory_automation.kick
     monkeypatch.setattr(memory_automation, "kick", lambda *args: None)
+    return original

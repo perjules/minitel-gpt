@@ -146,9 +146,14 @@ class MemoryStore:
         folder.mkdir(parents=True, exist_ok=True)
         # Fixed filenames and generated keys; no model-controlled filesystem paths.
         if folder.resolve() != folder or any(
-            (folder / name).is_symlink() for name in ("memory.json", ".lock", "logs")
+            (folder / name).is_symlink() for name in ("memory.json", "memory.before-sqlite.json", ".lock", "logs")
         ):
             raise MemoryProblem("Chemin mémoire invalide.")
+        if any((folder / name).exists() and not (folder / name).is_file()
+               for name in ("memory.json", "memory.before-sqlite.json", ".lock")):
+            raise MemoryProblem("Fichier mémoire non régulier; données conservées.")
+        if (folder / "logs").exists() and not (folder / "logs").is_dir():
+            raise MemoryProblem("Dossier de journaux invalide.")
         return folder
 
     @contextmanager

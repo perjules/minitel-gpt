@@ -1540,6 +1540,7 @@ def test_preset_route():
                 discard_memory(session.get("memory_session"))
                 return jsonify(ok=True, answer="Session effacée. Choisissez un nom ou laissez vide; la mémoire enregistrée est conservée.")
             selected.private_turn = False
+            selected.begin_turn()
             try:
                 private_question = pronote_answers.school_question(
                     [{"role": "user", "content": msg}], pronote.backend().config().get("children", {}))

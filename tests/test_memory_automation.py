@@ -30,13 +30,25 @@ def statements(selected, count=6):
 
 def queue(selected):
     with sql.connection(selected.store) as db:
-        return [dict(r) for r in db.execute("SELECT * FROM memory_events WHERE user_id=? ORDER BY id", (selected.user.id,))]
+        return [
+            dict(r)
+            for r in db.execute(
+                "SELECT * FROM memory_events WHERE user_id=? ORDER BY id",
+                (selected.user.id,),
+            )
+        ]
 
 
 def result(selected, events=None, **changes):
     event = (events or queue(selected))[0]
-    proposal = {"operation": "save", "kind": "fact", "title": "work", "text": "Works on a synthetic reactor.",
-                "id": None, "evidence": [{"event_id": event["id"], "quote": event["text"]}]}
+    proposal = {
+        "operation": "save",
+        "kind": "fact",
+        "title": "work",
+        "text": "Works on a synthetic reactor.",
+        "id": None,
+        "evidence": [{"event_id": event["id"], "quote": event["text"]}],
+    }
     proposal.update(changes)
     return json.dumps({"memories": [proposal]})
 
@@ -71,26 +83,37 @@ def test_close_and_restart_make_short_batches_ready(subject):
 
 
 def test_explicit_forget_invalidates_queued_and_inflight_extraction(subject):
-    item, _ = subject.store.apply(subject.key, {"operation": "save", "kind": "fact", "text": "Old fact"}, {})
+    item, _ = subject.store.apply(
+        subject.key, {"operation": "save", "kind": "fact", "text": "Old fact"}, {}
+    )
     statements(subject)
     proposal = result(subject)
+
     def late(*args, **kwargs):
         snapshot = subject.store.read(subject.key)
-        subject.store.apply(subject.key, {"operation": "remove", "ids": [item["id"]]}, snapshot)
+        subject.store.apply(
+            subject.key, {"operation": "remove", "ids": [item["id"]]}, snapshot
+        )
         return proposal
+
     subject.model.client.complete.side_effect = late
     assert not auto.process(subject.store, subject.model, subject.embeddings)
     assert not subject.store.read(subject.key)["items"]
     assert not queue(subject)
 
 
-@pytest.mark.parametrize("change", [
-    {"user_id": 999}, {"kind": "task"}, {"operation": "remove"},
-    {"id": "m_0123456789abcdef", "operation": "replace"},
-    {"evidence": [{"event_id": 99999, "quote": "Invented source"}]},
-    {"evidence": [{"event_id": 1, "quote": "Invented source"}]},
-    {"text": "password: synthetic-secret"},
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"user_id": 999},
+        {"kind": "task"},
+        {"operation": "remove"},
+        {"id": "m_0123456789abcdef", "operation": "replace"},
+        {"evidence": [{"event_id": 99999, "quote": "Invented source"}]},
+        {"evidence": [{"event_id": 1, "quote": "Invented source"}]},
+        {"text": "password: synthetic-secret"},
+    ],
+)
 def test_invalid_batches_never_write_and_retry_is_deferred(subject, change):
     statements(subject)
     subject.model.client.complete.return_value = result(subject, **change)
@@ -99,7 +122,9 @@ def test_invalid_batches_never_write_and_retry_is_deferred(subject, change):
     assert len(queue(subject)) == 6
     assert auto.claim(subject.store) is None
     with sql.connection(subject.store) as db:
-        state = db.execute("SELECT * FROM memory_state WHERE user_id=?", (subject.user.id,)).fetchone()
+        state = db.execute(
+            "SELECT * FROM memory_state WHERE user_id=?", (subject.user.id,)
+        ).fetchone()
         assert state["last_status"] == "retry" and state["retry_after"] > time.time()
 
 
@@ -134,10 +159,15 @@ def test_default_and_excluded_channels_secrets_and_global_pause(subject, monkeyp
 def test_disabled_profile_and_changed_profile_during_extraction_cannot_commit(subject):
     statements(subject)
     response = result(subject)
+
     def disable(*args, **kwargs):
         with subject.registry.connection() as db:
-            db.execute("UPDATE users SET enabled=0,revision=revision+1 WHERE id=?", (subject.user.id,))
+            db.execute(
+                "UPDATE users SET enabled=0,revision=revision+1 WHERE id=?",
+                (subject.user.id,),
+            )
         return response
+
     subject.model.client.complete.side_effect = disable
     assert not auto.process(subject.store, subject.model, subject.embeddings)
     assert not subject.store.read(subject.key)["items"]
@@ -154,16 +184,29 @@ def test_queue_is_bounded_and_empty_extraction_is_valid(subject):
 
 
 def test_replacing_a_note_requires_explicit_operation(subject):
-    item, _ = subject.store.apply(subject.key, {"operation": "save", "kind": "note", "title": "recipe", "text": "Full recipe."}, {})
+    item, _ = subject.store.apply(
+        subject.key,
+        {
+            "operation": "save",
+            "kind": "note",
+            "title": "recipe",
+            "text": "Full recipe.",
+        },
+        {},
+    )
     statements(subject)
-    subject.model.client.complete.return_value = result(subject, operation="replace", id=item["id"])
+    subject.model.client.complete.return_value = result(
+        subject, operation="replace", id=item["id"]
+    )
     assert not auto.process(subject.store, subject.model, subject.embeddings)
     assert subject.store.read(subject.key)["items"][0]["text"] == "Full recipe."
 
 
 def test_index_failure_keeps_saved_memory_and_uses_backoff(subject, monkeypatch):
     monkeypatch.setattr(auto, "_next_index_attempt", 0)
-    subject.store.apply(subject.key, {"operation": "save", "kind": "fact", "text": "Local fact."}, {})
+    subject.store.apply(
+        subject.key, {"operation": "save", "kind": "fact", "text": "Local fact."}, {}
+    )
     subject.embeddings.embed.side_effect = memory.MemoryProblem("synthetic outage")
     assert auto.run_once(subject.store, subject.model, subject.embeddings) == (False, 0)
     assert subject.store.read(subject.key)["items"][0]["text"] == "Local fact."
@@ -173,9 +216,78 @@ def test_index_failure_keeps_saved_memory_and_uses_backoff(subject, monkeypatch)
 
 
 def test_recent_mail_never_becomes_an_embedding_query(subject, monkeypatch):
-    subject.store.apply(subject.key, {"operation": "save", "kind": "fact", "text": "Local fact."}, {})
+    subject.store.apply(
+        subject.key, {"operation": "save", "kind": "fact", "text": "Local fact."}, {}
+    )
     subject.embeddings.embed.return_value = [[1.0] + [0.0] * 1023]
     vectors.index_pending(subject.store, subject.embeddings)
     subject.record("assistant", "PRIVATE MAIL BODY", "gmail")
     subject.context("What do I do?")
     assert "PRIVATE MAIL BODY" not in str(subject.embeddings.embed.call_args)
+
+
+def test_dispatch_is_nonblocking_and_only_one_finite_worker(
+    subject, monkeypatch, no_memory_background_network
+):
+    import threading
+
+    entered, release = threading.Event(), threading.Event()
+    actual_thread = threading.Thread
+    workers = []
+
+    def thread(*args, **kwargs):
+        worker = actual_thread(*args, **kwargs)
+        workers.append(worker)
+        return worker
+
+    def once(*args):
+        entered.set()
+        assert release.wait(2)
+        return True, 0
+
+    subject.model.client.profile.return_value = {"key": "synthetic-key"}
+    monkeypatch.setattr(auto.threading, "Thread", thread)
+    bounded = Mock(side_effect=once)
+    monkeypatch.setattr(auto, "run_once", bounded)
+    try:
+        no_memory_background_network(subject.store, subject.model, subject.embeddings)
+        assert entered.wait(1)
+        no_memory_background_network(subject.store, subject.model, subject.embeddings)
+        assert len(workers) == 1
+    finally:
+        release.set()
+        for worker in workers:
+            worker.join(2)
+    assert bounded.call_count == 2 and not auto._worker.locked()
+
+
+def test_explicit_override_releases_old_lease_and_keeps_event_ids_unique(subject):
+    statements(subject)
+    old_ids = [event["id"] for event in queue(subject)]
+    assert auto.claim(subject.store)
+    subject.store.apply(
+        subject.key,
+        {"operation": "save", "kind": "preference", "text": "Short replies."},
+        {},
+    )
+    statements(subject)
+    assert min(event["id"] for event in queue(subject)) > max(old_ids)
+    assert auto.claim(subject.store) is not None
+    assert sessions.explicit_request("FORGET my old address")
+
+
+def test_old_answer_finishing_after_forget_cannot_enqueue_earlier_statement(subject):
+    item, _ = subject.store.apply(
+        subject.key, {"operation": "save", "kind": "fact", "text": "Old address."}, {}
+    )
+    subject.begin_turn()  # The ordinary request has started; its model call is still running.
+    snapshot = subject.store.read(subject.key)
+    subject.store.apply(
+        subject.key, {"operation": "remove", "ids": [item["id"]]}, snapshot
+    )
+    subject.record("user", "I live at the old address.")
+    assert not queue(subject)
+    assert not subject.store.read(subject.key)["items"]
+    subject.begin_turn()
+    subject.record("user", "I now work at a synthetic laboratory.")
+    assert len(queue(subject)) == 1

@@ -1,197 +1,255 @@
-# Mémoire légère — 3615 IA
+# Mémoire personnelle — 3615 IA
 
-> Multi-user profiles and Gmail/PRONOTE assignments: see [USERS.md](USERS.md).
-> Les souvenirs restent dans les fichiers JSON propres à chaque profil.
+Chaque profil possède ses souvenirs. Aucun espace partagé, aucun héritage global.
+Un nom vide sélectionne MinitelGPT, un profil distinct dont l’apprentissage
+**automatique** est désactivé. Les noms et alias sélectionnent une identité;
+ils ne constituent pas encore une authentification. Voir [USERS.md](USERS.md).
 
+## Utilisation
 
-Sur le Minitel, appuyez sur **SOMMAIRE** après la mise sous tension : le démarrage
-fictif apparaît en français. **SUITE** ouvre immédiatement l'accueil; sans action,
-l'accueil apparaît 30 secondes après la fin du démarrage. Entrez alors un nom puis
-**ENVOI**. Laissez vide pour le profil MinitelGPT.
-Le nom sélectionne un profil, **ce n'est pas une
-authentification** : aucun mot de passe, ni contrôle d'accès supplémentaire.
-La casse ne distingue pas deux noms; les alias administratifs rejoignent le même
-profil et ses souvenirs. Revenez avec le même nom après un redémarrage.
-Choisissez ensuite la langue pour un nouveau nom : ce choix est enregistré dans
-son `memory.json` et repris automatiquement aux démarrages suivants, sans nouveau
-prompt de langue. Un nom existant sans langue enregistrée reçoit aussi ce prompt.
-Un nom vide ouvre directement le profil MinitelGPT en français, sans demander la
-langue. Ce profil a sa propre mémoire, comme les profils nommés.
-Un timeout utilise le français sans enregistrer ce choix implicite. Pour refaire
-le choix d'un utilisateur connu, retirez le champ `language` de son `memory.json`
-pendant que les deux services sont arrêtés, puis redémarrez-les.
-Sur le Minitel, **SOMMAIRE** efface la conversation, les choix en attente et les
-brouillons Gmail, puis revient directement à la requête initiale avec le même nom
-et la même langue. L'inactivité conserve aussi l'identité. **LOGOUT** puis **ENVOI**
-ferme cette session et revient au choix du nom. Ni SOMMAIRE ni LOGOUT ne rejoue le
-démarrage fictif. La mémoire enregistrée reste. La console web conserve son propre
-contrôle de nouvelle session et de sélection du nom.
+Le démarrage fictif reste en français, puis le terminal demande le nom et, si
+nécessaire, la langue. La langue est enregistrée pour les profils nommés;
+MinitelGPT démarre en français. SOMMAIRE recommence la conversation avec le même
+profil/langue et soumet les énoncés restants au traitement. LOGOUT revient au choix
+du nom. Les souvenirs persistent; les conversations/brouillons en cours ne sont
+pas rejoués. La console de test utilise les mêmes profils et le même stockage.
 
-La détection de mise hors tension utilise une requête d'état du terminal sans
-effet à l'écran (STUM : `PRO1 70`, réponse `PRO2 71 status`). Elle ne débute qu'après
-le premier SOMMAIRE. Sur une liaison ayant déjà répondu, trois réponses manquantes
-consécutives retirent la session : mémoire fermée, brouillons invalidés, opérations
-en cours non rejouées. Le prochain SOMMAIRE lance un nouveau démarrage. Si le
-terminal n'a jamais répondu à cette requête, la détection est désactivée sans
-confondre son silence avec une extinction. Les transports console ne sont pas sondés.
-La requête est décrite dans le [STUM Minitel 1, section 2.1.3](https://www.minitel-alcatel.fr/documents/M1_1983-1984/STUM%20M1.pdf).
-Les sondes sont espacées de deux secondes, avec une seconde de réponse chacune
-en plus du temps nécessaire à vider les octets déjà en file sur l'UART à 1200 bauds;
-une extinction très brève ou survenue entièrement pendant un affichage ou un
-appel bloquant peut donc passer inaperçue. Le comportement reste à valider sur
-le Matra physique. Un redémarrage du service démarre aussi une nouvelle connexion.
+L’apprentissage automatique traite les affirmations personnelles claires et les
+préférences durables des profils nommés. Il ne doit pas transformer une hypothèse,
+une question ou une réponse inventée par l’assistant en fait personnel. Les
+souvenirs automatiques gardent leurs citations et leur origine pour inspection.
+Ces règles encadrent un modèle, sans garantir une extraction parfaite.
 
-## Demander, lire, préciser
+Les commandes explicites restent prioritaires :
 
-Utilisez la saisie habituelle, **SUITE / RETOUR** et les résultats paginés.
-Il n'y a pas de nouvel organisateur ni d'arborescence.
-
-| Demande | Résultat attendu |
+| Demande | Résultat |
 | --- | --- |
-| « Retiens que je préfère les réponses courtes. » | Préférence enregistrée dans l'espace sélectionné |
-| « Note que les décorations sont dans le garage. » | Fait ou note délibérément enregistré |
-| « Corrige : les décorations sont au grenier. » | Modification de l'élément existant, avec confirmation du contenu |
-| « Ajoute des piles à ma liste de courses. » | Nouvelle entrée à faire dans la liste courses |
-| « J'ai acheté les piles. » | Entrée existante marquée faite; clarification si plusieurs correspondent |
-| « Ajoute une tâche : appeler le garage. » | Tâche à faire; on peut ensuite la terminer ou la retirer |
-| « Garde cette recette sous le nom naan. » | Note contenant la réponse précédente complète, pas un résumé |
-| « Rappelle la recette naan. » | Contenu enregistré, paginé si nécessaire |
-| « Qu'est-ce que tu sais sur moi ? » | Faits et préférences délibérément enregistrés |
-| « Oublie les décorations. » | Suppression de l'élément existant |
+| RETIENS que je préfère les réponses courtes | Préférence enregistrée immédiatement |
+| REMEMBER that I prefer short answers | Même opération en anglais |
+| OUBLIE mon ancienne adresse / FORGET my old address | Retrait de l’élément identifié |
+| Corrige : les décorations sont au grenier | Correction avec cible validée |
+| Garde cette recette sous le nom naan | Réponse précédente complète, sans résumé |
+| Rappelle la recette naan | Note complète, paginée si nécessaire |
+| Ajoute des piles à ma liste de courses | Entrée de liste |
+| J’ai acheté les piles | Entrée marquée faite, clarification si nécessaire |
+| MEMOIRE / MEMORY | Tous les éléments du profil, sans appel IA |
+| LISTE courses / LIST courses | Liste nommée, sans appel IA |
 
-Les confirmations indiquent **ce qui a changé et où**. En cas de choix numéroté,
-répondez par le numéro, un ordinal (« le deuxième ») ou un nom distinctif.
-Une cible inconnue n'est pas inventée. Une nouvelle demande abandonne le choix
-précédent; une sélection devenue obsolète demande de reformuler.
+Le langage naturel utilise toujours le modèle Mistral général pour interpréter
+les opérations explicites. Sans lui, MEMOIRE et LISTE restent disponibles; une
+opération naturelle échouée ne modifie rien. Une cible ambiguë demande de choisir;
+une sélection devenue obsolète est refusée. Les notes longues sont conservées
+entières; une correction fondée seulement sur un extrait doit être reformulée
+comme remplacement complet explicite.
 
-Deux raccourcis ne nécessitent pas de modèle : **MEMOIRE** montre les éléments de
-l'espace sélectionné; **LISTE courses** montre cette liste, y compris les entrées
-faites. Toutes les opérations visent uniquement le profil sélectionné. Les
-demandes explicites de mémoire/liste partagée sont refusées, sans appel au modèle
-ni modification. Il n’existe pas de mémoire globale ni d’héritage entre profils.
-Les éléments d’autres profils ne sont jamais consultés dans cette session.
-Pour changer de profil, utilisez LOGOUT; les noms ne constituent toujours pas
-une authentification.
+Une modification explicite annule les énoncés automatiques encore en attente
+avant elle, et invalide les résultats déjà en cours. Ce choix conservateur évite
+qu’un traitement tardif recrée un souvenir oublié. Un tour ordinaire commencé
+avant cette modification ne peut pas non plus réintroduire ses anciens énoncés
+lorsque sa réponse termine plus tard. De nouveaux énoncés ultérieurs
+peuvent être appris. Supprimer un souvenir ne supprime pas ses anciennes
+conversations, ses sauvegardes ou les extraits déjà reçus par un modèle.
 
-La préférence et les faits pertinents sont proposés aux réponses ordinaires
-suivantes, y compris après redémarrage. Les souvenirs ne sont pas injectés
-automatiquement dans un mail sortant. Pendant l'édition Gmail, les refinements du
-brouillon gardent leur routage; dites **RETIENS** ou nommez une liste/mémoire pour
-une demande mémoire explicite. Le modèle ne décide jamais du dossier ni d'un
-chemin; Python fixe l'espace, valide les identifiants et effectue l'opération.
+## Traitement automatique, sans service supplémentaire
 
-## Fichiers, limites et journaux
+Les données de travail sont des **énoncés utilisateur**, pas les affirmations de
+l’assistant ni un balayage des anciens journaux. Le programme n’envoie au
+consolidateur que les textes admissibles; Python fixe l’utilisateur, vérifie les
+sources/identifiants et écrit le résultat dans une transaction.
 
-Par défaut, les données se trouvent sous `~/.local/share/3615-ia` pour le compte
-qui exécute le service, normalement `/home/minitel/.local/share/3615-ia`.
-Option : définir `MINITEL_MEMORY_DIR=/chemin/hors/du/depot` dans `.env` pour les
-deux services. Un chemin situé dans le dépôt est refusé.
+- Après six énoncés ordinaires, le lot devient prêt. La clôture rend aussi prêt
+  un lot plus court; une nouvelle session reprend le travail interrompu.
+- Un seul thread ponctuel par processus traite au plus deux passages bornés.
+  Chaque passage traite au plus six énoncés et vectorise au plus huit souvenirs.
+  Un bail SQL de 90 secondes évite que terminal et admin traitent le même lot.
+- Aucun daemon ni boucle de surveillance. Les interactions/reprises/clôtures
+  déclenchent le travail. Un reste de file attend le prochain déclenchement.
+- Après échec, les énoncés restent en file et une nouvelle tentative est différée
+  d’au moins 60 secondes. Une tentative interrompue peut reprendre après le bail.
+- La file est limitée à 48 énoncés par profil, 2000 caractères par énoncé. Une file
+  pleine n’accumule plus de nouveaux énoncés; son état est visible dans l’admin.
+- Un lot validé est retiré de la file. Les souvenirs retenus conservent seulement
+  leurs citations justificatives, dates et références de session/énoncé.
 
-```text
-shared/memory.json
-shared/logs/date_session.jsonl
-users/nom-empreinte/memory.json
-users/nom-empreinte/logs/date_session.jsonl
-```
+Seuls faits et préférences peuvent être créés automatiquement. Les notes, listes,
+tâches et sauvegardes de réponses complètes restent explicites. Les propositions
+malformées, sans citation exacte ou visant un ID inconnu sont rejetées ensemble.
+La pertinence logique d’une citation reste une limite du modèle.
 
-Le dossier historique `shared/` appartient exclusivement au profil MinitelGPT.
-Il est conservé pour éviter de déplacer ou de perdre les données existantes; son
-nom ne désigne plus un espace commun accessible depuis un autre profil.
-Les anciens souvenirs partagés restent donc disponibles dans ce profil, sans
-copie vers les autres utilisateurs. Aucun souvenir ni journal n’est supprimé.
+Gmail, PRONOTE, les modes privés, les scènes fictives, les secrets détectés et les
+commandes mémoire sont exclus de cette collecte automatique. La console web
+respecte aussi l’exclusion des tours PRONOTE. Une sauvegarde **explicitement**
+demandée reste possible via les commandes mémoire. MinitelGPT et les profils
+désactivés ne produisent pas de souvenirs automatiques.
 
-Ce sont des fichiers texte UTF-8 lisibles : JSON indenté pour les éléments,
-JSONL pour les conversations. L'empreinte stabilise les noms de dossiers; elle
-ne protège pas leur contenu. SQLite conserve les identités, alias et droits
-d’accès aux services, ainsi que la clé stable du dossier mémoire. Le contenu
-des souvenirs reste en JSON, sans index vectoriel ni dépendance supplémentaire.
-Les verrous de fichier évitent les pertes entre
-admin et terminal; les écritures remplacent atomiquement un fichier synchronisé.
-Les notes ne sont pas chiffrées. Les credentials Gmail continuent à suivre leur
-stockage chiffré séparé existant.
+`.env` peut contenir `MINITEL_MEMORY_AUTO=0` pour suspendre l’apprentissage;
+redémarrer admin-ui et minitel-chatgpt après modification. Cela n’efface ni les
+souvenirs ni la file, et ne désactive pas les commandes explicites ou l’indexation.
+La clé/modèle Mistral général existant sert au consolidateur; les réglages Gmail
+n’interviennent pas. Aucun mot de passe utilisateur n’est ajouté dans cette phase.
 
-Limites : 256 éléments / 1 Mio par espace; 32 000 caractères par contenu;
-160 caractères pour un titre. Une note trop longue est refusée, jamais tronquée
-sur disque. Les réponses ordinaires reçoivent au plus 4 000 caractères de mémoire,
-avec priorité aux préférences et classement lexical simple des faits/notes.
-Les éléments terminés ne sont pas proposés automatiquement. Les extraits sont
-signalés comme tels; le rappel explicite restitue le texte complet. Le modèle
-d'intention reçoit un catalogue borné (environ 14 000 caractères, extraits de 2 000
-caractères) et au plus quatre messages visibles récents de 2 000 caractères.
-Un catalogue partiel ne permet pas de conclure qu'un élément n'existe pas.
-Pour corriger un contenu de plus de 2 000 caractères, donnez un remplacement
-complet explicite (« Remplace entièrement la note naan par : ... »); une
-correction fondée seulement sur son extrait est refusée pour préserver le reste.
+## Rappel sémantique
 
-Les journaux contiennent les demandes et les réponses complètes produites pour
-l'affichage, datées en Europe/Paris, par utilisateur/session. Une réponse paginée
-est enregistrée une fois, même si l'utilisateur quitte avant sa dernière page.
-Ils peuvent donc contenir les textes Gmail ou PRONOTE effectivement affichés.
-Les sélections de boîte, réponses d'API internes, plans du modèle, credentials,
-tokens et théâtre de démarrage ne sont pas archivés comme conversations.
-Les secrets configurés et les formes reconnues de secrets dans le texte visible
-sont masqués; les demandes mémoire contenant de tels secrets sont refusées.
-N'entrez pas de credentials dans la conversation : utilisez les connexions
-administratives existantes. Les journaux ne sont **jamais** relus pour répondre,
-ni transformés automatiquement en faits. Ils restent jusqu'à suppression manuelle.
-Retirer un souvenir ne supprime pas l'historique correspondant.
+Les textes et leurs vecteurs sont dans SQLite. `mistral-embed` génère des vecteurs
+normalisés de 1024 composantes, stockées en float32. Le modèle et l’empreinte du
+texte accompagnent chaque vecteur; un texte modifié invalide son vecteur. Une
+corruption ou un changement de modèle provoque une reconstruction ultérieure.
+Les vecteurs ne remplacent jamais le texte original et ne sont pas exportés.
 
-Un fichier absent est un espace vide. Un fichier malformé est conservé et signalé,
-sans écrasement automatique. Pour le réparer, arrêtez les deux services, sauvegardez
-le dossier, corrigez le JSON en gardant le schéma, ou déplacez le fichier abîmé
-pour repartir vide. Redémarrez ensuite. Sauvegardez ce dossier séparément de Git.
-La mémoire ne prouve aucun fait externe et ne donne aucune autorité au modèle;
-elle reste séparée des diagnostics fictifs du mainframe.
+Pour une réponse ordinaire, le programme vectorise la question et au plus deux
+courts messages récents du canal chat, recherche uniquement les souvenirs actifs
+du profil sélectionné, puis transmet leurs textes au modèle de réponse. La
+comparaison est un parcours exact des vecteurs, sans serveur/index vectoriel tiers.
+Les demandes d’embedding sont bornées à quatre secondes. Les textes vectorisés
+sont limités aux premiers 6000 caractères; les notes plus longues restent complètes
+en base et dans le rappel explicite.
 
-## Déploiement et acceptation
+La sélection combine jusqu’à trois préférences, six résultats sémantiques et trois
+résultats lexicaux, dédoublonnés dans le budget de contexte existant. Le seuil
+cosinus initial est 0,55 : il reste à calibrer sur des conversations réelles.
+Un résultat proche est une proximité de sens, pas une preuve. Les nombres,
+négations, contradictions et informations devenues anciennes demandent toujours
+une interprétation prudente. Aucun résultat pertinent est une réponse valide.
 
-Cette fonctionnalité est publiée sur **develop**, sans promotion de main.
-Vérifiez le commit à installer, puis sur le Pi :
+Sans clé, vecteur disponible ou API opérationnelle, le rappel utilise les textes
+locaux. Les nouveaux souvenirs restent enregistrés même si leur indexation échoue.
+MEMOIRE/LISTE ne vectorisent pas la demande. Les souvenirs ne sont pas injectés
+automatiquement dans les mails ni les requêtes scolaires. Linkup conserve son
+fonctionnement de recherche isolée, sans prompt mémoire.
+
+Limites par profil conservées : 256 éléments / 1 Mio; contenu de 32000 caractères,
+titre de 160. Les réponses ordinaires reçoivent au plus environ 4000 caractères,
+avec extraits de 900 caractères. Le planificateur explicite reçoit un catalogue
+borné à environ 14000 caractères, avec extraits de 2000 caractères; un catalogue
+partiel ne prouve pas l’absence d’un élément. Les éléments terminés restent
+consultables explicitement, mais sont exclus du rappel automatique.
+
+## Stockage et migration
+
+Racine par défaut : `/home/minitel/.local/share/3615-ia` pour le compte minitel.
+Option : `MINITEL_MEMORY_DIR=/chemin/hors/git` dans `.env`, identique pour les deux
+services. Aucun souvenir n’est placé dans Git ou dans les cookies.
+
+| Élément | Contenu |
+| --- | --- |
+| `users.sqlite3` | Identités/droits existants, souvenirs et métadonnées mémoire |
+| `memory_items` | Texte, propriétaire, type, origine, citations, état, vecteur |
+| `memory_state` | Révision/langue, apprentissage, barrière explicite, bail et état |
+| `memory_events` | Énoncés admissibles en attente, retirés après traitement |
+| `memory_schema` | Version du sous-schéma mémoire, actuellement 1 |
+| `users/<clé-stable>/logs/*.jsonl` | Archives de conversations visibles |
+| `shared/logs/*.jsonl` | Archives du profil MinitelGPT uniquement |
+| `<profil>/memory.before-sqlite.json` | Copie intacte de l’ancien fichier importé |
+| `<profil>/memory.json` | Marqueur de migration, pas le fichier à éditer |
+
+Le sous-schéma mémoire ne change pas la version 2 du registre utilisateurs/droits.
+Ses futures migrations doivent vérifier leur version et préserver les données;
+une version inconnue est refusée. Les dossiers restent stables après changement
+de nom/alias. Une base ou source invalide est signalée sans remplacement silencieux.
+
+À la première lecture d’un profil, son ancien JSON est importé une seule fois,
+avec IDs, langue et révision conservés. Les octets originaux sont archivés dans un
+fichier privé; `memory.json` devient un marqueur version 2. L’ancien code JSON-only
+refuse ce marqueur, ce qui évite de modifier une copie périmée après un rollback.
+Les nouveaux profils reçoivent aussi un marqueur. Ouvrir l’inventaire admin importe
+les profils connus; les dossiers historiques sans identité restent conservés et
+signalés, puis sont importés lors de la prochaine connexion avec le nom d’origine.
+
+Les données ne sont pas chiffrées. L’administrateur Linux peut les lire. Les textes
+sélectionnés quittent le Pi pour les appels Mistral d’extraction, d’embedding et de
+réponse. Les journaux techniques de ces opérations ne contiennent pas les textes,
+clés, vecteurs ni réponses brutes des fournisseurs.
+
+Les archives visibles restent en JSONL, séparées et jamais relues automatiquement
+pour créer des souvenirs. Elles peuvent contenir les mails effectivement affichés.
+Les tours scolaires ne sont pas archivés par les parcours terminal/test web actuels;
+d’anciennes archives peuvent encore en contenir. Aucun nettoyage rétroactif n’est
+fait. Les secrets configurés/détectés sont masqués, sans garantie de reconnaître
+un secret arbitraire non déclaré. Les données privées de modes séparés ne sont
+pas exposées par la page mémoire générale.
+
+## Administration et export
+
+**Maintenance → Mémoire des utilisateurs** affiche les profils, nombre d’éléments,
+volume de texte, dernière modification, indexation, file et état du traitement.
+Cela ne déclenche pas d’appel IA. Les profils désactivés restent inspectables.
+
+Une nouvelle saisie d’ADMIN_PASSWORD ouvre pendant cinq minutes maximum, dans la
+session admin courante, l’affichage des textes et l’export JSON individuel/global.
+Le bouton Verrouiller et la déconnexion ferment cet accès. Le mot de passe Linux
+n’est jamais demandé. Pages et téléchargements ne sont pas mis en cache.
+
+L’export contient les textes, langue, IDs, origines et citations; pas les vecteurs,
+journaux, credentials ou droits Gmail/PRONOTE. Il ne constitue donc pas une sauvegarde
+complète du Pi. L’export global inclut les anciens dossiers sans identité et porte
+`complete: false` si des données illisibles n’ont pas pu être exportées. Cette page
+est en lecture seule, sans bouton d’édition/suppression.
+
+## Nettoyage manuel et récupération
+
+Avant le premier déploiement et avant une intervention manuelle, arrêter les deux
+services puis sauvegarder **tout** le dossier de données. Pour le chemin par défaut :
 
 ```sh
-cd /home/minitel/minitel-gpt
-git status --short
-git switch develop
-git pull --ff-only origin develop
-sudo systemctl restart minitel-chatgpt admin-ui
+sudo systemctl stop minitel-chatgpt admin-ui
+cp -a /home/minitel/.local/share/3615-ia "/home/minitel/3615-ia-backup-$(date +%Y%m%d-%H%M%S)"
+```
+
+Adapter le chemin si MINITEL_MEMORY_DIR est défini. La base peut être ouverte avec
+l’outil `sqlite3` (optionnel) ou le module Python standard `sqlite3`; aucun serveur
+n’est requis. Par exemple, pour inventorier :
+
+```sql
+SELECT u.id, u.display_name, count(m.id) AS memories
+FROM users u LEFT JOIN memory_items m ON m.user_id=u.id GROUP BY u.id;
+SELECT id, kind, title, text FROM memory_items WHERE user_id=7;
+```
+
+Pour retirer un élément, adapter **les deux identifiants d’exemple** ci-dessous.
+L’invalidation du travail antérieur doit accompagner une édition manuelle :
+
+```sql
+BEGIN IMMEDIATE;
+DELETE FROM memory_events WHERE user_id=7;
+UPDATE memory_state SET revision=revision+1, barrier=barrier+1,
+ ready=0, lease_until=0, lease_token='', retry_after=0, last_status='manual'
+ WHERE user_id=7;
+DELETE FROM memory_items WHERE user_id=7 AND id='m_0123456789abcdef';
+COMMIT;
+```
+
+Pour modifier un texte, utiliser UPDATE et mettre `embedding`, `embedding_model`
+et `embedding_hash` à NULL dans la même transaction. Ne pas modifier les IDs,
+les alias ou les droits à cette occasion. Les vecteurs seront reconstruits au fil
+des prochains déclenchements. Les sauvegardes/journaux se nettoient séparément;
+ne pas supprimer les identités pour retirer leurs souvenirs.
+
+Redémarrer ensuite :
+
+```sh
+sudo systemctl start minitel-chatgpt admin-ui
 systemctl is-active minitel-chatgpt admin-ui
 ```
 
-Si `git status` montre du travail local, conservez-le avant le pull. Aucun nouvel
-enrôlement Google, changement de scope ni migration de credentials n'est requis.
-Le modèle d'intention utilise la clé/modèle Mistral déjà configuré, même si le
-fournisseur des réponses ordinaires est différent. Sans Mistral disponible,
-MEMOIRE et LISTE restent utilisables; une demande naturelle échouée ne change rien.
+La mise à jour normale de Maintenance suffit pour ce code, sans relancer
+l’installateur. **Un rollback vers une version antérieure à la mémoire SQLite
+ne convertit pas les données en sens inverse.** Restaurer une sauvegarde complète
+prise avant migration pour retrouver exactement cet ancien état, ou préparer
+hors ligne des JSON compatibles à partir de l’export. Ne pas simplement effacer
+les marqueurs ni réactiver les sauvegardes JSON devenues anciennes. Un rollback
+sans restauration conserve SQLite mais l’ancien code signale la mémoire indisponible.
 
-Dans **Administration → Configuration IA → Tester**, saisissez un
-nom; vide sélectionne MinitelGPT. **SOMMAIRE / nouvelle session** réinitialise le
-test. Le champ est relu à chaque requête; changer de nom ferme l'ancienne session.
-La page Gmail admin utilise la même sélection, indiquée au-dessus des résultats.
-Les tests admin restent protégés par le login existant. Aucun souvenir n'est placé
-dans le cookie. Après déploiement, harmoniser la notice de confidentialité publique
-avec cette conservation des textes visibles avant un usage par d'autres personnes.
+## Validation
 
-1. Choisir un nom de test; envoyer les exemples de préférence, fait, correction,
-   recette, liste et achat. Vérifier le contenu et la destination confirmés.
-2. Poser une question ordinaire : constater la préférence, puis rappeler le fait
-   ou la recette complète. Tester deux cibles semblables et leur clarification.
-3. Changer de nom : aucune mémoire personnelle précédente. Ajouter un élément
-   sous MinitelGPT, puis revenir au premier nom : cet élément n’est pas visible.
-   Une demande de liste commune doit être refusée sans modification.
-4. SOMMAIRE puis redémarrer les deux services : les souvenirs restent, les choix
-   en attente et conversations sont neufs. Examiner uniquement des journaux de
-   test; vérifier leurs dates, leur séparation et le masquage avec un faux secret.
-5. Vérifier Gmail (lecture, nouveau brouillon, réponse, pagination et gate ENVOYER),
-   PRONOTE et recherche web sans envoyer un mail réel sauf échange owner-controlled
-   délibéré. Répéter le démarrage, la pagination et le changement d'utilisateur
-   sur le vrai Minitel lorsqu'il est déballé.
+Les tests utilisent des profils synthétiques et des API simulées. Ils vérifient
+migration/reprise/concurrence, intégrité, isolation, vecteurs périmés/corrompus,
+repli local, sources automatiques, baux/retry/limites, priorité explicite et accès
+admin/CSRF/expiration/export. Aucun appel Mistral/Google live, envoi de mail,
+déploiement Pi ou validation matérielle n’est inclus dans ces résultats.
 
-**Preuves de cette livraison :** tests offline avec modèle/API simulés, fichiers
-réels, client Flask et décodeur UART réel. Ni échange avec un modèle live, ni
-déploiement/validation admin sur le Pi, ni validation physique ne sont revendiqués.
-Les tests physiques restent en attente. Commande de régression, dans le venv équipé
-des dépendances optionnelles existantes :
-
-```sh
-uv run --locked --all-extras pytest -v
-```
+Sur le Pi : sauvegarder avant migration; mettre à jour; vérifier les souvenirs
+existants dans Maintenance; tester deux profils et le défaut; reformuler un rappel;
+faire six échanges puis SOMMAIRE/LOGOUT; vérifier origine et état; oublier un
+souvenir pendant du travail en attente; vérifier l’export depuis le téléphone et
+le repli local sans API. La qualité réelle de l’extraction/rappel et les temps
+sur Raspberry Pi restent à mesurer avant promotion de develop vers main.
