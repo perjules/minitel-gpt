@@ -5,6 +5,7 @@ import time
 from unittest.mock import Mock
 
 import pytest
+import requests
 
 from services import gmail_mail, memory_session
 from services import mistral_settings as settings
@@ -78,3 +79,61 @@ def test_original_request_survives_lossy_or_fabricated_router_output(monkeypatch
     monkeypatch.setattr(model, "route", Mock(return_value=route))
     session.perform(question, None, session.epoch, time.monotonic() + 30)
     assert compose.call_args.args[:2] == ("alice@example.org", question)
+
+
+def test_reasoning_payload_parses_only_final_json_and_logs_no_private_content(monkeypatch, caplog):
+    env = {"MISTRAL_KEY": "PRIVATE-KEY", "MISTRAL_GMAIL_DRAFT_MODEL": "mistral-large-4-0",
+           "MISTRAL_GMAIL_DRAFT_REASONING_EFFORT": "medium"}
+    response = Mock()
+    response.json.return_value = {"choices": [{"finish_reason": "stop", "message": {"content": [
+        {"type": "thinking", "thinking": [{"type": "text", "text": "PRIVATE-THINKING"}]},
+        {"type": "text", "text": '{"subject":"Objet",'},
+        {"type": "text", "text": '"body":"PRIVATE-BODY"}'}]}}],
+        "usage": {"prompt_tokens": 100, "completion_tokens": 600, "private": "PRIVATE-USAGE"}}
+    post = Mock(return_value=response)
+    monkeypatch.setattr(gmail_mail.requests, "post", post)
+    model = gmail_mail.MailModel(env=lambda: env)
+    caplog.set_level("INFO", logger=gmail_mail.__name__)
+    subject, body = model.composition("PRIVATE-INSTRUCTION", {}, time.monotonic() + 60)
+    assert subject == "Objet" and "PRIVATE-BODY" in body and "THINKING" not in body
+    payload = post.call_args.kwargs["json"]
+    assert payload['model'] == 'mistral-large-4-0' and payload['reasoning_effort'] == 'medium'
+    assert payload['max_tokens'] == 8192 and post.call_args.kwargs['timeout'] == 45
+    assert 'PRIVATE' not in caplog.text
+    assert 'model=mistral-large-4-0' in caplog.text and "'completion_tokens': 600" in caplog.text
+    # The whole-operation deadline still caps a reasoning request.
+    model.composition("short", {}, time.monotonic() + 2)
+    assert 0 < post.call_args.kwargs['timeout'] <= 2
+
+
+@pytest.mark.parametrize("content,finish", [
+    ([{"type": "thinking", "thinking": "private"}], "stop"),
+    ([{"type": "text", "text": {"body": "bad"}}], "stop"),
+    ([{"type": "tool_call", "text": "bad"}], "stop"),
+    (None, "stop"), ("partial", "length"),
+])
+def test_reasoning_never_salvages_incomplete_or_malformed_answers(monkeypatch, content, finish):
+    response = Mock()
+    response.json.return_value = {"choices": [{"finish_reason": finish, "message": {"content": content}}]}
+    post = Mock(return_value=response)
+    monkeypatch.setattr(gmail_mail.requests, "post", post)
+    with pytest.raises(gmail_mail.GmailError, match="generation_incomplete"):
+        gmail_mail.MailModel(settings=lambda: ('key', 'model')).complete('x', {}, time.monotonic() + 5)
+    assert post.call_count == 1
+
+
+def test_invalid_reasoning_or_rejected_model_never_falls_back(monkeypatch):
+    env = {"MISTRAL_KEY": "key", "MISTRAL_GMAIL_DRAFT_MODEL": "mistral-large-4-0",
+           "MISTRAL_GMAIL_DRAFT_REASONING_EFFORT": "none"}
+    post = Mock()
+    monkeypatch.setattr(gmail_mail.requests, "post", post)
+    model = gmail_mail.MailModel(env=lambda: env)
+    with pytest.raises(gmail_mail.GmailError, match="invalid_gmail_draft_reasoning_effort"):
+        model.composition("x", {}, time.monotonic() + 5)
+    post.assert_not_called()
+    env['MISTRAL_GMAIL_DRAFT_REASONING_EFFORT'] = 'medium'
+    post.return_value.raise_for_status.side_effect = requests.HTTPError(
+        'PRIVATE-RESPONSE', response=Mock(status_code=400))
+    with pytest.raises(gmail_mail.GmailError, match="generation_configuration_rejected"):
+        model.composition("x", {}, time.monotonic() + 5)
+    assert post.call_count == 1

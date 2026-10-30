@@ -1,6 +1,7 @@
 """One private, bounded mail session. Only a literal user ENVOYER can send."""
 
 import json
+import logging
 import os
 import re
 import secrets
@@ -61,6 +62,28 @@ COMPOSE_REQUEST = re.compile(
     r"\b(?:send|write|compose|draft|envoie|envoyer|écris|ecris|écrire|ecrire|rédige|redige)\s+",
     re.IGNORECASE,
 )
+log = logging.getLogger(__name__)
+
+
+def final_text(content):
+    """Reasoning is never email text, JSON input or a transcript event."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        raise GmailError("generation_incomplete")
+    parts, size = [], 0
+    for chunk in content:
+        if not isinstance(chunk, dict):
+            raise GmailError("generation_incomplete")
+        if chunk.get("type") == "thinking":
+            continue
+        if chunk.get("type") != "text" or not isinstance(chunk.get("text"), str):
+            raise GmailError("generation_incomplete")
+        size += len(chunk["text"])
+        if size > DRAFT_LIMIT:
+            raise GmailError("draft_size_limit")
+        parts.append(chunk["text"])
+    return "".join(parts)
 
 
 def literal_command(question):
@@ -125,11 +148,15 @@ class MailModel:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise GmailError("timeout")
+        effort = profile["reasoning_effort"]
+        reasoning = draft and (effort in {"low", "medium", "high"} or (
+            not effort and model in {"mistral-large-4", "mistral-large-4-0"}))
+        started, usage, status = time.monotonic(), {}, "failed"
         try:
             response = requests.post(
                 "https://api.mistral.ai/v1/chat/completions",
                 headers={"Authorization": "Bearer " + key},
-                timeout=min(25, remaining),
+                timeout=min(45 if reasoning else 25, remaining),
                 json={
                     "model": model,
                     "messages": [
@@ -145,8 +172,9 @@ class MailModel:
                             "content": json.dumps(data, ensure_ascii=False),
                         },
                     ],
-                    "max_tokens": 3000,
+                    "max_tokens": 8192 if reasoning else 3000,
                     "temperature": 0.2,
+                    **({"reasoning_effort": effort} if effort else {}),
                     **(
                         {"response_format": {"type": "json_object"}}
                         if structured
@@ -155,19 +183,33 @@ class MailModel:
                 },
             )
             response.raise_for_status()
-            choice = response.json()["choices"][0]
-            text = choice["message"]["content"]
-            if (
-                choice.get("finish_reason") != "stop"
-                or not isinstance(text, str)
-                or not text.strip()
-            ):
+            payload = response.json()
+            reported = payload.get("usage")
+            if isinstance(reported, dict):
+                usage = {k: reported[k] for k in ("prompt_tokens", "completion_tokens", "total_tokens")
+                         if type(reported.get(k)) is int and reported[k] >= 0}
+            choice = payload["choices"][0]
+            if choice.get("finish_reason") != "stop":
+                raise GmailError("generation_incomplete")
+            text = final_text(choice["message"]["content"])
+            if not text.strip():
                 raise GmailError("generation_incomplete")
             if len(text) > DRAFT_LIMIT:
                 raise GmailError("draft_size_limit")
+            status = "ok"
             return printable(text).strip()
+        except requests.Timeout:
+            raise GmailError("generation_timeout") from None
+        except requests.HTTPError as error:
+            if error.response is not None and error.response.status_code in {400, 404, 422}:
+                raise GmailError("generation_configuration_rejected") from None
+            raise GmailError("generation_unavailable") from None
         except (requests.RequestException, ValueError, KeyError, TypeError, IndexError):
             raise GmailError("generation_unavailable") from None
+        finally:
+            log.info("llm_call service=%s task=%s model=%s effort=%s elapsed=%.2f status=%s usage=%s",
+                     self.service, "draft" if draft else "general", model, effort or "provider_default",
+                     time.monotonic() - started, status, usage)
 
     def route(self, question, deadline, context=None):
         # Routing sees only the new user request, never mailbox data.
