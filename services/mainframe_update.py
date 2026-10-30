@@ -27,7 +27,12 @@ TEXT = {
         "staging": "Preparation de la maintenance en cours.",
         "activating": "Remise en service en cours...",
         "leaving": "SOMMAIRE: sortir, maintenance continue",
-        "cycle": "CONTROLE COMPLEMENTAIRE / LOT",
+        "continuation": [
+            "Controle du registre / lot {n:04d}.",
+            "Parite des tores / banque {n:04d}.",
+            "Visa de coherence / dossier {n:04d}.",
+            "Inspection des relais / secteur {n:04d}.",
+        ],
         "failed": "Maintenance interrompue.\nMise a jour non confirmee.\nConsultez Maintenance dans la console.",
         "unknown": "Etat de maintenance indisponible.\nMise a jour non confirmee.\nConsultez Maintenance dans la console.",
         "finished": "Maintenance terminee.\nLe mainframe a repris son service.",
@@ -59,7 +64,12 @@ TEXT = {
         "staging": "Maintenance preparation in progress.",
         "activating": "Returning to service...",
         "leaving": "SOMMAIRE: leave, maintenance continues",
-        "cycle": "SUPPLEMENTARY INSPECTION / BATCH",
+        "continuation": [
+            "Ledger inspection / batch {n:04d}.",
+            "Core parity / bank {n:04d}.",
+            "Consistency stamp / dossier {n:04d}.",
+            "Relay inspection / sector {n:04d}.",
+        ],
         "failed": "Maintenance interrupted.\nUpdate not confirmed.\nSee Maintenance in the admin console.",
         "unknown": "Maintenance status unavailable.\nUpdate not confirmed.\nSee Maintenance in the admin console.",
         "finished": "Maintenance complete.\nThe mainframe has resumed service.",
@@ -89,13 +99,19 @@ def validate(text, adapt, *, procedure=False):
     if not isinstance(text, str) or len(text) > 6000:
         raise ValueError("Invalid maintenance text")
     rows = adapt(text)
-    if not 2 <= len(rows) <= (65 if procedure else 22):
+    if not 2 <= len(rows) <= (100 if procedure else 22):
         raise ValueError("Invalid maintenance length")
     plain = "\n".join(rows)
-    if re.search(r"\b(git(?:hub)?|commits?|branches?|depots?|repositories|repository|pull|push)\b",
+    if re.search(r"\b(git(?:hub)?|commits?|branches?|repositories|repository|pull|push)\b",
                  plain, re.IGNORECASE) or "?" in plain:
         raise ValueError("Invalid maintenance vocabulary")
     return rows
+
+
+def continuation(language, index):
+    """Extend a finished scene with numbered inspections, never replay its repairs."""
+    templates = TEXT[language]["continuation"]
+    return templates[index % len(templates)].format(n=index + 1)
 
 
 def request(preview, language, *, procedure=False):

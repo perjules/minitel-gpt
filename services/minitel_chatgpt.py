@@ -131,6 +131,7 @@ UI = json.loads(UI_FILE.read_text(encoding="utf-8"))
 BOOT_PROMPT_FILE = UI_FILE.with_name("boot_prompt.txt")
 BOOT_EXAMPLES_FILE = UI_FILE.with_name("boot_examples.json")
 BOOT_TIMEOUT = 8          # one attempt, then the static startup takes over
+UPDATE_TIMEOUT = 20      # the longer maintenance procedure needs its own budget
 
 
 def ensure_prompts():
@@ -141,14 +142,14 @@ def ensure_prompts():
                                 encoding="utf-8")
 
 
-def call_mistral(system_prompt, history, timeout=30, require_complete=False):
+def call_mistral(system_prompt, history, timeout=30, require_complete=False, *, max_tokens=700):
     """Appelle l'API Mistral (chat completions) et retourne le texte de réponse."""
     messages = [{"role": "system", "content": system_prompt}] + history
     r = requests.post(
         MISTRAL_URL,
         headers={"Authorization": f"Bearer {MISTRAL_KEY}",
                  "Content-Type": "application/json"},
-        json={"model": MISTRAL_MODEL, "messages": messages, "max_tokens": 700},
+        json={"model": MISTRAL_MODEL, "messages": messages, "max_tokens": max_tokens},
         timeout=timeout,
     )
     r.raise_for_status()
@@ -159,7 +160,7 @@ def call_mistral(system_prompt, history, timeout=30, require_complete=False):
     return text if require_complete else text.strip()
 
 
-def call_claude(system_prompt, history, timeout=30, require_complete=False):
+def call_claude(system_prompt, history, timeout=30, require_complete=False, *, max_tokens=700):
     """Appelle l'API Claude (Anthropic Messages) et retourne le texte de réponse.
     Le prompt systeme est passe a part (champ `system`), pas dans `messages`."""
     r = requests.post(
@@ -167,7 +168,7 @@ def call_claude(system_prompt, history, timeout=30, require_complete=False):
         headers={"x-api-key": ANTHROPIC_KEY,
                  "anthropic-version": "2023-06-01",
                  "content-type": "application/json"},
-        json={"model": CLAUDE_MODEL, "max_tokens": 700,
+        json={"model": CLAUDE_MODEL, "max_tokens": max_tokens,
               "system": system_prompt, "messages": history,
               # Claude 5.x : thinking adaptatif par défaut -> effort bas pour
               # une réponse rapide ; Haiku 4.5 refuse ce paramètre.
@@ -894,15 +895,36 @@ def prepare_update_text(preview, language, *, procedure=False):
                 (words["announcement"] if preview["behind"] else words["current"]).splitlines())
     generate, key = ((call_claude, ANTHROPIC_KEY) if PROVIDER == "claude" else
                      (call_mistral, MISTRAL_KEY))
+    phase = "procedure" if procedure else "announcement"
     if PROVIDER not in {"mistral", "claude"} or not key or key == "...":
+        log.info("update_theatre phase=%s status=fallback reason=provider_unconfigured", phase)
         return list(fallback)
+    started = time.monotonic()
     try:
         prompt = mainframe_update.PROMPT.read_text(encoding="utf-8")
         text = generate(prompt, [{"role": "user", "content": mainframe_update.request(
-            preview, language, procedure=procedure)}], timeout=BOOT_TIMEOUT, require_complete=True)
-        return mainframe_update.validate(text, validate_boot, procedure=procedure)
+            preview, language, procedure=procedure)}],
+            timeout=UPDATE_TIMEOUT if procedure else BOOT_TIMEOUT, require_complete=True,
+            **({"max_tokens": 1800} if procedure else {}))
+        rows = mainframe_update.validate(text, validate_boot, procedure=procedure)
+        log.info("update_theatre phase=%s status=generated lines=%s elapsed=%.2f",
+                 phase, len(rows), time.monotonic() - started)
+        return rows
     except Exception as error:  # noqa: BLE001 - Theatre must never block maintenance.
-        log.warning("Update theatre unavailable (%s); using static text", type(error).__name__)
+        reason = ("timeout" if isinstance(error, requests.Timeout) else
+                  "http_error" if isinstance(error, requests.RequestException) else
+                  "prompt_io" if isinstance(error, OSError) else {
+                      "Incomplete Mistral startup response": "incomplete_response",
+                      "Incomplete Claude startup response": "incomplete_response",
+                      "Invalid maintenance length": "line_count",
+                      "Invalid maintenance vocabulary": "vocabulary",
+                      "Invalid maintenance text": "invalid_text",
+                      "Startup contains Markdown": "markdown",
+                      "Startup contains non-printable characters": "control_characters",
+                      "Startup contains function-key instructions": "key_instructions",
+                  }.get(str(error), "invalid_response"))
+        log.warning("update_theatre phase=%s status=fallback reason=%s error=%s elapsed=%.2f",
+                    phase, reason, type(error).__name__, time.monotonic() - started)
         return list(fallback)
 
 
@@ -937,7 +959,7 @@ def play_update(t, rows, preview, queued_at, language):
     last_status = time.monotonic()
     next_probe = next_line = 0
     phase = None
-    index = cycle = 0
+    index = 0
     t.clear()
     t.w(SCROLL_ON)
     try:
@@ -967,11 +989,8 @@ def play_update(t, rows, preview, queued_at, language):
                     return "done", words["unknown"]
                 next_probe = now + 1
             if now >= next_line:
-                if index == len(rows):
-                    cycle += 1
-                    t.line(f"{words['cycle']} {cycle:03d}")
-                    index = 0
-                t.line(rows[index])
+                t.line(rows[index] if index < len(rows) else
+                       mainframe_update.continuation(language, index - len(rows)))
                 index += 1
                 next_line = now + 2.5
             kind, code = t.read_key(0.2)
@@ -985,6 +1004,7 @@ def play_update(t, rows, preview, queued_at, language):
 def terminal_update(t, language):
     """Only a physical, explicit confirmation can reach the existing update helper."""
     words = mainframe_update.TEXT[language]
+    t.line()  # ENVOI leaves the cursor after the locally echoed command.
     t.line(words["checking"])
     pending = start_update_request(language)
     t._pending = pending
@@ -1000,6 +1020,7 @@ def terminal_update(t, language):
     while True:
         t.line(words["confirm"])
         answer, action = read_question(t, allow_empty=True)
+        t.line()
         if action in ("sommaire", "guide"):
             return action, pending
         answer = (answer or "").strip().upper()
@@ -1012,7 +1033,7 @@ def terminal_update(t, language):
     t.line(words["preparing"])
     pending = start_update_request(language, preview)
     t._pending = pending
-    result, action = wait_answer(t, pending, 20)
+    result, action = wait_answer(t, pending, UPDATE_TIMEOUT + 10)
     if action in ("sommaire", "guide"):
         return action, pending
     rows = result["rows"] if result else words["procedure"]

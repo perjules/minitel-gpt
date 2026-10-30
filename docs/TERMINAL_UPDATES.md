@@ -46,8 +46,9 @@ sudoers change is required for this feature. Install it through the existing adm
 updater once, then terminal updates become available.
 
 The procedure scrolls automatically at roughly one line every 2.5 seconds, without
-SUITE pagination. If it runs out, local inspection cycles extend it without more
-model calls. During this foreground screen only, deployment.json is read about
+SUITE pagination. If it runs out, numbered local inspections extend it without
+replaying the repair sequence or making more model calls. During this foreground
+screen only, deployment.json is read about
 once per second. Real queued/preparing/activating phases are displayed separately
 from the fictional repair text. There is no fabricated percentage or ETA.
 
@@ -72,10 +73,21 @@ the final ready status.
   not branch names, hashes, usernames, histories, memories or account credentials.
   Requests use the configured general Mistral or Claude model. Linkup is a search
   provider and is never called for theatre.
-- Each generation has the boot generator's eight-second request timeout and
-  complete-response check. Missing keys, API errors, truncated output, terminal
+- The announcement keeps the boot generator's eight-second/700-token budget.
+  The longer procedure gets twenty seconds and 1800 tokens for 40–60 lines, with
+  thirty seconds of interruptible local waiting. Both require a complete response.
+  Missing keys, API errors, truncated output, terminal
   controls, Markdown, excessive text, questions or Git jargon use static themed
   text. No retries or paid calls during playback.
+- The terminal journal records `update_theatre phase=announcement|procedure`
+  with `status=generated`, line count and duration, or `status=fallback` and a
+  fixed reason such as `timeout`, `incomplete_response` or `vocabulary`. No model
+  text, provider body or credentials are logged. Inspect recent attempts with:
+
+  ```bash
+  sudo journalctl --namespace=minitel-gpt -u minitel-chatgpt -n 200 --no-pager | grep -E 'update_theatre|Update theatre'
+  ```
+
 - The check and generation share the existing bounded worker/keyboard wait
   mechanism. Workers never write to the UART or invoke sudo. Only the terminal
   thread, after explicit confirmation, can queue the fixed update operation.

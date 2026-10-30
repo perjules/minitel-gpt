@@ -128,7 +128,46 @@ def test_text_generation_is_separate_and_only_receives_bounded_change_subjects(m
         assert "Clearer mail" in content and "Better recall" in content
         assert "develop" not in content and "a" * 40 not in content and "b" * 40 not in content
         assert ("PROCEDURE" if procedure else "ANNOUNCEMENT") in content
-        assert generate.call_args.kwargs == {"timeout": chat.BOOT_TIMEOUT, "require_complete": True}
+        assert generate.call_args.kwargs == (
+            {"timeout": chat.UPDATE_TIMEOUT, "require_complete": True, "max_tokens": 1800}
+            if procedure else {"timeout": chat.BOOT_TIMEOUT, "require_complete": True})
+
+
+@pytest.mark.parametrize("provider", ["mistral", "claude"])
+def test_long_generated_procedure_reaches_display_and_records_success(monkeypatch, caplog, provider):
+    # 'Depot' is ordinary French bureaucracy, not necessarily source-control jargon.
+    text = "\n".join(f"Depot du formulaire FT-{n:03d} en cours." for n in range(60))
+    response = Mock()
+    response.json.return_value = (
+        {"choices": [{"finish_reason": "stop", "message": {"content": text}}]}
+        if provider == "mistral" else
+        {"stop_reason": "end_turn", "content": [{"type": "text", "text": text}]})
+    post = Mock(return_value=response)
+    monkeypatch.setattr(chat.requests, "post", post)
+    monkeypatch.setattr(chat, "PROVIDER", provider)
+    monkeypatch.setattr(chat, "MISTRAL_KEY", "synthetic")
+    monkeypatch.setattr(chat, "ANTHROPIC_KEY", "synthetic")
+    caplog.set_level("INFO", logger=chat.log.name)
+    assert chat.prepare_update_text(checked(), "fr", procedure=True) == text.splitlines()
+    assert post.call_args.kwargs["timeout"] == 20
+    assert post.call_args.kwargs["json"]["max_tokens"] == 1800
+    assert "phase=procedure status=generated lines=60" in caplog.text
+    assert "Depot du formulaire" not in caplog.text
+
+
+@pytest.mark.parametrize("failure,reason", [("truncated", "incomplete_response"), ("timeout", "timeout")])
+def test_procedure_fallback_reports_a_fixed_reason_without_provider_text(monkeypatch, caplog, failure, reason):
+    response = Mock()
+    response.json.return_value = {"choices": [{"finish_reason": "length",
+                                               "message": {"content": "PRIVATE RESPONSE"}}]}
+    post = Mock(return_value=response, side_effect=chat.requests.Timeout("PRIVATE RESPONSE")
+                if failure == "timeout" else None)
+    monkeypatch.setattr(chat.requests, "post", post)
+    monkeypatch.setattr(chat, "PROVIDER", "mistral")
+    monkeypatch.setattr(chat, "MISTRAL_KEY", "synthetic")
+    assert chat.prepare_update_text(checked(), "fr", procedure=True) == update.TEXT["fr"]["procedure"]
+    assert f"phase=procedure status=fallback reason={reason}" in caplog.text
+    assert "PRIVATE RESPONSE" not in caplog.text
 
 
 @pytest.mark.parametrize("bad", ["git pull\nConfirmed", "New commit\nReady", "Branche develop\nOui",
@@ -181,6 +220,10 @@ def test_real_uart_confirmation_routes_locally_and_never_enters_chat(confirmatio
         screens, calls = harness.run_session(keys)
     text = "\n".join(screens)
     assert "Mettre a jour le mainframe ? OUI/NON" in text
+    uart = bytes(harness.uart.output)
+    assert b"> \r\nFRANCE TELECOM / DOSSIER MAINTENANCE" in uart
+    assert (b"> \r\nPreparation du protocole Alcatel..." if launch else
+            b"> \r\nDossier classe sans suite.") in uart
     assert len(calls) == 1 and calls[0][1] == [{"role": "user", "content": "Bonjour"}]
     assert queue.call_count == int(launch) and play.call_count == int(launch)
     assert requests.call_count == 1 + int(launch)
@@ -283,7 +326,10 @@ def test_playback_follows_real_status_and_restores_page_mode(monkeypatch, outcom
             assert clock.now < 11
         if outcome in {"ready", "failed", "unchanged"}:
             # A short generated sequence is extended locally, without new paid calls.
-            assert any("LOT 001" in str(call) for call in term.line.call_args_list)
+            lines = [call.args[0] for call in term.line.call_args_list]
+            assert lines.count("Controle des tubes.") == 1
+            assert "Controle du registre / lot 0001." in lines
+            assert "Parite des tores / banque 0002." in lines
     assert term.w.call_args.args == (chat.SCROLL_OFF,)
     assert any(call.args == (chat.SCROLL_ON,) for call in term.w.call_args_list)
     assert len(probe_count) <= int(clock.now) + 2
