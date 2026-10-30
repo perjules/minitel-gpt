@@ -134,7 +134,7 @@ class MemorySession:
     def __init__(
         self, username="", store=None, model=None, extra_secrets=(), root=None
     ):
-        self.registry = user_registry.Registry(root)
+        self.registry = user_registry.Registry(root or (store.root if store else None))
         try:
             self.user = self.registry.resolve(username)
         except GmailError:

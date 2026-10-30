@@ -1,4 +1,4 @@
-"""Readable memory and separate conversation archives. A username is not a login."""
+"""SQLite memories, legacy JSON import and separate readable conversation archives."""
 
 import fcntl
 import hashlib
@@ -166,7 +166,7 @@ class MemoryStore:
                 "Stockage mémoire indisponible. Vérifiez le dossier configuré."
             ) from None
 
-    def _read(self, folder):
+    def _read_legacy(self, folder):
         path = folder / "memory.json"
         if not path.exists():
             return {"version": 1, "revision": 0, "items": []}
@@ -207,6 +207,20 @@ class MemoryStore:
             raise MemoryProblem(
                 "Mémoire illisible. Les données existantes sont conservées; aucune réécriture automatique."
             ) from None
+
+    def _read(self, folder):
+        try:
+            from . import memory_database
+        except ImportError:
+            import memory_database
+        return memory_database.read(self, folder)
+
+    def _write(self, folder, data):
+        try:
+            from . import memory_database
+        except ImportError:
+            import memory_database
+        memory_database.write(self, folder, data)
 
     def read(self, key):
         with self.locked(key) as folder:
@@ -249,6 +263,7 @@ class MemoryStore:
                     if proposal.get("title"):
                         item["title"] = clean_text(proposal["title"], 160)
                 item["updated"] = now()
+                item["origin"], item["source"] = "explicit", []
             else:
                 kind = proposal.get("kind")
                 if not isinstance(kind, str) or kind not in KINDS:
@@ -316,7 +331,7 @@ class MemoryStore:
             data["revision"] += 1
             self._write(folder, data)
 
-    def _write(self, folder, data):
+    def _write_json(self, folder, data):
         encoded = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
         if len(encoded.encode()) > MAX_FILE:
             raise MemoryProblem(
