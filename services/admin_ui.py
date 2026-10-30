@@ -43,6 +43,7 @@ try:
         admin_service_pages,
         calculator,
         config_store,
+        deployment,
         gmail_auth,
         gmail_client,
         gmail_mail,
@@ -68,6 +69,7 @@ except ImportError:
     import admin_service_pages
     import calculator
     import config_store
+    import deployment
     import gmail_auth
     import gmail_client
     import gmail_mail
@@ -519,18 +521,7 @@ def check_update():
     """Compare with the explicitly installed branch; deployment is handled separately."""
     if not git_ready():
         return {"ok": False, "msg": "Le code n'est pas un dépôt git sur le Pi."}
-    branch = runtime_branch()
-    rc, _, err = git("fetch", "origin", branch)
-    if rc != 0:
-        return {"ok": False, "msg": "Échec de la vérification (Internet ?) : " + err}
-    rc, behind, _ = git("rev-list", "--count", f"HEAD..origin/{branch}")
-    if rc != 0 or not behind.isdigit():
-        return {"ok": False, "msg": "Comparaison des versions indisponible ; réessayer la vérification."}
-    n = int(behind)
-    rc, changes, _ = git("log", "-20", "--format=%h  %s", f"HEAD..origin/{branch}")
-    if rc != 0:
-        return {"ok": False, "msg": "Liste des mises à jour indisponible ; réessayer la vérification."}
-    return {"ok": True, "behind": n, "log": changes[:1600]}
+    return deployment.check_update(git, runtime_branch())
 
 def do_update():
     return queue_deployment("update")
@@ -540,17 +531,7 @@ def do_rollback():
 
 
 def queue_deployment(operation, payload=None):
-    try:
-        result = subprocess.run(
-            ["sudo", "-n", "/usr/local/sbin/minitel-runtime", operation],
-            capture_output=True, text=True, timeout=15, check=False,
-            input=json.dumps(payload) if payload is not None else None,
-        )
-    except (OSError, subprocess.SubprocessError, UnicodeError):
-        return False, "Gestionnaire uv indisponible ; relancer sudo bash install.sh."
-    if result.returncode:
-        return False, "Opération refusée ; consulter le journal minitel-deploy."
-    return True, "Opération planifiée ; actualiser Maintenance pour suivre le résultat."
+    return deployment.queue_deployment(operation, payload)
 
 # ── Génération de prompt par IA ──────────────────────────────────────────
 def generate_prompt(description):
