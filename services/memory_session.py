@@ -76,7 +76,7 @@ def allowed_changes(question):
 
 class MemoryModel:
     def __init__(self, settings=None):
-        self.client = MailModel(settings=settings)
+        self.client = MailModel(settings=settings, service="general")
 
     def plan(self, question, candidates, partial, recent, language, deadline):
         text = self.client.complete(

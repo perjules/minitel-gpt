@@ -309,7 +309,7 @@ class ModelContractTests(unittest.TestCase):
                 model.route(
                     "écris un mail à Alice pour confirmer mardi", time.monotonic() + 10
                 ),
-                route,
+                route | {"original_request": "écris un mail à Alice pour confirmer mardi"},
             )
             self.assertEqual(
                 complete.call_args.args[1]["request"],

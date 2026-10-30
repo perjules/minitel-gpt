@@ -358,7 +358,7 @@ class WorkflowTests(unittest.TestCase):
         ticket = draft(session)
         entered, release = threading.Event(), threading.Event()
 
-        def blocked(*args):
+        def blocked(*args, **kwargs):
             entered.set()
             release.wait(2)
             return "Stale reply"

@@ -2335,7 +2335,8 @@ def mail_entry(username=""):
                     auto_summary_chars=read_env().get("GMAIL_AUTO_SUMMARY_CHARS",
                                                       os.getenv("GMAIL_AUTO_SUMMARY_CHARS", "6000")),
                     model=gmail_mail.MailModel(
-                        settings=lambda: (mistral_key(), mistral_model())
+                        settings=lambda: (mistral_key(), mistral_model()),
+                        env=lambda: {**os.environ, **read_env()},
                     )
                 ),
                 "pages": ["MAIL pour consulter la boîte.\nECRIRE nom : instructions pour un nouveau mail."],

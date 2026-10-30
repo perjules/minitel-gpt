@@ -18,7 +18,7 @@ import requests
 
 try:
     from . import gmail_correspondents as correspondents
-    from . import user_services
+    from . import mistral_settings, user_services
     from .gmail_auth import GmailError, enabled
     from .gmail_client import (
         addresses,
@@ -28,6 +28,7 @@ try:
     )
 except ImportError:
     import gmail_correspondents as correspondents
+    import mistral_settings
     import user_services
     from gmail_auth import GmailError, enabled
     from gmail_client import (
@@ -39,6 +40,9 @@ except ImportError:
 
 SIGNATURE = "Envoyé par Minitel 722079V (138121) — 3615 IA"
 DRAFT_RULES = (
+    "Preserve the user's intent, especially negations, conditions, reservations and requested tone. "
+    "An agreement subject to a condition is not an unconditional promise. Expand terse instructions "
+    "into natural correspondence without inventing dates, amounts, reasons or commitments. "
     "User writing/editing instructions are commands for the draft, not facts to announce "
     "to its recipient. During revision, a request such as 'signe avec Camille' means add Camille as the "
     "sender's closing name; it does not mean anyone signed a document. Include a personal "
@@ -99,16 +103,23 @@ def signed(body, default_name=None):
 class MailModel:
     """No tools, persona, web, inbox, ordinary conversation history or credentials."""
 
-    def __init__(self, settings=None):
-        self.settings = settings or (
-            lambda: (
-                os.getenv("MISTRAL_KEY", ""),
-                os.getenv("MISTRAL_MODEL", "mistral-small-latest"),
-            )
-        )
+    def __init__(self, settings=None, *, service="gmail", env=None):
+        self.settings, self.service = settings, service
+        self.env = env or (lambda: os.environ)
 
-    def complete(self, instructions, data, deadline, structured=False):
-        key, model = self.settings()
+    def profile(self, draft=False):
+        values = dict(self.env())
+        if self.settings is not None:
+            key, model = self.settings()
+            values.update(MISTRAL_KEY=key, MISTRAL_MODEL=model)
+        try:
+            return mistral_settings.resolve(values, service=self.service, draft=draft)
+        except mistral_settings.SettingsError as error:
+            raise GmailError(str(error)) from None
+
+    def complete(self, instructions, data, deadline, structured=False, *, draft=False):
+        profile = self.profile(draft)
+        key, model = profile["key"], profile["model"]
         if not key:
             raise GmailError("mistral_configuration_error")
         remaining = deadline - time.monotonic()
@@ -221,6 +232,11 @@ class MailModel:
                 for address in re.findall(r"[\w.+-]+@[\w.-]+", route["recipient"]):
                     if address.casefold() not in question.casefold():
                         raise ValueError()
+            # The model's paraphrase must never be the writer's only view of the request.
+            # This field is supplied by Python, never trusted from model output.
+            route.pop("original_request", None)
+            if route["action"] in {"compose", "retarget"} and route.get("instruction"):
+                route["original_request"] = question
             return route
         except (ValueError, AttributeError):
             raise GmailError("invalid_search") from None
@@ -276,6 +292,7 @@ class MailModel:
             data,
             deadline,
             structured=True,
+            draft=True,
         )
         try:
             value = json.loads(result)
@@ -601,7 +618,7 @@ class MailSession:
             pending = self.composition
             return self.compose(
                 route["recipient"],
-                route.get("instruction") or (pending["instruction"] if pending else ""),
+                route.get("original_request") or route.get("instruction") or (pending["instruction"] if pending else ""),
                 epoch,
                 deadline,
                 previous=pending.get("previous") if pending else None,
@@ -614,7 +631,7 @@ class MailSession:
             previous = self.draft
             return self.compose(
                 route["recipient"],
-                route.get("instruction") or previous["instruction"],
+                route.get("original_request") or route.get("instruction") or previous["instruction"],
                 epoch,
                 deadline,
                 previous=previous,
@@ -1037,6 +1054,7 @@ class MailSession:
                 + "Return only the complete plain-text body. " + DRAFT_RULES,
                 data,
                 deadline,
+                draft=True,
             )
         )
         subject = re.sub(r"[\r\n]+", " ", selected["subject"]).strip()
