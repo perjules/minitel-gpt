@@ -138,6 +138,11 @@ not prove ARM compilation or physical hardware behavior.
 
 ## Updates, status and rollback
 
+The same update operation is also available from the physical terminal through
+`UPDATE`, `MISE A JOUR` or `MAJ`, with explicit confirmation and mainframe
+maintenance theatre. See [TERMINAL_UPDATES.md](TERMINAL_UPDATES.md) for operation,
+the one-use automatic boot display hint and physical acceptance checks.
+
 Admin buttons call fixed, root-owned commands allowed by sudoers. They queue a
 separate systemd job with a short delay so the HTTP response can finish; queued
 does not mean successfully applied. The job is independent of the admin process.

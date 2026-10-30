@@ -114,6 +114,10 @@ s'affiche** pendant la frappe : c'est une sécurité.
 ### 3. Installer MINITEL GPT
 
 > Ce fork utilise un environnement uv partagé : voir [installation et migration](docs/RUNTIME.md).
+
+Depuis le terminal, `UPDATE`, `MISE A JOUR` ou `MAJ` ouvre la
+[maintenance du mainframe](docs/TERMINAL_UPDATES.md), avec confirmation OUI/NON
+et procédure Alcatel à défilement automatique.
 > Pour développer et tester : [guide de test](docs/TESTING.md).
 
 Une fois connecté au Pi, mettre à jour le système et installer **git** (qui sert
