@@ -490,7 +490,7 @@ class Term:
                     code = self.read_byte()
                 if code is None:
                     continue          # SEP parasite → ignorer, ne pas bloquer
-                if code in (K_ENVOI, K_SUITE, K_SOMMAIRE, K_GUIDE, K_RETOUR, K_CORR):
+                if code in (K_ENVOI, K_SUITE, K_SOMMAIRE, K_GUIDE, K_RETOUR, K_CORR, K_ANNUL):
                     self.keyboard_activity()
                 return ('fn', code)
             if b == ESC:
@@ -555,6 +555,10 @@ def call_answer(system_prompt, history, language, options, knowledge,
     question = history[-1]["content"]
     if memory is not None and hasattr(memory, "begin_turn"):
         memory.begin_turn()
+    if mail is not None and gmail_mail.enabled() and (gmail_mail.shortcut(question) or gmail_mail.literal_command(question)):
+        # Explicit mail instructions cannot be intercepted by welcome, memory,
+        # school or calculator routing. Keep the user's actual line for approval.
+        return {**mail.handle(question, review_ticket, timeout), "gmail": True}
     blocked = calculator_blocked(mail, memory)
     if calc is not None and calc.explicit(question):
         return calc.handle(question, language, generate=lambda expr, lang:
@@ -1119,6 +1123,11 @@ def read_question(t: Term, allow_empty=False, calculator_mode=False, navigation_
             overflow = False
             continue
         if kind == 'fn':
+            if code == K_ANNUL:
+                t.w(bytes([BS, 0x20, BS]) * len(buf))
+                buf.clear()
+                overflow = False
+                continue
             if navigation_mode and code in (K_SUITE, K_RETOUR):
                 return 'SUIVANT' if code == K_SUITE else 'PRECEDENT', 'envoi'
             if calculator_mode and code == K_RETOUR:

@@ -169,8 +169,8 @@ def test_hardware_echo_password_hidden_normal_input_once_and_routes_restored(
     user = registry.resolve("Alice")
     monkeypatch.setattr(chat.time, "sleep", lambda _: None)
     keys = (
-        submitted("q")
-        + submitted("q")
+        submitted("SYNTHETIC_PW_q7")
+        + submitted("SYNTHETIC_PW_q7")
         + submitted("TEXTE : PRIVATE NOTE")
         + bytes([chat.SEP, chat.K_SOMMAIRE])
     )
@@ -185,7 +185,7 @@ def test_hardware_echo_password_hidden_normal_input_once_and_routes_restored(
     action, _ = journal_terminal.run(term, user, registry, model=Mock())
     assert action == "sommaire" and serial.routes == routes
     assert all(copies == 0 for _, copies in serial.echo)
-    assert b"q" not in serial.output
+    assert b"SYNTHETIC_PW_q7" not in serial.output
     assert serial.output.endswith(b"Journal verrouille.\r\n")
     # The typed text is explicitly echoed once; it appears again in its preview.
     assert serial.output.count(b"TEXTE : PRIVATE NOTE") == 1

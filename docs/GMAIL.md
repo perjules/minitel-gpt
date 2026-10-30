@@ -11,6 +11,32 @@ admin console `/gmail` and the physical Minitel. Disabled until encrypted enroll
 is installed and both services are activated. Existing web search, PRONOTE, boot,
 personality and serial/navigation paths remain available.
 
+## Colon shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| `A:` | ANNULER: discard the pending draft/mail session |
+| `M: instructions` | MODIFIER; `M:` alone opens the existing editing preview |
+| `E:` | ENVOYER: requires full review of the current draft and its current ticket |
+| `L: 2` | LIRE message 2; `L:` alone asks for a number without AI |
+| `T: exact text` | TEXTE: append a literal paragraph to the pending draft without AI |
+| `Q:` | QUITTER: discard the draft and leave the mail session |
+
+Full words remain accepted. A shortcut is recognized only at the start of the
+submitted line, ignoring leading whitespace/case, with the colon immediately
+after its letter. Space after the colon is optional. `A: some text`, `E: some
+text`, `Q: some text` and unknown shortcuts are rejected locally, with no model,
+send, cancellation or edit. Literal contents after `T:`/`TEXTE:` are never parsed
+as further commands. Existing numbered literal edits and `R:` remain supported;
+the old unnumbered `A: text` append alias is replaced by `T: text`.
+
+Shortcuts are handled before welcome, memory or school routing. They cannot turn
+an editing instruction such as `T: RETIENS ceci` into a saved memory. ENVOI still
+only submits input; `E:` is explicit send approval, subject to the same review,
+account permissions, stale-ticket and duplicate-send checks as ENVOYER. The
+ANNULATION function key clears the current input; `A:` cancels the draft itself.
+Both the web test console and physical terminal use these same session rules.
+
 ## Validation status
 
 The full suite passes **623 offline tests** (28 October 2026), including mocked REST/model responses,
@@ -430,10 +456,14 @@ Select an owner-controlled test message, then:
 
    | Command | Alias | Result |
    |---|---|---|
-   | `AJOUTER: texte` | `A: texte` | Append before the tracked personal sign-off, or at the end of the body if none is tracked |
+   | `TEXTE: texte` | `T: texte` | Append exact text before the tracked personal sign-off, or at the end of the body if none is tracked |
    | `AJOUTER 1: texte` | `A1: texte` | Insert after paragraph 1 |
    | `REMPLACER 1: texte` | `R1: texte` | Replace paragraph 1 |
    | `REMPLACER TOUT: texte` | `R: texte` | Replace the complete body, including its personal sign-off |
+
+   `AJOUTER: texte` remains accepted for compatibility. `A:` now exclusively
+   means ANNULER; `A: texte` is rejected without cancelling or editing anything.
+   `TEXTE` **without a colon** retains its existing full-message reading behavior.
 
    Commands are case-insensitive; spaces around a paragraph number are optional.
    The first colon separates the command from the text; further colons remain
@@ -448,7 +478,7 @@ Select an owner-controlled test message, then:
 3. `MODIFIER` asks for changes; `MODIFIER rendre plus court` or conversational
    revisions create a new revision. Any attempted change invalidates review.
    Reread every page of the new draft. `ANNULER` discards it and the mail session.
-4. Type **`ENVOYER`** and press the function key **ENVOI**, or use the admin
+4. Type **`ENVOYER`** or **`E:`** and press the function key **ENVOI**, or use the admin
    **ENVOYER** button only after reaching the final review page. The function key
    **ENVOI alone does not approve sending**. The LLM has no send tool and cannot
    approve anything; only this literal user command sends the stored reviewed

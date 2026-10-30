@@ -349,7 +349,7 @@ class CompositionSessionTests(unittest.TestCase):
             self.assertEqual(model.method_calls, [])
 
     def test_literal_append_precedes_default_or_literally_replaced_signoff(self):
-        for command in ("AJOUTER: À bientôt.", "A: À bientôt."):
+        for command in ("AJOUTER: À bientôt.", "ajouter: À bientôt."):
             session, _, _ = self.literal_session()
             session.handle("R3: Alex")
             session.handle(command)
@@ -366,7 +366,7 @@ class CompositionSessionTests(unittest.TestCase):
             client.send.assert_not_called()
 
     def test_invalid_literal_target_or_empty_text_leaves_body_and_approval_untouched(self):
-        for command in ("A0: x", "R99: x", "AJOUTER TOUT: x", "R1:", "A:", "R: "):
+        for command in ("A0: x", "R99: x", "AJOUTER TOUT: x", "R1:", "AJOUTER:", "R: "):
             with self.subTest(command=command):
                 session, _, model = self.literal_session()
                 ticket = session.draft["ticket"]

@@ -29,6 +29,7 @@ un terminal interactif (`ssh -t`). Ctrl-Q ou Ctrl-C quitte et restaure le termin
 | Ctrl-P, F2, Home | SOMMAIRE |
 | Ctrl-G, F1 | GUIDE |
 | Ctrl-R, F4, Échap | RETOUR |
+| Ctrl-U, F5 | ANNULATION : effacer la saisie en cours |
 | Retour arrière | CORRECTION |
 
 Ces touches ont exactement le comportement de la boucle Minitel selon l'écran.

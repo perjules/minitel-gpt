@@ -22,7 +22,13 @@ def read_field(term, session):
         with session.lock:
             session.check()
             session.touch()
-        if kind == "fn" and code in (chat.K_SOMMAIRE, chat.K_RETOUR, chat.K_ANNUL):
+        if kind == "fn" and code == chat.K_ANNUL:
+            if not secret:
+                term.w(b"\x08 \x08" * len(buffer))
+            buffer.clear()
+            overflow = False
+            continue
+        if kind == "fn" and code in (chat.K_SOMMAIRE, chat.K_RETOUR):
             return None, "sommaire" if code == chat.K_SOMMAIRE else "retour"
         if kind == "fn" and code == chat.K_GUIDE and not secret:
             return "AIDE", "submit"

@@ -11,18 +11,26 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from . import gmail_mail, journal_store, persistent_memory
+from . import command_shortcuts, gmail_mail, journal_store, persistent_memory
 
 JournalError = journal_store.JournalError
 IDLE_SECONDS = 300
 MAX_TEXT = 12000
+SHORTCUTS = {
+    "A": ("ANNULER", False), "M": ("MODIFIER", True),
+    "E": ("ENREGISTRER", False), "L": ("LIRE", True),
+    "Q": ("QUITTER", False), "S": ("EFFACER AUJOURD'HUI", False),
+    "T": ("TEXTE :", True), "P": ("MOT DE PASSE", False),
+    "G": ("AIDE", False),
+}
 HELP = (
     "Texte libre : proposer un ajout.\n"
-    "TEXTE : contenu exact sans IA.\n"
-    "MODIFIER instructions / ENREGISTRER\n"
-    "LIRE jj/mm/aaaa / AUJOURD'HUI\n"
-    "EFFACER AUJOURD'HUI / ANNULER\n"
-    "MOT DE PASSE / QUITTER"
+    "T: texte exact sans IA\n"
+    "M: modifier / E: enregistrer\n"
+    "L: jj/mm/aaaa / AUJOURD'HUI\n"
+    "S: effacer aujourd'hui / A: annuler\n"
+    "P: mot de passe / Q: quitter\n"
+    "Commandes complètes aussi acceptées."
 )
 DISCLOSURE = (
     "Journal personnel chiffré.\n"
@@ -290,7 +298,7 @@ class Session:
         action = (
             "AJOUT" if draft["operation"] == "append" else "REMPLACEMENT DE LA JOURNÉE"
         )
-        return f"Brouillon — {action}\n{draft['day']}\n\n{draft['text']}\n\nENREGISTRER / MODIFIER instructions / ANNULER"
+        return f"Brouillon — {action}\n{draft['day']}\n\n{draft['text']}\n\nE: enregistrer / M: modifier / A: annuler"
 
     def acknowledge(self, token=None):
         with self.lock:
@@ -336,6 +344,12 @@ class Session:
             self.touch()
             if self.secret:
                 return self.password(text)  # Never normalize, route or log passwords.
+            try:
+                text = command_shortcuts.expand(text, SHORTCUTS)
+            except command_shortcuts.ShortcutError as error:
+                # A malformed command also cancels a pending deletion confirmation.
+                self.delete_pending = None
+                return self.result(str(error))
             command = persistent_memory.normalized(text).strip()
             if command in {"quitter", "sommaire", "logout", "retour"}:
                 self.close()
@@ -401,7 +415,7 @@ class Session:
                 return self.result(
                     "Effacer TOUTE la journée du "
                     + self.delete_pending
-                    + " ?\nOUI / ANNULER"
+                    + " ?\nOUI / A: annuler"
                 )
             if command in {"lire", "dernier"}:
                 return self.result(self.read_day())
@@ -429,7 +443,7 @@ class Session:
                 )
             if command == "modifier":
                 return self.result(
-                    "MODIFIER suivi de vos corrections. TEXTE : propose un ajout exact."
+                    "M: suivi de vos corrections (ou MODIFIER). T: propose un ajout exact."
                 )
             if reading:
                 epoch, current = self.epoch, self.date()

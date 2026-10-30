@@ -2603,7 +2603,7 @@ def mail_entry(username=""):
                         env=lambda: {**os.environ, **read_env()},
                     )
                 ),
-                "pages": ["MAIL pour consulter la boîte.\nECRIRE nom : instructions pour un nouveau mail."],
+                "pages": ["MAIL pour consulter la boîte.\nL: numéro pour lire.\nECRIRE nom : instructions pour un nouveau mail."],
                 "page": 0,
                 "ticket": None,
                 "used": now,
@@ -2633,10 +2633,10 @@ input,button{font:inherit;padding:.5em;margin:.2em} input[type=text]{width:90%}<
 <input type="hidden" name="ticket" value="{{ ticket or '' }}">
 <button name="action" value="previous" {% if position == 1 %}disabled{% endif %}>RETOUR</button>
 <button name="action" value="next" {% if position == count %}disabled{% endif %}>SUITE</button>
-<button name="action" value="send" {% if not reviewed %}disabled{% endif %}>ENVOYER</button>
-<button name="action" value="modify">MODIFIER</button><button name="action" value="cancel">ANNULER</button>
+<button name="action" value="send" {% if not reviewed %}disabled{% endif %}>E: ENVOYER</button>
+<button name="action" value="modify">M: MODIFIER</button><button name="action" value="cancel">A: ANNULER</button>
 <button name="action" value="reset">SOMMAIRE</button><br>
-<input name="question" type="text" maxlength="2000" placeholder="MAIL / LIRE 1 / REPONDRE / ECRIRE nom : instructions">
+<input name="question" type="text" maxlength="2000" placeholder="L: 1 / M: corrections / E: / A: / Q:">
 <button name="action" value="command">ENVOI</button></form>
 <p>RECHERCHE is:unread / from:nom / subject:mot / after:2026/10/01 before:2026/10/13.
 Les dates de la liste sont affichées en Europe/Paris.</p></html>"""
@@ -2675,7 +2675,7 @@ def gmail_admin():
     item = mail_entry("" if selected.key == "shared" else selected.username)
     cancelling = request.method == "POST" and (
         request.form.get("action") in ("cancel", "reset")
-        or request.form.get("question", "").strip().upper() in ("ANNULER", "SOMMAIRE")
+        or gmail_mail.cancelling(request.form.get("question", ""))
     )
     if cancelling:
         item["mail"].reset()
@@ -2709,7 +2709,7 @@ def gmail_admin():
                 if command is None:
                     return "Action inconnue", 400
                 selected.record("user", command, "gmail")
-                memory_request = (not gmail_mail.literal_command(command) and selected.interested(command) and
+                memory_request = (not gmail_mail.literal_command(command) and not gmail_mail.shortcut(command) and selected.interested(command) and
                                   (not item["mail"].draft or memory_session.explicit_request(command)))
                 result = selected.handle(command) if memory_request else {"passthrough": True}
                 if not result.get("passthrough"):

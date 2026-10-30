@@ -1,4 +1,4 @@
-"""One private, bounded mail session. Only a literal user ENVOYER can send."""
+"""One private, bounded mail session. Only user ENVOYER / E: can send."""
 
 import json
 import logging
@@ -18,8 +18,8 @@ from zoneinfo import ZoneInfo
 import requests
 
 try:
+    from . import command_shortcuts, mistral_settings, user_services
     from . import gmail_correspondents as correspondents
-    from . import mistral_settings, user_services
     from .gmail_auth import GmailError, enabled
     from .gmail_client import (
         addresses,
@@ -28,6 +28,7 @@ try:
         reply_addresses,
     )
 except ImportError:
+    import command_shortcuts
     import gmail_correspondents as correspondents
     import mistral_settings
     import user_services
@@ -57,7 +58,13 @@ DRAFT_RULES = (
 )
 CONTEXT_LIMIT = 12000
 DRAFT_LIMIT = 12000
-LITERAL_EDIT = re.compile(r"^\s*(ajouter|remplacer|a|r)\s*(\d+|tout)?\s*:", re.IGNORECASE)
+LITERAL_EDIT = re.compile(r"^\s*(ajouter|texte|remplacer|a(?=\s*\d)|r)\s*(\d+|tout)?\s*:", re.IGNORECASE)
+SHORTCUTS = {
+    "A": ("ANNULER", False), "M": ("MODIFIER", True),
+    "E": ("ENVOYER", False), "L": ("LIRE", True), "Q": ("QUITTER", False),
+    "T": ("TEXTE:", True),
+}
+DRAFT_ACTIONS = "Après relecture: E: envoyer / M: modifier / A: annuler"
 COMPOSE_REQUEST = re.compile(
     r"\b(?:send|write|compose|draft|envoie|envoyer|écris|ecris|écrire|ecrire|rédige|redige)\s+",
     re.IGNORECASE,
@@ -88,6 +95,22 @@ def final_text(content):
 
 def literal_command(question):
     return LITERAL_EDIT.match(question)
+
+
+def shortcut(question):
+    # R: and numbered A1:/R1: retain their existing literal-edit contracts.
+    return not literal_command(question) and command_shortcuts.PREFIX.match(question)
+
+
+def expand_command(question):
+    return command_shortcuts.expand(question, SHORTCUTS) if shortcut(question) else question
+
+
+def cancelling(question):
+    try:
+        return expand_command(question).strip().upper() in {"ANNULER", "SOMMAIRE", "QUITTER"}
+    except command_shortcuts.ShortcutError:
+        return False
 
 
 def body_paragraphs(body):
@@ -408,6 +431,8 @@ class MailSession:
     def interested(self, question):
         if not enabled():
             return False
+        if shortcut(question):
+            return True
         q = question.strip().casefold()
         if literal_command(question):
             return True
@@ -424,6 +449,7 @@ class MailSession:
             "modifier",
             "annuler",
             "sommaire",
+            "quitter",
             "texte",
             "full",
             "résumer",
@@ -478,9 +504,14 @@ class MailSession:
         q = question.strip()
         if len(q) > 2000:
             return {"display": "Gmail: request_size_limit", "turn": None}
-        if q.upper() in ("SOMMAIRE", "ANNULER"):
+        try:
+            q = expand_command(q)
+        except command_shortcuts.ShortcutError as error:
+            return {"display": str(error) + "\nT: texte pour un ajout littéral.", "turn": None}
+        if q.upper() in ("SOMMAIRE", "ANNULER", "QUITTER"):
             self.reset()
-            return {"display": "Brouillon annulé. Session mail effacée.", "turn": None}
+            return {"display": "Session mail quittée. Brouillon abandonné." if q.upper() == "QUITTER"
+                    else "Brouillon annulé. Session mail effacée.", "turn": None}
         with self.lock:
             if self.busy:
                 return {"display": "Gmail: busy", "turn": None}
@@ -541,8 +572,10 @@ class MailSession:
                 self.editing = True
             return {
                 "display": self.edit_preview(self.draft)
-                + "\n\nModification libre ou A: / A1: / R1: / R: texte.\nLe nouveau brouillon devra être relu."
+                + "\n\nModification libre ou T: texte exact à ajouter.\nLe nouveau brouillon devra être relu."
             }
+        if upper == "LIRE":
+            return {"display": "L: numéro (ou LIRE numéro) pour ouvrir un message."}
         match = re.fullmatch(r"(?:lire|read)?\s*(\d+)", question, re.IGNORECASE)
         recipient = re.fullmatch(r"destinataire\s+(\d+)", question, re.IGNORECASE)
         if self.choice_kind == "new" and self.recipient_choices and question.isdigit():
@@ -739,10 +772,10 @@ class MailSession:
         text = text.removeprefix(" ")
         body = previous["body"].removesuffix("\n\n" + SIGNATURE)
         spans = body_paragraphs(body)
-        adding = action in {"a", "ajouter"}
+        adding = action in {"a", "ajouter", "texte"}
         if (not text.strip() or printable(text) != text or (adding and target == "tout")
                 or (target.isdigit() and not 1 <= int(target) <= len(spans))):
-            return {"display": "Commande invalide. A: / A1: / R1: / R: texte.\nBrouillon inchangé."}
+            return {"display": "Commande invalide. T: texte exact à ajouter.\nBrouillon inchangé."}
         closing = previous.get("personal_signoff")
         if adding:
             position = spans[int(target) - 1][1] if target else len(body)
@@ -764,7 +797,7 @@ class MailSession:
         result = self.finish_draft(previous["subject"], body, previous["recipient"], epoch, deadline,
             selected=self.selection() if previous["kind"] == "reply" else None, previous=state,
             candidate=previous.get("candidate"), instruction=previous.get("instruction", ""))
-        result["display"] = self.edit_preview(self.draft) + "\n\nAprès relecture: ENVOYER / MODIFIER / ANNULER"
+        result["display"] = self.edit_preview(self.draft) + "\n\n" + DRAFT_ACTIONS
         return result
 
     def list_text(self):
@@ -776,7 +809,7 @@ class MailSession:
                 + ("non lu" if r["unread"] else "lu")
                 for i, r in enumerate(self.items, 1)
             )
-            + "\n\nLIRE numéro / RECHERCHE requête"
+            + "\n\nL: numéro / RECHERCHE requête / Q: quitter"
         )
 
     def list(self, query, epoch, deadline):
@@ -1002,7 +1035,7 @@ class MailSession:
             "display": notice
             + "Quel destinataire ?\n"
             + text
-            + "\n\nDESTINATAIRE numéro / précisez le nom / ANNULER"
+            + "\n\nDESTINATAIRE numéro / précisez le nom / A: annuler"
         }
 
     def make_new(self, instruction, candidate, epoch, deadline, previous=None):
@@ -1176,7 +1209,7 @@ class MailSession:
         return {
             "display": f"Brouillon révision {draft['revision']}\nÀ: {recipient}\nObjet: {subject}\n\n{body}"
             + (self.limitation() if selected is not None else "")
-            + "\n\nAprès relecture: ENVOYER / MODIFIER / ANNULER",
+            + "\n\n" + DRAFT_ACTIONS,
             "review_ticket": draft["ticket"],
         }
 

@@ -33,6 +33,30 @@ day is displayed, without an API call. An empty journal displays a short prompt.
 | `MOT DE PASSE` | Verify the current password; enter the new password twice; re-encrypt |
 | `QUITTER`, `LOGOUT`, SOMMAIRE, RETOUR | Close and clear the private mode; LOGOUT also leaves the profile |
 
+Colon shortcuts are accepted at the beginning of a submitted line:
+
+| Shortcut | Full command |
+| --- | --- |
+| `A:` | `ANNULER` |
+| `M: instructions` | `MODIFIER instructions`; `M:` alone asks for corrections |
+| `E:` | `ENREGISTRER` |
+| `L: date` | `LIRE date`; `L:` alone reads the latest nonempty day |
+| `T: exact text` | `TEXTE : exact text`, without AI |
+| `S:` | `EFFACER AUJOURD'HUI`, still requiring `OUI` |
+| `P:` | `MOT DE PASSE` |
+| `G:` | `AIDE` |
+| `Q:` | `QUITTER` |
+
+Case and leading spaces do not matter; the colon must immediately follow the
+letter. A space after it is optional. Commands without arguments must occupy the
+whole line: `A: some text`, `E: some text`, `Q: some text` and unknown shortcuts
+produce a local error, without AI or a saved change. Text after `T:`/`TEXTE :`
+is literal; embedded command-looking text is never interpreted again. Password
+fields always treat the complete input literally, including `A:` or `E:`.
+Full command words remain valid. ENVOI submits input and does not approve a save
+by itself. ANNULATION clears the current input, including a hidden password
+field; it does not abandon the draft. `A:` explicitly cancels the pending draft.
+
 SUITE reads subsequent pages. Saving requires displaying all proposal pages;
 revisions invalidate that review. A new proposal defaults to today's date even
 while viewing an older day. Each save appends a blank-line-separated paragraph

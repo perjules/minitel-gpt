@@ -67,6 +67,7 @@ def key_bytes(key):
         "\x10": 0x46, curses.KEY_HOME: 0x46, curses.KEY_F2: 0x46,
         "\x07": 0x44, curses.KEY_F1: 0x44,
         "\x12": 0x42, "\x1b": 0x42, curses.KEY_F4: 0x42,
+        "\x15": 0x45, curses.KEY_F5: 0x45,
         "\x08": 0x47, "\x7f": 0x47, curses.KEY_BACKSPACE: 0x47,
     }
     if key in ("\x03", "\x11"):
@@ -86,7 +87,7 @@ class ConsoleSerial:
         self.screen = Screen()
         self.pending = deque()
         self.local_echo = True
-        self.hint = "Enter ENVOI | ^N SUITE | ^P SOMMAIRE | ^G GUIDE | ^R RETOUR | ^Q quit"
+        self.hint = "Enter ENVOI | ^N SUITE | ^P SOMMAIRE | ^G GUIDE | ^R RETOUR | ^U ANNUL | ^Q quit"
         window.keypad(True)
         window.timeout(100)
 
