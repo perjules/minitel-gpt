@@ -254,7 +254,8 @@ LoadCredentialEncrypted=gmail:/etc/credstore.encrypted/minitel-gmail
 PrivateMounts=yes
 """
         if self.system_path('/etc/credstore.encrypted/minitel-gmail-accounts').exists():
-            gmail = gmail.replace('minitel-gmail\n','minitel-gmail-accounts\n')
+            gmail = gmail.replace('gmail:/etc/credstore.encrypted/minitel-gmail\n',
+                                  'gmail-accounts:/etc/credstore.encrypted/minitel-gmail-accounts\n')
         for service in SERVICES[:2]:
             folder = self.system_path(f"/etc/systemd/system/{service}.service.d")
             (folder / "pronote.conf").unlink(missing_ok=True)
@@ -675,6 +676,13 @@ def main():
         if initialized and args.operation not in {"update", "rollback", "housekeeping", "switch-branch", "poweroff", "reboot"}:
             manager.status("failed", error_type=type(error).__name__)
         message = str(error) if isinstance(error, RuntimeError) else "Inspect journalctl -u minitel-deploy -u minitel-runtime-install."
+        if isinstance(error, subprocess.CalledProcessError):
+            executable = Path(str(error.cmd[0])).name if isinstance(error.cmd, (list, tuple)) and error.cmd else "command"
+            # Never log raw argv or captured output: Git URLs and subprocess data
+            # may contain credentials. Fixed executable names are enough to locate the step.
+            if executable not in {"systemctl", "systemd-run", "runuser", "uv", "visudo", "apt-get"}:
+                executable = "External command"
+            message = f"{executable} exited with status {error.returncode}. {message}"
         print(f"Deployment failed ({type(error).__name__}): {message}", file=sys.stderr)
         return 1
 

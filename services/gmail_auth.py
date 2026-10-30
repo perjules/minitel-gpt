@@ -20,6 +20,7 @@ SCOPES = (
 )
 TOKEN_URI = "https://oauth2.googleapis.com/token"
 CREDENTIAL_NAME = "gmail"
+ACCOUNTS_CREDENTIAL_NAME = "gmail-accounts"
 STORE = Path("/etc/credstore.encrypted/minitel-gmail")
 ACCOUNTS_STORE = Path("/etc/credstore.encrypted/minitel-gmail-accounts")
 OAUTH_STORE = Path("/etc/credstore.encrypted/minitel-gmail-oauth")
@@ -328,7 +329,7 @@ def account_id(value):
 def account_bundle():
     if not ACCOUNTS_STORE.exists():
         return {"version": 1, "accounts": {}}
-    data = decrypt_payload(ACCOUNTS_STORE, "gmail-accounts")
+    data = decrypt_payload(ACCOUNTS_STORE, ACCOUNTS_CREDENTIAL_NAME)
     if not isinstance(data, dict) or set(data) != {"version", "accounts"} or data["version"] != 1 or not isinstance(data["accounts"], dict) or len(data["accounts"]) > 16:
         raise GmailError("credential_configuration_error")
     for identifier, entry in data["accounts"].items():
@@ -342,7 +343,7 @@ def account_bundle():
 def save_accounts(data):
     if len(data["accounts"]) > 16:
         raise GmailError("account_limit")
-    encrypt_payload(data, ACCOUNTS_STORE, "gmail-accounts")
+    encrypt_payload(data, ACCOUNTS_STORE, ACCOUNTS_CREDENTIAL_NAME)
 
 
 class AccountTokenSource(TokenSource):
@@ -358,7 +359,10 @@ class AccountTokenSource(TokenSource):
     def delivered_info(self):
         # Root helper remains the only token source; require systemd delivery as capability.
         directory = os.getenv("CREDENTIALS_DIRECTORY")
-        if not directory or not (Path(directory) / CREDENTIAL_NAME).is_file():
+        # Legacy delivery remains a capability between importing the account bundle
+        # and its next activation. Tokens still come only from the targeted helper.
+        if not directory or not any((Path(directory) / name).is_file()
+                                    for name in (ACCOUNTS_CREDENTIAL_NAME, CREDENTIAL_NAME)):
             raise GmailError("reconnect_required")
         self.guard("read")
         return validate_info(self.selected_helper({"operation": "read"}))

@@ -93,6 +93,32 @@ Do not run bare `sudo uv sync` from the production checkout: the deployment help
 sets the environment path, selected extras, system interpreter, and transaction
 boundaries. To synchronize after a manual clean source update, rerun `install.sh`.
 
+### Repairing early multi-account Gmail deployment
+
+Early multi-account code encrypted the account bundle with the name
+`gmail-accounts` but generated `LoadCredentialEncrypted=gmail:...` settings.
+Systemd rejects that name mismatch at service startup. Corrected releases use
+`gmail-accounts` consistently in the updater, browser activation helper and Gmail
+installer. Existing ciphertext and Google authorizations do not need replacing.
+
+The installed old updater can still generate the wrong setting while activating
+new code. On an affected Pi, use the new checkout's runtime installer once:
+
+```bash
+cd /home/minitel/minitel-gpt &&
+git switch develop &&
+git pull --ff-only origin develop &&
+sudo bash scripts/install_runtime.sh --branch develop
+```
+
+This preserves installed extras and local data. Wait for the worker to finish,
+then confirm `ready` in `/var/lib/minitel-gpt/deployment.json`. Future updates can
+use the console again. If activation fails, inspect both the deployment journal
+and `journalctl --namespace=minitel-gpt -u admin-ui -u minitel-chatgpt`; service
+errors are in the application namespace, while deployment errors use the default
+namespace. New deployment failures include the failing executable and exit code,
+without exposing command arguments or captured data.
+
 ## ARM and offline setup
 
 The installer supplies C compiler/Python/libffi headers because some 32-bit ARM

@@ -104,8 +104,22 @@ def test_preparation_copies_protected_code_and_checks_optional_imports(manager):
     assert "pronotepy" not in probe[-1]
 
 
-def test_successful_switch_records_matching_pair_and_preserves_credentials(manager):
+@pytest.mark.parametrize('multi_account', [False, True])
+def test_successful_switch_records_matching_pair_and_preserves_credentials(manager, monkeypatch, multi_account):
     before, after = release(manager, "old", ["gmail"]), release(manager, "new", ["gmail", "printer"])
+    name = 'gmail'
+    store = '/etc/credstore.encrypted/minitel-gmail'
+    if multi_account:
+        name = admin.gmail_auth.ACCOUNTS_CREDENTIAL_NAME
+        store += '-accounts'
+        encrypted = manager.system_path(store)
+        encrypted.parent.mkdir(parents=True)
+        encrypted.write_bytes(b'synthetic ciphertext')
+        (Path(after['release']) / 'root/gmail_auth.py').write_text('class AccountTokenSource: pass')
+        encrypt = Mock()
+        monkeypatch.setattr(admin.gmail_auth, 'encrypt_payload', encrypt)
+        admin.gmail_auth.save_accounts({'version': 1, 'accounts': {}})
+        assert encrypt.call_args.args[2] == name
     manager.activate(before)
     folder = manager.system_path("/etc/systemd/system/admin-ui.service.d")
     folder.mkdir(parents=True)
@@ -118,10 +132,24 @@ def test_successful_switch_records_matching_pair_and_preserves_credentials(manag
     assert (manager.root / "venv").resolve() == Path(after["release"]) / "venv"
     assert (manager.project / ".venv").resolve() == Path(after["release"]) / "venv"
     text = (folder / "gmail.conf").read_text()
-    assert "LoadCredentialEncrypted=gmail:/etc/credstore.encrypted/minitel-gmail" in text
+    assert f"LoadCredentialEncrypted={name}:{store}\n" in text
     assert "ExecStart" not in text and not (folder / "pronote.conf").exists()
     wrapper = manager.system_path("/usr/local/libexec/minitel-gmail-credential").read_text()
     assert "/opt/minitel-gpt/venv/bin/python -I" in wrapper
+
+
+def test_failed_command_reports_executable_without_leaking_argv(manager, monkeypatch, capsys):
+    monkeypatch.setattr(runtime, 'Runtime', lambda: manager)
+    monkeypatch.setattr(runtime.os, 'geteuid', lambda: 0)
+    monkeypatch.setattr(runtime.os, 'umask', Mock())
+    monkeypatch.setattr(manager, 'initialize', Mock())
+    monkeypatch.setattr(manager, 'install', Mock(side_effect=subprocess.CalledProcessError(
+        1, ['systemctl', 'start', 'PRIVATE-ARGV'], output=b'PRIVATE-OUTPUT')))
+    monkeypatch.setattr(runtime.sys, 'argv', ['runtime', 'install'])
+    assert runtime.main() == 1
+    output = capsys.readouterr().err
+    assert 'systemctl exited with status 1' in output
+    assert 'PRIVATE' not in output
 
 
 def test_failed_service_start_restores_code_environment_units_and_state(manager):

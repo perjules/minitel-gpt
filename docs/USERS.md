@@ -40,6 +40,10 @@ The existing encrypted OAuth client configuration and HTTPS callback are reused.
 The legacy `/etc/credstore.encrypted/minitel-gmail` is retained untouched as the
 pre-migration credential backup. Once the account bundle exists, implicit legacy
 reads/rotations and single-account enrollment writes are refused.
+Systemd delivers the bundle as `gmail-accounts`, matching its embedded encryption
+name; the legacy credential remains named `gmail`. The targeted token source accepts
+the legacy delivery marker during import until the next service activation, but
+always obtains the selected account's actual credentials from the root helper.
 
 Root helpers accept validated account IDs and enrollment revisions only. Each
 refresh rotation preserves the other accounts. Account revision comparisons reject

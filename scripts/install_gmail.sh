@@ -40,8 +40,10 @@ from gmail_auth import ACCOUNTS_STORE, account_bundle, decrypt_info
 account_bundle() if ACCOUNTS_STORE.exists() else decrypt_info()
 PY
 GMAIL_CREDENTIAL=/etc/credstore.encrypted/minitel-gmail
+GMAIL_CREDENTIAL_NAME=gmail
 if [[ -f /etc/credstore.encrypted/minitel-gmail-accounts ]]; then
   GMAIL_CREDENTIAL=/etc/credstore.encrypted/minitel-gmail-accounts
+  GMAIL_CREDENTIAL_NAME=gmail-accounts
 fi
 for GMAIL_SERVICE in minitel-chatgpt admin-ui; do
   mkdir -p "/etc/systemd/system/$GMAIL_SERVICE.service.d"
@@ -50,7 +52,7 @@ for GMAIL_SERVICE in minitel-chatgpt admin-ui; do
 After=systemd-tmpfiles-setup.service
 [Service]
 Environment=GMAIL_ENABLED=1
-LoadCredentialEncrypted=gmail:$GMAIL_CREDENTIAL
+LoadCredentialEncrypted=$GMAIL_CREDENTIAL_NAME:$GMAIL_CREDENTIAL
 PrivateMounts=yes
 EOF
 done

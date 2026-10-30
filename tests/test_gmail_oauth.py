@@ -261,3 +261,37 @@ def test_configuration_encryption_uses_separate_ciphertext_and_no_plaintext(tmp_
     assert destination.read_bytes() == b'ENCRYPTED' and destination.stat().st_mode & 0o777 == 0o600
     assert '--name=gmail-oauth' in run.call_args_list[0].args[0]
     assert 'PRIVATE-CLIENT' not in str([c.args for c in run.call_args_list])
+
+
+def test_multi_account_activation_uses_the_bundle_encryption_name(tmp_path, monkeypatch):
+    module = root_helper(tmp_path, monkeypatch)
+    module.ACCOUNTS_STORE.touch()
+    bundle = Mock(return_value={'version': 1, 'accounts': {}})
+    monkeypatch.setattr(module, 'account_bundle', bundle)
+    assert module.process({'operation': 'activate'}) == {'status': 'queued'}
+    bundle.assert_called_once_with()
+    for service in ('minitel-chatgpt', 'admin-ui'):
+        unit = (tmp_path / f'etc/systemd/system/{service}.service.d/gmail.conf').read_text()
+        assert f'LoadCredentialEncrypted={auth.ACCOUNTS_CREDENTIAL_NAME}:{module.ACCOUNTS_STORE}\n' in unit
+        assert 'LoadCredentialEncrypted=gmail:' not in unit
+
+
+@pytest.mark.parametrize('delivered_name', ['gmail-accounts', 'gmail', None])
+def test_account_token_source_accepts_delivery_capabilities_but_uses_targeted_helper(
+    tmp_path, monkeypatch, delivered_name
+):
+    monkeypatch.setenv('CREDENTIALS_DIRECTORY', str(tmp_path))
+    if delivered_name:
+        (tmp_path / delivered_name).write_bytes(b'not used as token data')
+    helper = Mock(return_value=INFO)
+    guard = Mock()
+    monkeypatch.setattr(auth, 'credential_helper', helper)
+    source = auth.AccountTokenSource('a' * 32, guard=guard, revision=2)
+    if delivered_name:
+        assert source.delivered_info() == INFO
+        helper.assert_called_once_with({'operation': 'read', 'account_id': 'a' * 32, 'revision': 2})
+        guard.assert_called_once_with('read')
+    else:
+        with pytest.raises(auth.GmailError, match='reconnect_required'):
+            source.delivered_info()
+        helper.assert_not_called()

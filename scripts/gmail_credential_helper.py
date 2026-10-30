@@ -11,6 +11,7 @@ from pathlib import Path
 # This file and gmail_auth.py are copied into the same root-owned release.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gmail_auth import (
+    ACCOUNTS_CREDENTIAL_NAME,
     ACCOUNTS_STORE,
     GmailError,
     account_bundle,
@@ -35,6 +36,8 @@ def activate():
             account_bundle()
         else:
             decrypt_info()
+        name = ACCOUNTS_CREDENTIAL_NAME if ACCOUNTS_STORE.exists() else "gmail"
+        store = ACCOUNTS_STORE if name == ACCOUNTS_CREDENTIAL_NAME else Path('/etc/credstore.encrypted/minitel-gmail')
         for service in ("minitel-chatgpt", "admin-ui"):
             folder = Path(f"/etc/systemd/system/{service}.service.d")
             folder.mkdir(mode=0o755, parents=True, exist_ok=True)
@@ -42,7 +45,7 @@ def activate():
             (folder / "gmail.conf").write_text(
                 "[Unit]\nAfter=systemd-tmpfiles-setup.service\n[Service]\n"
                 "Environment=GMAIL_ENABLED=1\n" +
-                ("LoadCredentialEncrypted=gmail:" + str(ACCOUNTS_STORE if ACCOUNTS_STORE.exists() else Path('/etc/credstore.encrypted/minitel-gmail')) + "\n") +
+                ("LoadCredentialEncrypted=" + name + ":" + str(store) + "\n") +
                 "PrivateMounts=yes\n"
             )
         for command in (
