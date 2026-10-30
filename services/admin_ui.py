@@ -66,6 +66,7 @@ try:
         storage_health,
         system_health,
         user_registry,
+        user_reports,
         user_services,
     )
 except ImportError:
@@ -93,6 +94,7 @@ except ImportError:
     import storage_health
     import system_health
     import user_registry
+    import user_reports
     import user_services
 
     from services import journal, journal_page, journal_store
@@ -1880,6 +1882,7 @@ def toggle_service(feature):
 @require_login
 def service_configuration(feature):
     message = session.pop("gmail_oauth_message", "") if feature == "gmail" else ""
+    status_code = 200
     titles = {"gmail": "Gmail", "alexa": "Alexa", "printer": "Imprimante", "smart-home": "Maison connectée"}
     if feature not in titles:
         abort(404)
@@ -1892,29 +1895,45 @@ def service_configuration(feature):
         body = admin_service_pages.GMAIL
         account = "Un seul compte par profil ; un même compte peut être attribué explicitement à plusieurs profils. Aucun compte de secours automatique."
         if request.method == "POST":
-            if request.form.get("action") != "check":
+            action = request.form.get("action")
+            if action not in {"check", "reports"}:
                 abort(400)
             try:
-                if not gmail_enabled():
-                    raise gmail_auth.GmailError("disabled")
-                identifier = request.form.get('account_id','')
-                metadata = next((a for a in user_registry.Registry().accounts() if a['id']==identifier),None)
-                if metadata is None:
-                    raise gmail_auth.GmailError('account_required')
-                gmail_client.GmailClient(tokens=gmail_auth.AccountTokenSource(identifier,revision=metadata['revision'])).list("", time.monotonic() + 20)
-                message = "Connexion Gmail vérifiée. Aucun message envoyé ni marqué comme lu."
+                if action == "reports":
+                    registry = user_registry.Registry()
+                    recipient = request.form.get("report_recipient", "")
+                    if recipient.strip():
+                        if not gmail_enabled():
+                            raise gmail_auth.GmailError("disabled")
+                        user_reports.default_sender(registry)
+                    registry.set_report_recipient(recipient)
+                    message = "Destinataire des rapports enregistré." if recipient.strip() else "Rapports automatiques désactivés."
+                else:
+                    if not gmail_enabled():
+                        raise gmail_auth.GmailError("disabled")
+                    identifier = request.form.get('account_id','')
+                    metadata = next((a for a in user_registry.Registry().accounts() if a['id']==identifier),None)
+                    if metadata is None:
+                        raise gmail_auth.GmailError('account_required')
+                    gmail_client.GmailClient(tokens=gmail_auth.AccountTokenSource(identifier,revision=metadata['revision'])).list("", time.monotonic() + 20)
+                    message = "Connexion Gmail vérifiée. Aucun message envoyé ni marqué comme lu."
             except gmail_auth.GmailError:
-                message = "Connexion non confirmée ; vérifier l’activation et l’enrôlement."
+                if action == "reports":
+                    status_code = 400
+                    message = "Enregistrement refusé. Saisissez une seule adresse email complète et vérifiez que le profil par défaut peut envoyer avec Gmail."
+                else:
+                    message = "Connexion non confirmée ; vérifier l’activation et l’enrôlement."
         try:
             oauth_uri = gmail_oauth.configuration()["redirect_uri"]
         except gmail_auth.GmailError:
             oauth_uri = ""
         context = {"account": account, "enabled": gmail_enabled(),
+                   "reports": user_reports.configuration(user_registry.Registry()),
                    "oauth_users": user_registry.Registry().users(), "oauth_accounts": user_registry.Registry().accounts(),
                    "oauth_uri": oauth_uri, "oauth_ready": session.get("gmail_oauth_saved", False),
                    "oauth_console": oauth_uri.removesuffix(gmail_auth.OAUTH_CALLBACK) + "/services/gmail" if oauth_uri else ""}
     return render_template_string(admin_service_pages.HEAD + body + "</html>",
-                                  title=titles[feature], message=message, **context)
+                                  title=titles[feature], message=message, **context), status_code
 
 
 def gmail_https_origin(uri):
@@ -2024,6 +2043,8 @@ USERS_HTML = admin_service_pages.HEAD + """
 <form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=create>
 <label>Nouveau nom<input name=name required maxlength=60></label><button>Créer le profil</button></form>
 {% for u in users %}<section><h2>{{u.display_name}} · #{{u.id}}</h2><form method=post>
+{% if u.id != 1 and (u.display_name|lower == 'minitelgpt' or 'minitelgpt' in details[u.id].aliases) %}
+<p role=status>Ce nom est réservé au profil #1. Ce profil existant et ses données sont conservés. Pour le distinguer, changez son nom et retirez l’alias MinitelGPT.</p>{% endif %}
 <input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=save><input type=hidden name=user_id value="{{u.id}}">
 <label>Nom affiché<input name=name value="{{u.display_name}}" required maxlength=60></label>
 <label>Alias (un par ligne)<textarea name=aliases>{{details[u.id].aliases|join('\n')}}</textarea></label>
@@ -2074,8 +2095,10 @@ def users_admin():
             accounts=accounts,details={u['id']:registry.details(u['id']) for u in users},
             children=pronote.backend().config()['children'])
     except (gmail_auth.GmailError,ValueError,KeyError) as error:
+        reason = ("Le nom et l’alias MinitelGPT sont réservés au profil #1. Choisissez un autre nom et retirez cet alias."
+                  if str(error) == 'reserved_user_name' else str(error))
         return render_template_string(admin_service_pages.HEAD,title='Utilisateurs et accès',
-                                      message='Modification refusée : '+str(error)),400
+                                      message='Modification refusée : '+reason),400
 
 
 @app.route('/users/<int:user_id>/delete', methods=['POST'])
@@ -2424,8 +2447,13 @@ def memory_entry(username=None, reset=False):
                 username='' if selected.key=='shared' else selected.username
                 discard_memory(identifier)
                 item=None
-        key = memory_session.memory.user_key(username)[0] if username is not None else None
-        if item and (reset or (key is not None and key != item["memory"].key)):
+        changed = False
+        if item and username is not None and not reset:
+            try:
+                changed = item["memory"].registry.resolve(username).id != item["memory"].user.id
+            except gmail_auth.GmailError:
+                raise memory_session.memory.MemoryProblem("Profil indisponible ou désactivé.") from None
+        if item and (reset or changed):
             discard_memory(identifier)
             item = None
         if not item:
@@ -2484,7 +2512,8 @@ def journal_console():
     if not journal_transport():
         return "Ouvrez l’administration via HTTPS (Tailscale Serve) ou un tunnel localhost.", 403
     selected = memory_entry()
-    response = app.make_response(render_template_string(journal_page.HTML, username=selected.username))
+    response = app.make_response(render_template_string(
+        journal_page.HTML, username="" if selected.key == "shared" else selected.username))
     response.headers.update({"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
     return response
 
@@ -2660,9 +2689,11 @@ def test_console():
         if preset not in data["presets"]:
             abort(400)
         draft = request.form.get("system_prompt", "")
+    selected = memory_entry()
     return render_template_string(admin_service_pages.HEAD + admin_service_pages.TEST_NAV +
                                   admin_service_pages.CHAT_TEST + "</html>",
-                                  title="Tester le Minitel", message="Brouillon non enregistré ; aucune sauvegarde ni activation." if draft is not None else "", preset=preset, draft=draft, username=memory_entry().username)
+                                  title="Tester le Minitel", message="Brouillon non enregistré ; aucune sauvegarde ni activation." if draft is not None else "", preset=preset, draft=draft,
+                                  username="" if selected.key == "shared" else selected.username)
 
 
 @app.route("/gmail", methods=["GET", "POST"])
@@ -2735,7 +2766,7 @@ def gmail_admin():
             render_template_string(
                 GMAIL_HTML,
                 enabled=gmail_mail.enabled(),
-                memory_label=selected.label, username=selected.username,
+                memory_label=selected.label, username="" if selected.key == "shared" else selected.username,
                 csrf=session["gmail_csrf"],
                 page=item["pages"][item["page"]],
                 position=item["page"] + 1,

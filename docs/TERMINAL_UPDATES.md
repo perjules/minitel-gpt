@@ -76,9 +76,11 @@ the final ready status.
 - The announcement keeps the boot generator's eight-second/700-token budget.
   The longer procedure gets twenty seconds and 1800 tokens for 40–60 lines, with
   thirty seconds of interruptible local waiting. Both require a complete response.
-  Missing keys, API errors, truncated output, terminal
-  controls, Markdown, excessive text, questions or Git jargon use static themed
-  text. No retries or paid calls during playback.
+  Common headings, list markers, emphasis and a surrounding plain-text code fence
+  are converted to plain text before validation. Missing keys, API errors,
+  truncated output, terminal controls, remaining code fences, excessive text,
+  questions or Git jargon use static themed text. No retries or paid calls during
+  playback.
 - The terminal journal records `update_theatre phase=announcement|procedure`
   with `status=generated`, line count and duration, or `status=fallback` and a
   fixed reason such as `timeout`, `incomplete_response` or `vocabulary`. No model

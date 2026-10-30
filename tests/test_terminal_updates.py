@@ -155,6 +155,28 @@ def test_long_generated_procedure_reaches_display_and_records_success(monkeypatc
     assert "Depot du formulaire" not in caplog.text
 
 
+@pytest.mark.parametrize("procedure", [False, True])
+@pytest.mark.parametrize("text", [
+    "# ALCATEL MF-83\n- Controle des relais.\n* Visa du bureau 83.",
+    "### **ALCATEL MF-83**\n1. Controle des `relais`.\n2) __Visa du bureau 83.__",
+    "```\nALCATEL MF-83\nControle des relais.\nVisa du bureau 83.\n```",
+    "```text\r\nALCATEL MF-83\r\n- Controle des relais.\r\n+ Visa du bureau 83.\r\n```",
+    "```plaintext\nALCATEL MF-83\nControle des relais.\nVisa du bureau 83.\n```",
+])
+def test_harmless_formatting_keeps_generated_narration(monkeypatch, caplog, procedure, text):
+    generate = Mock(return_value=text)
+    monkeypatch.setattr(chat, "PROVIDER", "mistral")
+    monkeypatch.setattr(chat, "MISTRAL_KEY", "synthetic")
+    monkeypatch.setattr(chat, "call_mistral", generate)
+    caplog.set_level("INFO", logger=chat.log.name)
+    assert chat.prepare_update_text(checked(), "fr", procedure=procedure) == [
+        "ALCATEL MF-83", "Controle des relais.", "Visa du bureau 83.",
+    ]
+    generate.assert_called_once()
+    assert "status=generated lines=3" in caplog.text
+    assert "status=fallback" not in caplog.text
+
+
 @pytest.mark.parametrize("failure,reason", [("truncated", "incomplete_response"), ("timeout", "timeout")])
 def test_procedure_fallback_reports_a_fixed_reason_without_provider_text(monkeypatch, caplog, failure, reason):
     response = Mock()
@@ -172,7 +194,11 @@ def test_procedure_fallback_reports_a_fixed_reason_without_provider_text(monkeyp
 
 @pytest.mark.parametrize("bad", ["git pull\nConfirmed", "New commit\nReady", "Branche develop\nOui",
                                "Dossier\nOUI ou NON?", "Bad\x1bcommand\nOther", "x" * 6001,
-                               "Only one line", "```\nText\n```"])
+                               "Only one line", "```\nText\n```", "```text\nUnclosed\nFence",
+                               "```python\nText\nOther\n```", "#\tTitle\nOther",
+                               "```text\n# **git pull**\nConfirmed\n```",
+                               "# Dossier\n- Appuyez sur SUITE",
+                               "```text\nText\nOther\n```\x1b"])
 def test_unsafe_or_leaky_theatre_falls_back(monkeypatch, bad):
     monkeypatch.setattr(chat, "PROVIDER", "mistral")
     monkeypatch.setattr(chat, "MISTRAL_KEY", "synthetic")

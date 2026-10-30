@@ -74,6 +74,8 @@ COMMIT;""")
  progress TEXT NOT NULL DEFAULT '{}', history TEXT NOT NULL DEFAULT '[]',
  asked TEXT NOT NULL DEFAULT '', turns INTEGER NOT NULL DEFAULT 0,
  barrier INTEGER NOT NULL DEFAULT -1)""")
+                db.execute("""CREATE TABLE IF NOT EXISTS user_mail_reports(
+ id INTEGER PRIMARY KEY CHECK(id=1), recipient TEXT NOT NULL)""")
                 yield db
         except (sqlite3.Error, OSError):
             raise GmailError("user_registry_unavailable") from None
@@ -117,6 +119,7 @@ COMMIT;""")
     def resolve(self, name=""):
         key, label = memory.user_key(name)
         canonical = " ".join(unicodedata.normalize("NFKC", name).split()).casefold()
+        created = False
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             if not canonical:
@@ -126,6 +129,10 @@ COMMIT;""")
                     "SELECT u.* FROM users u JOIN user_aliases a ON u.id=a.user_id WHERE a.alias=?",
                     (canonical,),
                 ).fetchone()
+                if row is None and canonical == "minitelgpt":
+                    # The default display label is also a selector, not a new identity.
+                    # Preserve pre-existing aliases until their owner is renamed explicitly.
+                    row = db.execute("SELECT * FROM users WHERE id=1").fetchone()
                 if row is None:
                     existing = db.execute(
                         "SELECT * FROM users WHERE memory_key=?", (key,)
@@ -143,7 +150,42 @@ COMMIT;""")
                     row = db.execute(
                         "SELECT * FROM users WHERE id=?", (user_id,)
                     ).fetchone()
-            return self.user(row)
+                    created = True
+            user = self.user(row)
+        if created:
+            self.report_event("created", user.id, user.display_name)
+        return user
+
+    def report_event(self, action, user_id, name):
+        # Import after identity transactions commit; notification failures cannot undo them.
+        try:
+            try:
+                from . import user_reports
+            except ImportError:
+                import user_reports
+            user_reports.enqueue(self, action, user_id, name)
+        except Exception as error:  # noqa: BLE001 - Optional reporting must not fail committed user changes.
+            logging.getLogger(__name__).warning(
+                "user_report action=%s user_id=%s status=failed reason=%s", action, user_id, type(error).__name__
+            )
+
+    def report_recipient(self):
+        with self.connection() as db:
+            row = db.execute("SELECT recipient FROM user_mail_reports WHERE id=1").fetchone()
+            return row[0] if row else ""
+
+    def set_report_recipient(self, value):
+        try:
+            from .gmail_client import addresses
+        except ImportError:
+            from gmail_client import addresses
+        if not isinstance(value, str) or len(value) > 254 or any(ord(c) < 32 or ord(c) == 127 for c in value):
+            raise GmailError("recipient_invalid")
+        value = value.strip()
+        if value and addresses(value) != [value]:
+            raise GmailError("recipient_invalid")
+        with self.connection() as db:
+            db.execute("INSERT INTO user_mail_reports VALUES(1,?) ON CONFLICT(id) DO UPDATE SET recipient=excluded.recipient", (value,))
 
     @staticmethod
     def retain_user_ids(db):
@@ -168,6 +210,7 @@ COMMIT;""")
             if confirmation != row["display_name"]:
                 raise GmailError("user_confirmation_required")
             key = row["memory_key"]
+            name = row["display_name"]
             store.folder(key)  # Validate fixed paths before changing any permissions.
             if key == "shared":
                 raise GmailError("reserved_user")
@@ -194,6 +237,7 @@ COMMIT;""")
             raise memory.MemoryProblem(
                 "Suppression incomplète : profil désactivé. Rechargez la page et réessayez."
             ) from None
+        self.report_event("deleted", user_id, name)
 
     def reset_onboarding(self, user_id, expected_revision):
         """Restart only the optional welcome; preserve identity, grants and memory."""
@@ -283,6 +327,8 @@ COMMIT;""")
                 normalized.append(value)
         if user_id != 1 and not normalized:
             raise GmailError("user_alias_required")
+        if user_id != 1 and "minitelgpt" in normalized:
+            raise GmailError("reserved_user_name")
         if (
             len(normalized) > 20
             or len(children) > 20

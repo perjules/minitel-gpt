@@ -11,6 +11,7 @@ import time
 from collections import OrderedDict
 from datetime import datetime
 from email.message import EmailMessage
+from email.parser import BytesParser
 from email.policy import SMTP
 from email.utils import formatdate, make_msgid
 from zoneinfo import ZoneInfo
@@ -54,7 +55,8 @@ DRAFT_RULES = (
     "rather than adding a second name. "
     "Do not invent facts or include headers. Do not generate the automatic Minitel footer; "
     "Python appends it separately. For revisions return the complete revised body, "
-    "preserving all unchanged content and meaning."
+    "preserving all unchanged content and meaning. Do not quote the original message "
+    "or its history; Python appends that when sending replies."
 )
 CONTEXT_LIMIT = 12000
 DRAFT_LIMIT = 12000
@@ -1186,6 +1188,10 @@ class MailSession:
         if personal_signoff and not body.removesuffix("\n\n" + SIGNATURE).endswith("\n\n" + personal_signoff):
             personal_signoff = None
         msg.set_content(body)
+        reply_source = previous.get("reply_source") if selected is not None and previous else None
+        if selected is not None and reply_source is None:
+            # Bind the original full text to this draft; UI/model context stays unchanged.
+            reply_source = {key: selected[key] for key in ("sender", "date", "body")}
         draft = {
             "kind": "reply" if selected is not None else "new",
             "parent": selected["id"] if selected is not None else None,
@@ -1195,6 +1201,7 @@ class MailSession:
             "recipient": recipient,
             "subject": subject,
             "body": body,
+            "reply_source": reply_source,
             "personal_signoff": personal_signoff,
             "raw": msg.as_bytes(),
             "message_id": msg["Message-ID"],
@@ -1227,8 +1234,20 @@ class MailSession:
                 raise GmailError("review_current_draft_first")
             draft["status"] = "sending"
         try:
+            raw = draft["raw"]
+            if draft["kind"] == "reply":
+                source = draft["reply_source"]
+                sender = " ".join(source["sender"].splitlines())
+                quoted = "\n".join("> " + line for line in source["body"].splitlines())
+                message = BytesParser(policy=SMTP).parsebytes(raw)
+                message.set_content(
+                    draft["body"] + "\n\n"
+                    + f"Le {source['date']} (Europe/Paris), {sender} a écrit :\n"
+                    + quoted
+                )
+                raw = message.as_bytes()
             confirmed = self.client.send(
-                draft["raw"], draft["thread"], draft["message_id"], deadline
+                raw, draft["thread"], draft["message_id"], deadline
             )
             if confirmed != "sent":
                 raise GmailError("send_uncertain")
