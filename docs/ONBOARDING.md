@@ -76,8 +76,13 @@ archives and access grants are preserved. The reserved blank-name MinitelGPT
 profile remains excluded. The welcome revision advances so an answer already in
 flight cannot overwrite the reset. No model call is made by the reset action.
 Reconnect the profile/use SOMMAIRE on the terminal, or press **Faire connaissance**
-in the test console, to receive a fresh introduction. REPRENDRE ACCUEIL by itself
-resumes existing progress; it does not reset a completed welcome.
+in the test console, to receive a fresh introduction. Cleanup of an older terminal
+or browser session cannot pause that newly reset welcome, including when another
+session has already restarted it: each UI may pause only its observed welcome
+revision. Inspection alone does not adopt a newer revision. Ordinary SOMMAIRE and
+the browser reset still pause the current interview until an explicit resume.
+REPRENDRE ACCUEIL by itself resumes existing progress; it does not reset a
+completed welcome.
 
 During the new welcome, clear current assertions take precedence over conflicting
 saved facts/preferences about the same detail, without requiring a correction

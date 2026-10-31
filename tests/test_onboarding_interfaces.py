@@ -305,3 +305,49 @@ def test_admin_sommaire_or_reset_leaves_welcome_until_explicit_resume(
     assert client.post('/test-preset', headers=headers, json={**base, 'message': 'REPRENDRE ACCUEIL'}).json['ok']
     assert model.client.complete.call_count == 2
     client.post('/logout', headers=headers)
+
+
+@pytest.mark.parametrize('departure', ['physical_sommaire', 'typed_sommaire', 'logout'])
+def test_real_terminal_admin_reset_survives_old_session_cleanup(welcome_enabled, monkeypatch, departure):
+    from services import user_registry
+
+    phases = []
+    def complete(self, instructions, data, deadline, **kwargs):
+        phases.append(data['phase'])
+        return response(reply='Bienvenue, présentation terminée.', action='finish')
+
+    def ordinary(*args, **kwargs):
+        registry = user_registry.Registry()
+        user = registry.resolve('Camille')
+        registry.reset_onboarding(user.id, user.revision)
+        return {'status': 'ordinary', 'text': 'Accueil réinitialisé.', 'chunks': [], 'references': []}
+
+    monkeypatch.setattr(gmail_mail.MailModel, 'complete', complete)
+    monkeypatch.setattr(chat.mistral_answers, 'answer', ordinary)
+    monkeypatch.setattr(chat.time, 'sleep', Mock())
+    monkeypatch.setattr(chat, 'load_preset', lambda: ('persona', '3615 IA', 'Question?', 'WAIT', None))
+    monkeypatch.setattr(chat, 'build_title', lambda _: ['LOGO'])
+    monkeypatch.setattr(chat, 'factual_knowledge', lambda: '')
+    monkeypatch.setattr(chat, 'prepare_boot', lambda _: chat.UI['fr']['boot'])
+    monkeypatch.setattr(chat.gmail_mail, 'enabled', lambda: False)
+
+    def synchronous(*args, **kwargs):
+        output = Queue()
+        output.put((chat.call_answer(*args, **kwargs), None))
+        return Mock(is_alive=lambda: False), output, chat.time.monotonic()
+
+    monkeypatch.setattr(chat, 'start_answer', synchronous)
+    boot = Mock(wraps=chat.show_boot)
+    monkeypatch.setattr(chat, 'show_boot', boot)
+    keys = (fn(chat.K_SOMMAIRE) + fn(chat.K_SUITE) + b'Camille' + fn(chat.K_ENVOI)
+            + b'fr' + fn(chat.K_ENVOI) + b'REINITIALISER' + fn(chat.K_ENVOI))
+    if departure == 'logout':
+        keys += b'LOGOUT' + fn(chat.K_ENVOI) + b'Camille' + fn(chat.K_ENVOI)
+    elif departure == 'typed_sommaire':
+        keys += b'SOMMAIRE' + fn(chat.K_ENVOI)
+    else:
+        keys += fn(chat.K_SOMMAIRE)
+    with pytest.raises(EndOfInput):
+        chat.run(chat.Term(FakeSerial(keys)))
+    assert phases == ['first', 'first']
+    assert boot.call_count == 1

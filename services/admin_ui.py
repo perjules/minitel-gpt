@@ -1530,14 +1530,15 @@ def test_preset_route():
         system += ("\n\nCONNAISSANCES DE REFERENCE (utilise ces informations "
                    "en priorite pour repondre) :\n" + kb)
     try:
-        selected = memory_entry(j.get("memory_user", ""),
-                                reset=bool(j.get("reset")) or msg.upper() == "SOMMAIRE")
+        # Pause the UI that actually saw the welcome, before retiring its session.
+        # Creating a replacement first would lose its revision guard against resets.
+        selected = memory_entry(j.get("memory_user", ""))
         with selected.turn_lock:
             if j.get("reset") or msg.upper() == "SOMMAIRE":
                 selected.welcome.pause()
                 selected.close()
                 discard_memory(session.get("memory_session"))
-                return jsonify(ok=True, answer="Session effacée; souvenirs conservés. Accueil en pause : REPRENDRE ACCUEIL permet de le poursuivre.")
+                return jsonify(ok=True, answer="Session effacée; souvenirs conservés. REPRENDRE ACCUEIL permet de poursuivre un accueil en pause.")
             selected.private_turn = False
             selected.begin_turn()
             try:

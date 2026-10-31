@@ -78,6 +78,7 @@ def bypass(question):
 class Session:
     def __init__(self, selected):
         self.selected = selected
+        self.seen_revision = None
 
     def state(self, create=False):
         selected = self.selected
@@ -143,27 +144,36 @@ class Session:
                     )
                 return state
 
+    def observe(self, create=False):
+        """Remember the revision this UI is using, without treating inspection as use."""
+        with self.selected.lock:
+            state = self.state(create=create)
+            self.seen_revision = state["revision"] if state is not None else None
+            return state
+
     def should_greet(self):
         if not enabled():
             return False
         try:
-            state = self.state()
+            state = self.observe()
             return state is not None and state["status"] in {"new", "active"}
         except memory.MemoryProblem as error:
             self.selected.warning = str(error)
             return False
 
     def pause(self):
-        """Leaving the UI is an atomic pause, including against an in-flight reply."""
+        """Pause this UI's welcome, never a later reset or another session's work."""
         selected = self.selected
         with selected.lock:
-            if selected.closed:
+            if selected.closed or self.seen_revision is None:
                 return
             try:
                 selected.active()
                 with memory_database.connection(selected.store) as db:
-                    db.execute("""UPDATE user_onboarding SET status='paused',revision=revision+1
- WHERE user_id=? AND status IN ('new','active')""", (selected.user.id,))
+                    result = db.execute("""UPDATE user_onboarding SET status='paused',revision=revision+1
+ WHERE user_id=? AND revision=? AND status IN ('new','active')""", (selected.user.id, self.seen_revision))
+                    if result.rowcount == 1:
+                        self.seen_revision += 1
             except memory.MemoryProblem as error:
                 selected.warning = str(error)
 
@@ -195,6 +205,7 @@ class Session:
                     raise memory.MemoryProblem(
                         "Accueil modifié dans une autre session; réessayez."
                     )
+                self.seen_revision = state["revision"] + 1
 
     def respond(self, question, persona, language="fr", timeout=30, start=False):
         command = command_text(question)
@@ -202,7 +213,7 @@ class Session:
         if not enabled():
             return None
         try:
-            state = self.state(create=requested)
+            state = self.observe(create=requested)
         except memory.MemoryProblem as error:
             self.selected.warning = str(error)
             return (
@@ -261,7 +272,7 @@ class Session:
         if control and state["asked"]:
             state["progress"][state["asked"]] = "covered" if moving else "skipped"
             self.control(state, "active")
-            state = self.state()
+            state = self.observe()
         if private_answer:
             # Do not send the declined personal detail to the dialogue model.
             question = "PASSER" if language != "en" else "SKIP"
@@ -399,6 +410,7 @@ class Session:
                         self.selected.user.id,
                     ),
                 )
+                self.seen_revision = state["revision"] + 1
             memory_automation.kick(
                 self.selected.store, self.selected.model, self.selected.embeddings
             )

@@ -81,6 +81,8 @@ def test_reset_supersedes_in_flight_answer_without_memory_write(monkeypatch):
     state = selected.welcome.state()
     assert state['status'] == 'new' and not state['history'] and state['turns'] == 0
     assert not selected.store.read(selected.key)['items']
+    selected.welcome.pause()
+    assert selected.welcome.state()['status'] == 'new'
     selected.close()
 
 
@@ -132,3 +134,73 @@ def test_new_welcome_correction_replaces_fact_and_fences_older_extraction(monkey
     assert selected.welcome.state()['barrier'] == state
     assert selected.welcome.state()['history'][-1]['text'] == 'Quelle matière aimes-tu ?'
     selected.close()
+
+
+@pytest.mark.parametrize('old_status', ['active', 'complete'])
+def test_old_session_cannot_pause_reset_or_restarted_welcome(monkeypatch, old_status):
+    monkeypatch.setenv('MINITEL_ONBOARDING', '1')
+    old = memory_session.MemorySession('Reset cleanup', model=Mock())
+    fresh = None
+    try:
+        run(old, action='finish' if old_status == 'complete' else 'continue')
+        old.registry.reset_onboarding(old.user.id, old.user.revision)
+        # Inspection may synchronize the memory barrier, but must not make an old
+        # UI the owner of a later reset's welcome.
+        assert old.welcome.state()['status'] == 'new'
+        old.welcome.pause()
+        old.welcome.pause()  # Both end-of-loop and next-session cleanup may run.
+        assert old.welcome.state()['status'] == 'new'
+        fresh = memory_session.MemorySession('Reset cleanup', model=Mock())
+        assert fresh.welcome.should_greet()
+        run(fresh)
+        before = fresh.welcome.state()
+        assert fresh.model.client.complete.call_args.args[1]['phase'] == 'first'
+        old.welcome.pause()
+        assert fresh.welcome.state() == before
+        # The new UI can still pause its own successfully committed welcome.
+        fresh.welcome.pause()
+        assert fresh.welcome.state()['status'] == 'paused'
+    finally:
+        old.close()
+        if fresh:
+            fresh.close()
+
+
+def test_unobserved_session_cleanup_preserves_admin_reset(monkeypatch):
+    monkeypatch.setenv('MINITEL_ONBOARDING', '1')
+    old = memory_session.MemorySession('Not greeted yet', model=Mock())
+    try:
+        old.registry.reset_onboarding(old.user.id, old.user.revision)
+        old.welcome.pause()
+        assert old.welcome.state()['status'] == 'new'
+    finally:
+        old.close()
+
+
+@pytest.mark.parametrize('reset_button', [False, True])
+def test_browser_session_exit_does_not_cancel_admin_welcome_reset(console, monkeypatch, reset_button):
+    monkeypatch.setenv('MINITEL_ONBOARDING', '1')
+    client, headers, _ = console
+    model = Mock()
+    model.client.complete.return_value = response()
+    monkeypatch.setattr(memory_session, 'MemoryModel', lambda **kwargs: model)
+    ordinary = Mock(return_value='Conversation libre.')
+    monkeypatch.setattr(admin, 'llm_answer', ordinary)
+    base = {'preset_key': 'main', 'memory_user': 'Browser reset'}
+    assert client.post('/test-preset', headers=headers, json={**base, 'welcome_start': True}).json['ok']
+    with client.session_transaction() as cookie:
+        old = admin.MEMORY_SESSIONS[cookie['memory_session']]['memory']
+    old.store.apply(old.key, {'operation': 'save', 'kind': 'fact', 'text': 'Existing personal fact'}, {})
+    saved = old.store.read(old.key)
+    assert client.post(f'/users/{old.user.id}/reset-onboarding', headers=headers,
+                       data={'revision': old.user.revision}).status_code == 302
+    assert client.post('/test-preset', headers=headers, json={**base,
+        'reset': reset_button, 'message': '' if reset_button else 'SOMMAIRE'}).json['ok']
+    with old.registry.connection() as db:
+        assert db.execute('SELECT status FROM user_onboarding WHERE user_id=?', (old.user.id,)).fetchone()[0] == 'new'
+    assert client.post('/test-preset', headers=headers, json={**base, 'message': 'Bonjour'}).json['ok']
+    assert model.client.complete.call_count == 2
+    assert model.client.complete.call_args.args[1]['phase'] == 'first'
+    ordinary.assert_not_called()
+    assert old.store.read(old.key) == saved
+    client.post('/logout', headers=headers)
