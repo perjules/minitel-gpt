@@ -240,6 +240,8 @@ def write(store, folder, data):
         user = owner(db, key)
         if user is None:
             raise memory.MemoryProblem("Profil mémoire inconnu.")
+        if "_expected_user" in data and data["_expected_user"] != (user["id"], user["revision"]):
+            raise memory.MemoryProblem("Profil modifié ou supprimé. Rechargez la page.")
         state = db.execute(
             "SELECT revision FROM memory_state WHERE user_id=?", (user["id"],)
         ).fetchone()

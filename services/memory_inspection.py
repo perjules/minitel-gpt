@@ -61,6 +61,7 @@ def profile(store, user):
     return {
         "onboarding": welcome,
         "user_id": user["id"],
+        "profile_revision": user["revision"],
         "name": user["display_name"],
         "enabled": bool(user["enabled"]),
         "memory_key": user["memory_key"],

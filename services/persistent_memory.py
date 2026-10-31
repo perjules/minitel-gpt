@@ -235,9 +235,11 @@ class MemoryStore:
         with self.locked(key, guard=guard) as folder:
             return self._read(folder)
 
-    def apply(self, key, proposal, snapshot, guard=None):
+    def apply(self, key, proposal, snapshot, guard=None, *, admin=False, publish=False, expected_user=None):
         with self.locked(key, guard=guard) as folder:
             data = self._read(folder)
+            if admin and data["revision"] != snapshot["revision"]:
+                raise MemoryProblem("La mémoire a changé. Rechargez les souvenirs avant de modifier.")
             operation = proposal.get("operation")
             if not isinstance(operation, str) or operation not in {
                 "save",
@@ -269,8 +271,9 @@ class MemoryStore:
                     item["status"] = "done"
                 else:
                     item["text"] = clean_text(proposal.get("text"))
-                    if proposal.get("title"):
-                        item["title"] = clean_text(proposal["title"], 160)
+                    if admin or proposal.get("title"):
+                        item["title"] = clean_text(proposal.get("title", ""), 160,
+                                                   allow_empty=item["kind"] in {"fact", "preference", "task"})
                 item["updated"] = now()
                 item["origin"], item["source"] = "explicit", []
             else:
@@ -301,8 +304,10 @@ class MemoryStore:
                     ),
                     None,
                 )
-                if duplicate:
+                if duplicate and not admin:
                     return duplicate, "Déjà enregistré"
+                if duplicate:
+                    raise MemoryProblem("Cet élément existe déjà; modifiez-le plutôt que de le dupliquer.")
                 item = {
                     "id": "m_" + secrets.token_hex(8),
                     "kind": kind,
@@ -312,11 +317,18 @@ class MemoryStore:
                     "updated": now(),
                 }
                 data["items"].append(item)
+            if admin and operation != "remove":
+                if publish and (key != "shared" or item["kind"] not in {"fact", "preference"}):
+                    raise MemoryProblem("Seuls les faits et préférences du profil MinitelGPT peuvent être partagés.")
+                item["origin"] = "household" if publish else "admin"
+                item["source"] = []
             if len(data["items"]) > MAX_ITEMS:
                 raise MemoryProblem(
                     "Mémoire pleine (256 éléments). Retirez un élément avant d'en ajouter."
                 )
             data["revision"] += 1
+            if expected_user is not None:
+                data["_expected_user"] = expected_user
             self._write(folder, data)
             label = {
                 "save": "Enregistré",
@@ -384,7 +396,7 @@ def ranked(items, question):
     )
 
 
-def context(data, question, destination, retrieved=False):
+def context(data, question, destination, retrieved=False, limit=CONTEXT_LIMIT):
     selected, used = [], 0
     words = tokens(question)
     ordered = list(data["items"]) if retrieved else ranked(data["items"], question)
@@ -401,7 +413,7 @@ def context(data, question, destination, retrieved=False):
             excerpt["text"] = excerpt["text"][:900]
             excerpt["excerpt"] = True
         cost = len(json.dumps(excerpt, ensure_ascii=False))
-        if used + cost > CONTEXT_LIMIT - 500:
+        if used + cost > limit - 500:
             continue
         selected.append(excerpt)
         used += cost

@@ -53,6 +53,7 @@ try:
         journal,
         journal_page,
         journal_store,
+        memory_administration,
         memory_automation,
         memory_inspection,
         memory_session,
@@ -81,6 +82,7 @@ except ImportError:
     import gmail_mail
     import gmail_oauth
     import io_limits
+    import memory_administration
     import memory_automation
     import memory_inspection
     import memory_session
@@ -2606,6 +2608,7 @@ def discard_mail(identifier):
 
 
 def mail_entry(username=""):
+    selected = memory_entry(username)
     with MAIL_SESSIONS_LOCK:
         now = time.monotonic()
         for identifier, item in list(MAIL_SESSIONS.items()):
@@ -2629,6 +2632,7 @@ def mail_entry(username=""):
             MAIL_SESSIONS[identifier] = {
                 "mail": gmail_mail.MailSession(
                     username=username,
+                    memory=selected,
                     auto_summary_chars=read_env().get("GMAIL_AUTO_SUMMARY_CHARS",
                                                       os.getenv("GMAIL_AUTO_SUMMARY_CHARS", "6000")),
                     model=gmail_mail.MailModel(
@@ -2643,6 +2647,7 @@ def mail_entry(username=""):
                 "lock": threading.Lock(),
             }
         item = MAIL_SESSIONS[identifier]
+        item["mail"].memory = selected
         item["used"] = now
         MAIL_SESSIONS.move_to_end(identifier)
         return item
@@ -2811,6 +2816,9 @@ def memory_admin():
         if (request.form.get("action") == "unlock" and ADMIN_PASSWORD.strip()
                 and hmac.compare_digest(request.form.get("password", "").encode(errors="replace"), ADMIN_PASSWORD.encode())):
             session["memory_unlock_until"] = time.time() + MEMORY_GATE_SECONDS
+            target = request.form.get("profile", "")
+            if target.isdecimal() and len(target) < 12:
+                return redirect(url_for("memory_admin_profile", user_id=int(target)))
             return redirect(url_for("memory_admin"))
         message, status = "Mot de passe incorrect.", 401
     store = inspection_store()
@@ -2820,6 +2828,7 @@ def memory_admin():
     return render_template_string(
         admin_service_pages.HEAD + admin_memory_pages.BODY,
         title="Mémoire des utilisateurs", message=message, profiles=visible, selected=None,
+        target=request.args.get("profile", ""),
         unlocked=memory_unlocked(), automatic=memory_automation.enabled(),
         legacy=memory_inspection.unassigned(store, profiles, contents=memory_unlocked()),
         paths=memory_inspection.storage_paths(store)), status
@@ -2839,10 +2848,33 @@ def memory_admin_profile(user_id):
         abort(503, selected["error"])
     return render_template_string(
         admin_service_pages.HEAD + admin_memory_pages.BODY,
-        title="Mémoire des utilisateurs", message=None,
+        title="Mémoire des utilisateurs", message=session.pop("memory_message", None), target="",
         profiles=[{k: v for k, v in selected.items() if k != "data"}], selected=selected,
         unlocked=True, automatic=memory_automation.enabled(), legacy=[],
         paths=memory_inspection.storage_paths(store))
+
+
+@app.route("/maintenance/memory/<int:user_id>/change", methods=["POST"])
+@require_login
+def memory_admin_change(user_id):
+    if not memory_unlocked():
+        abort(403, "Déverrouillez la mémoire dans Maintenance.")
+    action = request.form.get("action", "")
+    if action == "delete" and request.form.get("confirm") != "yes":
+        abort(400, "Confirmez la suppression de cet élément.")
+    try:
+        memory_administration.change(
+            inspection_store(), user_id, int(request.form.get("profile_revision", "-1")),
+            int(request.form.get("memory_revision", "-1")), action,
+            request.form.get("identifier", ""), request.form.get("kind", "fact"),
+            request.form.get("title", ""), request.form.get("text", ""),
+            publish=request.form.get("publish") == "yes")
+    except ValueError:
+        abort(400, "Formulaire mémoire invalide.")
+    except memory_session.memory.MemoryProblem as error:
+        abort(409, str(error))
+    session["memory_message"] = "Élément supprimé." if action == "delete" else "Souvenir enregistré."
+    return redirect(url_for("memory_admin_profile", user_id=user_id))
 
 
 @app.route("/maintenance/memory/export", defaults={"user_id": None})

@@ -1,26 +1,27 @@
-"""Read-only, responsive memory inspector; uses the existing admin page shell."""
+"""Gated, responsive ordinary-memory editor; uses the existing admin page shell."""
 
 BODY = '''
 <p><a href="/?section=maintenance#memory">Retour à Maintenance</a></p>
 <p><a href=/users>Gérer les profils / supprimer un utilisateur et ses mémoires</a></p>
-<p>Souvenirs propres à chaque profil. Les noms ne sont pas une authentification.
+<p>Souvenirs personnels par profil et faits du foyer partagés depuis MinitelGPT. Les noms ne sont pas une authentification.
 Les conversations et sauvegardes héritées restent séparées. Aucun appel IA depuis cette page.</p>
-<p>Apprentissage automatique global : <b>{{'actif' if automatic else 'en pause'}}</b>.
-Défaut MinitelGPT : apprentissage désactivé. Les opérations explicites restent disponibles.</p>
+<p>Apprentissage automatique des profils nommés : <b>{{'actif' if automatic else 'en pause'}}</b>.
+Défaut MinitelGPT : apprentissage désactivé, édition uniquement ici. Les autres profils gardent leurs commandes personnelles.</p>
 {% if not unlocked %}
-<section><h2>Consulter / télécharger les contenus</h2>
+<section id=memory-unlock><h2>Consulter / modifier / télécharger les contenus</h2>
 <p>Confirmez le mot de passe d’administration. Le mot de passe Linux n’est pas utilisé.</p>
-<form method=post><input type=hidden name=csrf value="{{csrf_token()}}">
+<form method=post action=/maintenance/memory><input type=hidden name=csrf value="{{csrf_token()}}">
+<input type=hidden name=profile value="{{target}}">
 <input type=hidden name=action value=unlock>
 <label>ADMIN_PASSWORD<input type=password name=password autocomplete=current-password required></label>
 <button>Déverrouiller pour 5 minutes</button></form></section>
 {% else %}
 <p>Contenus déverrouillés pour cette session, pendant 5 minutes maximum.</p>
-<form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><button name=action value=lock>Verrouiller</button></form>
+<form method=post action=/maintenance/memory><input type=hidden name=csrf value="{{csrf_token()}}"><button name=action value=lock>Verrouiller</button></form>
 <p><a href=/maintenance/memory/export>Télécharger toutes les mémoires (JSON)</a> — sans journaux ni vecteurs.</p>
 {% endif %}
 {% for p in profiles %}<section>
-<h2>{{p.name}} · #{{p.user_id}} {{'(profil désactivé)' if not p.enabled}}</h2>
+<h2>{{p.name}}{{" — mémoire du foyer" if p.user_id==1}} · #{{p.user_id}} {{'(profil désactivé)' if not p.enabled}}</h2>
 {% if p.error %}<p role=status>{{p.error}}</p>
 {% else %}
 <p>{{p.count}} éléments · {{p.bytes}} octets de texte · dernière modification : {{p.updated}}</p>
@@ -29,15 +30,49 @@ Apprentissage : {{'actif' if p.auto_enabled and automatic and p.enabled else 'in
 {% if p.onboarding %}<p>Premier accueil : {{p.onboarding.status}} · {{p.onboarding.turns}} échanges.
 {% for topic,status in p.onboarding.topics.items() %}{{topic}} : {{status}}{{'; ' if not loop.last}}{% endfor %}</p>{% endif %}
 {% if p.retry_after %}<p>Une reprise est différée après un échec; une prochaine interaction relancera le travail.</p>{% endif %}
-{% if unlocked %}<p><a href="/maintenance/memory/{{p.user_id}}">Afficher les souvenirs</a> ·
-<a href="/maintenance/memory/export/{{p.user_id}}">Télécharger ce profil</a></p>{% endif %}
+{% if unlocked %}<p><a href="/maintenance/memory/{{p.user_id}}">Afficher / modifier les souvenirs</a> ·
+<a href="/maintenance/memory/export/{{p.user_id}}">Télécharger ce profil</a></p>{% else %}<p><a href="/maintenance/memory?profile={{p.user_id}}#memory-unlock">Afficher / modifier les souvenirs — déverrouiller</a></p>{% endif %}
 {% endif %}<p>Dossier historique : <code>{{p.memory_key}}</code></p></section>{% endfor %}
 {% if selected %}
 <section><h2>Souvenirs de {{selected.name}}</h2>
+{% if selected.user_id==1 %}<p>Les faits et préférences cochés « Partager » sont accessibles à tous les profils.
+Les anciens éléments restent non partagés jusqu’à votre choix explicite. Utilisez des noms précis :
+« Le frère d’Alice est Bob », « Le Minitel est installé à… ». Ne saisissez que des informations destinées à tous.</p>{% endif %}
+<details><summary>Ajouter un souvenir</summary>
+<form method=post action="/maintenance/memory/{{selected.user_id}}/change">
+<input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=add>
+<input type=hidden name=profile_revision value="{{selected.profile_revision}}">
+<input type=hidden name=memory_revision value="{{selected.data.revision}}">
+<label>Type<select name=kind><option value=fact>Fait</option><option value=preference>Préférence</option>
+{% if selected.user_id!=1 %}<option value=note>Note</option><option value=list>Entrée de liste</option><option value=task>Tâche</option>{% endif %}</select></label>
+<label>Titre (obligatoire pour une note ou une liste)<input name=title maxlength=160></label>
+<label>Texte<textarea name=text rows=5 maxlength=32000 required></textarea></label>
+{% if selected.user_id==1 %}<label><input type=checkbox name=publish value=yes> Partager avec tous les utilisateurs</label>{% endif %}
+<button>Ajouter</button></form></details>
 {% for item in selected.data['items'] %}<article>
 <h3>{{item.title or item.kind}} {{'[fait]' if item.status=='done'}}</h3>
 <p>{{item.kind}} · {{item.origin}} · {{item.updated}} · <code>{{item.id}}</code></p>
 <pre>{{item.text}}</pre>
+{% if selected.user_id==1 %}<p>{{"Partagé avec tous les utilisateurs" if item.origin=='household' else "Non partagé"}}</p>{% endif %}
+<details><summary>Modifier cet élément</summary>
+<form method=post action="/maintenance/memory/{{selected.user_id}}/change">
+<input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=edit>
+<input type=hidden name=profile_revision value="{{selected.profile_revision}}">
+<input type=hidden name=memory_revision value="{{selected.data.revision}}">
+<input type=hidden name=identifier value="{{item.id}}">
+<label>Titre<input name=title value="{{item.title}}" maxlength=160></label>
+<label>Texte<textarea name=text rows=5 maxlength=32000 required>{{item.text}}</textarea></label>
+{% if selected.user_id==1 and item.kind in ['fact','preference'] %}<label><input type=checkbox name=publish value=yes {{'checked' if item.origin=='household'}}> Partager avec tous les utilisateurs</label>{% endif %}
+<p>L’enregistrement remplace le contenu et son origine par une correction administrative.</p>
+<button>Enregistrer les modifications</button></form></details>
+<details><summary>Supprimer cet élément</summary>
+<form method=post action="/maintenance/memory/{{selected.user_id}}/change">
+<input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=delete>
+<input type=hidden name=profile_revision value="{{selected.profile_revision}}">
+<input type=hidden name=memory_revision value="{{selected.data.revision}}">
+<input type=hidden name=identifier value="{{item.id}}">
+<label><input type=checkbox name=confirm value=yes required> Confirmer la suppression de ce souvenir</label>
+<p>Les anciennes conversations et sauvegardes sont conservées.</p><button>Supprimer</button></form></details>
 {% if item.source %}<details><summary>Origine de l’apprentissage</summary>
 {% for source in item.source %}<p>{{source.at}} · session {{source.session_id}} · énoncé {{source.event_id}}</p><pre>{{source.quote}}</pre>{% if source.question %}<p>Question à laquelle la réponse se rapporte :</p><pre>{{source.question}}</pre>{% endif %}{% endfor %}
 </details>{% endif %}<hr></article>{% else %}<p>Aucun souvenir enregistré.</p>{% endfor %}

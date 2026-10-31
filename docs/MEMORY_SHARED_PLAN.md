@@ -35,3 +35,22 @@ develop before delivery/publication. No main promotion, live API probe, account
 operation, credential change, data purge or Pi deployment. Physical checks remain:
 phone editor layout; two users reading a household fact without sharing personal
 facts; Alice's brother resolving to a real Bob candidate; usual draft review.
+
+## Completed implementation and evidence
+
+All three work packages are implemented. Household publication is an explicit
+`household` origin on existing default-profile fact/preference records; legacy
+records remain unpublished. No dependency, schema migration or installer change.
+Manual edits use the normal SQLite write/barrier path with additional profile
+and form revision checks; old extraction cannot restore removed/replaced items.
+
+Offline validation: locked all-extras sync; **998 tests and 400 subtests passed**,
+including 23 new admin/household cases. Ruff, requirements-export freshness and
+whitespace checks passed. A final profile-view relock/form-target correction was
+also checked with the focused admin/household suite. No live model or Google call,
+mail send, Pi deployment, physical terminal or visual phone validation was run.
+
+Physical checks listed above remain for the owner after a requested publication
+and normal update. In particular, wording/relationship reasoning still depends
+on the model; offline candidate tests verify context routing and grounded IDs,
+not real-model interpretation quality.

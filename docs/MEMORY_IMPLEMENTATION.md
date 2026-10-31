@@ -1,5 +1,8 @@
 # Per-user memory implementation — 30 October 2026
 
+Historical scope (superseded for household sharing/admin editing by
+[MEMORY_SHARED_PLAN.md](MEMORY_SHARED_PLAN.md); current operation: MEMORY.md).
+
 Approved scope: SQLite storage, Mistral semantic recall, periodic/session-end
 consolidation, explicit memory commands, and a gated read-only Maintenance page.
 No shared memory, passwords for terminal users, encryption, graph database,

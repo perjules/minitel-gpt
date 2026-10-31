@@ -1,8 +1,9 @@
 # Mémoire personnelle — 3615 IA
 
-Chaque profil possède ses souvenirs. Aucun espace partagé, aucun héritage global.
-Un nom vide sélectionne MinitelGPT, un profil distinct dont l’apprentissage
-**automatique** est désactivé. Les noms et alias sélectionnent une identité;
+Chaque profil nommé possède ses souvenirs personnels. Les faits du foyer sont
+partagés explicitement par l’administrateur depuis le profil réservé MinitelGPT.
+Un nom vide sélectionne ce profil, dont l’apprentissage **automatique** et les
+modifications au terminal sont désactivés. Les noms et alias sélectionnent une identité;
 ils ne constituent pas encore une authentification. Voir [USERS.md](USERS.md).
 
 ## Utilisation
@@ -20,7 +21,7 @@ une question ou une réponse inventée par l’assistant en fait personnel. Les
 souvenirs automatiques gardent leurs citations et leur origine pour inspection.
 Ces règles encadrent un modèle, sans garantir une extraction parfaite.
 
-Les commandes explicites restent prioritaires :
+Les commandes explicites personnelles restent prioritaires pour les profils nommés :
 
 | Demande | Résultat |
 | --- | --- |
@@ -34,6 +35,7 @@ Les commandes explicites restent prioritaires :
 | J’ai acheté les piles | Entrée marquée faite, clarification si nécessaire |
 | MEMOIRE / MEMORY | Tous les éléments du profil, sans appel IA |
 | LISTE courses / LIST courses | Liste nommée, sans appel IA |
+| MEMOIRE GLOBALE / MEMORY GLOBAL | Faits du foyer publiés, en lecture seule, sans appel IA |
 
 Le langage naturel utilise toujours le modèle Mistral général pour interpréter
 les opérations explicites. Sans lui, MEMOIRE et LISTE restent disponibles; une
@@ -128,13 +130,13 @@ une interprétation prudente. Aucun résultat pertinent est une réponse valide.
 
 Sans clé, vecteur disponible ou API opérationnelle, le rappel utilise les textes
 locaux. Les nouveaux souvenirs restent enregistrés même si leur indexation échoue.
-MEMOIRE/LISTE ne vectorisent pas la demande. Les souvenirs ne sont pas injectés
-automatiquement dans les mails ni les requêtes scolaires. Linkup conserve son
+MEMOIRE/LISTE ne vectorisent pas la demande. Les faits/préférences pertinents peuvent aider à identifier un destinataire Gmail,
+mais ne sont pas injectés dans la rédaction des mails ni les requêtes scolaires. Linkup conserve son
 fonctionnement de recherche isolée, sans prompt mémoire.
 
 Limites par profil conservées : 256 éléments / 1 Mio; contenu de 32000 caractères,
-titre de 160. Les réponses ordinaires reçoivent au plus environ 4000 caractères,
-avec extraits de 900 caractères. Le planificateur explicite reçoit un catalogue
+titre de 160. Les réponses ordinaires reçoivent au plus environ 4000 caractères au total pour les contextes personnel/foyer,
+avec extraits de 900 caractères et identité sélectionnée explicite. Le planificateur explicite reçoit un catalogue
 borné à environ 14000 caractères, avec extraits de 2000 caractères; un catalogue
 partiel ne prouve pas l’absence d’un élément. Les éléments terminés restent
 consultables explicitement, mais sont exclus du rappel automatique.
@@ -190,15 +192,55 @@ volume de texte, dernière modification, indexation, file et état du traitement
 Cela ne déclenche pas d’appel IA. Les profils désactivés restent inspectables.
 
 Une nouvelle saisie d’ADMIN_PASSWORD ouvre pendant cinq minutes maximum, dans la
-session admin courante, l’affichage des textes et l’export JSON individuel/global.
+session admin courante, l’affichage/édition des textes et l’export JSON individuel/global.
 Le bouton Verrouiller et la déconnexion ferment cet accès. Le mot de passe Linux
 n’est jamais demandé. Pages et téléchargements ne sont pas mis en cache.
 
 L’export contient les textes, langue, IDs, origines et citations; pas les vecteurs,
 journaux, credentials ou droits Gmail/PRONOTE. Il ne constitue donc pas une sauvegarde
 complète du Pi. L’export global inclut les anciens dossiers sans identité et porte
-`complete: false` si des données illisibles n’ont pas pu être exportées. Cette page
-est en lecture seule, sans bouton d’édition/suppression.
+`complete: false` si des données illisibles n’ont pas pu être exportées. Les liens « Afficher / modifier » restent visibles quand la page est verrouillée et
+conduisent au formulaire de déverrouillage. Une fois déverrouillé, chaque profil
+propose **Ajouter un souvenir**, **Modifier cet élément** et **Supprimer cet élément**.
+Les modifications portent sur le titre et le texte complets; type et état existants
+sont conservés. La suppression demande une confirmation. Un formulaire périmé
+(mémoire ou profil modifié, supprimé/recréé) est refusé : recharger avant de réessayer.
+L’enregistrement manuel utilise l’origine `admin` et remplace les anciennes citations,
+qui ne justifieraient plus le nouveau texte. Il invalide les vecteurs modifiés,
+annule la file antérieure et bloque ses résultats tardifs, sans appel IA.
+Les vecteurs sont reconstruits lors d’un prochain déclenchement normal.
+
+## Faits du foyer : publication explicite
+
+Dans **MinitelGPT — mémoire du foyer**, ajouter un fait/préférence ou modifier un
+élément, puis cocher **Partager avec tous les utilisateurs**. L’origine `household`
+marque cette décision administrative dans la même table SQLite, sans migration de
+schéma. Décocher puis enregistrer retire l’élément du contexte commun; supprimer
+le retire de la base courante. Les anciens éléments du profil par défaut restent
+intacts et non publiés jusqu’à une décision explicite. MEMOIRE sur ce profil
+continue d’afficher son ancien inventaire, sans pouvoir le modifier au terminal.
+
+Exemples : « Le Minitel est installé à … », « Le frère d’Alice est Bob »,
+« Bob est né le … », « Le foyer possède un Thermomix ». Utiliser des relations
+nommées; une adresse d’installation n’est pas automatiquement celle du visiteur.
+Tous les profils, y compris le défaut, peuvent rappeler les faits publiés. Les
+profils nommés gardent leurs propres commandes/énoncés et ne peuvent ni modifier
+le foyer ni consulter les souvenirs privés des autres. MEMOIRE GLOBALE expose
+uniquement les faits publiés; MEMOIRE reste l’inventaire personnel. Les ambiguïtés
+ou contradictions demandent clarification, sans fusion automatique des espaces.
+
+Le rappel réutilise un vecteur de question pour les deux espaces et conserve le
+repli lexical. Les faits retirés/modifiés pendant la recherche sont revalidés
+avant injection. Les limites de stockage par profil restent inchangées. Les
+archives, anciens JSON, journal intime et Rose ne sont jamais publiés par ce mécanisme.
+
+Dans Gmail, seule la **sélection du destinataire** reçoit les faits/préférences
+pertinents et l’identité du profil, sans notes, tâches, conversations récentes ni
+archives. « Mon frère » pour Alice peut ainsi désigner Bob. La correspondance doit
+toujours être trouvée dans les vrais candidats du compte Gmail attribué (catalogue
+actuel des 50 messages récents); une relation ou adresse mémorisée ne crée pas
+de candidat. Plusieurs Bob restent un choix à préciser. Routeur, rédaction,
+permissions d’accès et confirmation explicite d’envoi restent séparés.
 
 ## Nettoyage manuel et récupération
 

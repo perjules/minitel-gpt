@@ -125,8 +125,8 @@ class MemoryTests(unittest.TestCase):
         default = sessions.MemorySession("", self.store, self.model)
         self.addCleanup(default.close)
         result = default.handle("Ajoute du lait à ma liste de courses.")
-        self.assertIn("mémoire de MinitelGPT", result["display"])
-        self.assertEqual(self.store.read("shared")["items"][0]["text"], "lait")
+        self.assertIn("lecture seule", result["display"])
+        self.assertEqual(self.store.read("shared")["items"], [])
         self.assertNotIn("lait", self.alice.context("Quelles courses ?"))
         self.assertNotIn("Réponses courtes", bob.context("Que sais-tu ?"))
         self.alice.close()
@@ -137,7 +137,7 @@ class MemoryTests(unittest.TestCase):
         self.assertIn("Réponses courtes", restored.handle("MEMOIRE")["display"])
         restored_default = sessions.MemorySession("", self.store, self.model)
         self.addCleanup(restored_default.close)
-        self.assertIn("lait", restored_default.handle("LISTE courses")["display"])
+        self.assertNotIn("lait", restored_default.handle("LISTE courses")["display"])
         self.assertNotIn("lait", restored.handle("MEMOIRE")["display"])
 
     def test_fact_correction_recall_removal_and_list_completion(self):

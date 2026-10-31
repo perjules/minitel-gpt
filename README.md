@@ -220,12 +220,14 @@ maintenance fictives, interruptible par les touches existantes.
 
 La [mémoire légère](docs/MEMORY.md) ajoute un nom facultatif au démarrage :
 vide sélectionne le profil MinitelGPT, sans authentification.
-Chaque profil dispose de sa propre mémoire; aucun espace commun n’est proposé.
+Chaque profil nommé dispose de sa propre mémoire. L’administrateur peut aussi
+publier des faits du foyer, lisibles par tous, depuis le profil MinitelGPT.
 Préférences, notes,
 listes et tâches se gèrent en langage naturel. Les profils nommés bénéficient
 aussi d’un apprentissage périodique et d’un rappel sémantique Mistral; les commandes
 RETIENS/OUBLIE restent prioritaires. SQLite conserve les souvenirs et leurs vecteurs.
-Maintenance propose un inventaire et des exports après confirmation du mot de passe admin.
+Maintenance propose consultation, ajout, correction, suppression et exports après
+confirmation du mot de passe admin. Les faits partagés restent en lecture seule au terminal.
 Un [premier accueil conversationnel](docs/ONBOARDING.md) présente le Minitel aux
 nouveaux profils nommés et apprend quelques repères personnels, avec des questions
 adaptées et facultatives. PASSER, PLUS TARD et FIN ACCUEIL permettent de le guider. Sur le Minitel, SOMMAIRE revient à

@@ -168,3 +168,17 @@ Ces étapes ne sont pas exécutées sur le poste de développement.
 
 Sauvegarde/restauration, nettoyage manuel, routage multi-compte et intégrations des
 placeholders restent différés. Aucun push ni merge effectué pendant ces travaux.
+
+## Éditeur mémoire et faits du foyer
+
+Maintenance → Mémoire des utilisateurs propose un lien Afficher / modifier sur
+chaque profil, visible même verrouillé. Ressaisir ADMIN_PASSWORD déverrouille les
+contenus et leurs formulaires pendant cinq minutes. Ajouter, modifier le titre/texte
+ou supprimer un élément ne demande aucun appel IA. Les formulaires périmés sont
+refusés, les suppressions confirmées, et les anciens traitements automatiques
+infirmés. Recharger après une modification avant d’utiliser un autre ancien formulaire.
+
+Le profil MinitelGPT contient aussi la mémoire du foyer : seuls les faits/préférences
+cochés Partager sont lus par tous les profils. Aucun ancien élément n’est publié
+automatiquement. Gestion, limites et récupération : [MEMORY.md](MEMORY.md).
+Les exports ordinaires n’incluent toujours ni journal intime, ni Rose, ni credentials.

@@ -31,10 +31,14 @@ card identifies this case. Afterwards, blank input and the explicit default name
 both select #1. Inspect the duplicate's data and account assignments before
 choosing whether to delete it.
 
-Saved memory belongs only to the selected profile. There is no global/shared
-memory or cross-profile memory command. The reserved MinitelGPT profile keeps its
-legacy `shared/` directory to preserve existing data; other profiles cannot target
-it from their conversations. Selecting a profile is still not authentication.
+Personal saved memory belongs only to its selected named profile. The reserved
+MinitelGPT profile keeps its legacy `shared/` directory. Administrators may now
+publish its facts/preferences as household context with the explicit Share
+checkbox in Maintenance; old default records are not silently published. Every
+profile can read these published facts, including through MEMOIRE GLOBALE, but
+terminal commands cannot modify them. Named-profile learning remains personal.
+No mailbox access or other permissions are inherited with household knowledge.
+See [MEMORY.md](MEMORY.md). Selecting a profile is still not authentication.
 
 ## Data
 

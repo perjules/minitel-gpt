@@ -707,8 +707,13 @@ References: [Gmail list/search](https://developers.google.com/workspace/gmail/ap
 The optional startup [memory selector](MEMORY.md) also selects the separate
 plaintext conversation archive. Visible Gmail requests/results can appear there;
 mailbox caches, draft internals, OAuth credentials and API payloads are not archived.
-Memory records are deliberately saved only, and are not automatically added to
-outgoing messages. Gmail's encrypted enrollment and send/review gate are unchanged.
+Relevant personal facts/preferences and explicitly published household facts can
+help **recipient selection** interpret relationships for the selected user (Alice's
+brother is Bob). Notes, tasks, recent chat and archives are excluded. Context is not
+passed to the mail router or outgoing-message writer. Candidate IDs/addresses still
+come from the assigned mailbox's bounded recent-correspondent catalogue; multiple
+same-name people require clarification. Memory never creates a recipient or grants
+mailbox/send permission, and is not automatically added to outgoing messages. Gmail's encrypted enrollment and send/review gate are unchanged.
 
 `reconnect_required` means refresh authorization expired/revoked or service
 credentials are absent. Use the admin console's Connect/Reauthorize then Apply

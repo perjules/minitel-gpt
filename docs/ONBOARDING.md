@@ -130,12 +130,14 @@ first test message is sent. Completed welcomes are not silently reset by the but
 **Maintenance → Mémoire des utilisateurs** shows welcome status, exchange count
 and covered/skipped topic IDs. The existing password gate protects saved facts,
 source quotes and their question context. The export includes progress metadata,
-not raw welcome history. No new top-level section or memory editor is added.
+not raw welcome history. No new top-level section is added. The ordinary-memory editor and household
+publication controls are documented in MEMORY.md.
 
 To inspect what was actually saved, type **MEMOIRE**/**MEMORY** on the terminal,
 or unlock **Maintenance → Mémoire des utilisateurs** with ADMIN_PASSWORD and
-choose **Afficher les souvenirs** (or **Télécharger ce profil**). The saved items
-show their origin and supporting source quotes. This is distinct from the visible
+choose **Afficher / modifier les souvenirs** (or **Télécharger ce profil**). The saved items
+in the admin viewer show their origin and supporting source quotes; terminal
+MEMOIRE lists the saved content without provenance. This is distinct from the visible
 conversation archive: not everything discussed becomes a saved fact.
 
 `user_onboarding` is an additive table in the existing users.sqlite3. Its version

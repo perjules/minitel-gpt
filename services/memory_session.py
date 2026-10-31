@@ -286,21 +286,57 @@ class MemorySession:
         except memory.MemoryProblem as error:
             self.warning = str(error)
 
-    def context(self, question):
+    def context(self, question, *, recipient=False):
+        """Personal and explicitly published household facts, kept in separate scopes."""
         try:
             with self.lock:
                 self.active()
                 data = self.store.read(self.key, guard=self.active)
-            selected, _ = memory_vectors.ordered(self.store, self.key, data, question,
-                                                  self.recent, self.embeddings)
-            with self.lock:
-                self.active()
-                current = {item["id"]: item for item in self.store.read(self.key, guard=self.active)["items"]}
-                selected = [item for item in selected if current.get(item["id"]) == item]
-                return memory.context({**data, "items": selected}, question, self.label, retrieved=True)
+            try:
+                household = self.store.read("shared", guard=self.active)
+            except memory.MemoryProblem as error:
+                self.warning = str(error)
+                household = {"items": []}
+            scopes = []
+            if self.user.id != 1:
+                personal = data["items"]
+                if recipient:
+                    personal = [r for r in personal if r["kind"] in {"fact", "preference"}]
+                scopes.append((self.key, {**data, "items": personal}, self.label))
+            published = [r for r in household["items"]
+                         if r["origin"] == "household" and r["kind"] in {"fact", "preference"}]
+            if published:
+                scopes.append(("shared", {**household, "items": published},
+                               "HOUSEHOLD / MINITEL — shared, read only"))
+            # Identity anchors first-person relationships without implying every visitor
+            # lives at the appliance's address. Reuse one embedding across both scopes.
+            query = question + "\nSelected user: " + self.username
+            cache, parts = {}, []
+            for key, snapshot, label in scopes:
+                selected, _ = memory_vectors.ordered(self.store, key, snapshot, query,
+                                                      [] if recipient else self.recent,
+                                                      self.embeddings, cache=cache)
+                with self.lock:
+                    self.active()
+                    current = {r["id"]: r for r in self.store.read(key, guard=self.active)["items"]}
+                    selected = [r for r in selected if current.get(r["id"]) == r]
+                part = memory.context({**snapshot, "items": selected}, query, label,
+                                      retrieved=True, limit=1800 if len(scopes) > 1 else 3500)
+                if part:
+                    parts.append(part)
+            if not parts:
+                return ""
+            return ("Selected user: " + json.dumps(self.username, ensure_ascii=False)
+                    + ". Resolve I/my relatives for this user only. Household facts describe the "
+                    "appliance/household, not necessarily this visitor. If identities or facts "
+                    "conflict, clarify; never infer account permissions.\n" + "\n\n".join(parts))
         except memory.MemoryProblem as error:
             self.warning = str(error)
             return ""
+
+    def recipient_context(self, description):
+        # No notes, tasks, archives, recent dialogue or private integrations.
+        return self.context(description, recipient=True)
 
     def interested(self, question):
         q = memory.normalized(question)
@@ -333,8 +369,8 @@ class MemorySession:
             and self.recent
         )
 
-    def display(self, items):
-        label = self.label
+    def display(self, items, label=None, readonly=False):
+        label = label or self.label
         if not items:
             return "Aucun élément dans " + label + "."
         result = []
@@ -358,7 +394,8 @@ class MemorySession:
             label.capitalize()
             + "\n\n"
             + "\n\n".join(result)
-            + "\n\nCorrigez, retirez ou terminez un élément en mots."
+            + ("\n\nLecture seule. Gestion dans Maintenance." if readonly or self.user.id == 1
+               else "\n\nCorrigez, retirez ou terminez un élément en mots.")
         )
 
     def handle(self, question, language="fr", timeout=60):
@@ -386,13 +423,18 @@ class MemorySession:
             raise memory.MemoryProblem("Demande trop longue (2000 caractères).")
         with self.lock:
             self.active()
+            if memory.normalized(question).strip() in {"memoire globale", "memoire du foyer", "memory global", "global memory", "household memory"}:
+                self.pending = None
+                data = self.store.read("shared", guard=self.active)
+                return {"display": self.display([r for r in data["items"]
+                        if r["origin"] == "household" and r["kind"] in {"fact", "preference"}],
+                        "mémoire du foyer (lecture seule)", readonly=True)}
             if shared_request(question):
                 self.pending = None
                 raise memory.MemoryProblem(
-                    "La mémoire partagée n'est plus disponible. "
-                    "Reformulez pour votre mémoire personnelle ("
-                    + self.username
-                    + ")."
+                    "La modification de mémoire partagée n'est plus disponible au terminal. "
+                    "Les faits du foyer sont en lecture seule; utilisez Maintenance pour les gérer. "
+                    "MEMOIRE GLOBALE permet de les consulter."
                 )
             pending = self.pending
         if pending and question.isdigit():
@@ -472,6 +514,11 @@ class MemorySession:
                 and memory.normalized(r["title"]) == memory.normalized(title)
             ]
             return {"display": self.display(items)}
+        if self.user.id == 1:
+            if allowed_changes(question):
+                raise memory.MemoryProblem("La mémoire du Minitel est en lecture seule au terminal. "
+                                           "Utilisez Maintenance pour ajouter, corriger ou supprimer un fait du foyer.")
+            return {"display": "", "passthrough": True}
         _, ordered = memory_vectors.ordered(self.store, self.key, snapshot, question,
                                               self.recent, self.embeddings)
         candidates, partial = memory.catalogue(snapshot, question, ordered=ordered)
@@ -620,6 +667,9 @@ class MemorySession:
     def execute(self, proposal, snapshot, allowed):
         with self.lock:
             self.active()
+            if self.user.id == 1:
+                raise memory.MemoryProblem("La mémoire du Minitel est en lecture seule au terminal. "
+                                           "Utilisez Maintenance pour la modifier.")
             if proposal["operation"] not in allowed:
                 raise memory.MemoryProblem("Modification non demandée.")
             if proposal["operation"] == "replace":

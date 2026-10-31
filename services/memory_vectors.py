@@ -151,7 +151,7 @@ def index_pending(store, embeddings, limit=8):
     return count
 
 
-def ordered(store, key, data, question, recent, embeddings):
+def ordered(store, key, data, question, recent, embeddings, cache=None):
     """Return relevance candidates, then the remaining records for explicit planners."""
     lexical = memory.ranked(data["items"], question)
     words = memory.tokens(question)
@@ -191,7 +191,16 @@ def ordered(store, key, data, question, recent, embeddings):
             query = question[:2000] + (
                 "\nRecent context: " + context if context else ""
             )
-            vector = embeddings.embed([query])[0]
+            # A single ordinary recall may search personal and household records.
+            # Reuse its query vector (including a failed attempt) across both scans.
+            if cache is None:
+                cache = {}
+            if query not in cache:
+                cache[query] = None
+                cache[query] = embeddings.embed([query])[0]
+            vector = cache[query]
+            if vector is None:
+                raise memory.MemoryProblem("Vectorisation indisponible.")
             for item, saved in usable:
                 score = sum(a * b for a, b in zip(vector, saved, strict=True))
                 if score >= MIN_SIMILARITY:
