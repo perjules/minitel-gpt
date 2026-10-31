@@ -20,7 +20,8 @@ personality and serial/navigation paths remain available.
 | `E:` | ENVOYER: requires full review of the current draft and its current ticket |
 | `L: 2` | LIRE message 2; `L:` alone asks for a number without AI |
 | `T: exact text` | TEXTE: append a literal paragraph to the pending draft without AI |
-| `Q:` | QUITTER: discard the draft and leave the mail session |
+| `B:` | BROUILLON: restore the latest local draft; fresh review is required |
+| `Q:` | QUITTER: leave mail, preserving the latest saved draft |
 
 Full words remain accepted. A shortcut is recognized only at the start of the
 submitted line, ignoring leading whitespace/case, with the colon immediately
@@ -54,6 +55,45 @@ An early send refusal redisplays the pending draft so its remaining pages can be
 reviewed. Revisions retain their existing stale-ticket and review invalidation.
 The web mail console already provides previous/next buttons and command input
 on each page; these same approval rules continue to apply.
+
+## Local draft recovery
+
+Each completed draft and successful revision is atomically saved as readable,
+unencrypted UTF-8 JSON, mode 0600, outside the checkout. There is one slot per
+Minitel profile **and** assigned Gmail account; profiles sharing the same mailbox
+do not share drafts. The file is under the profile's existing memory folder:
+`$MINITEL_MEMORY_DIR/<memory-key>/mail-draft-<account-hash>.json` (the default root
+is `~/.local/share/3615-ia`). Deleting a profile also removes its draft files.
+Drafts have no automatic expiry. Users discard sensitive text with ANNULER / A:.
+
+- BROUILLON / B: restores the last saved recipient, subject, text, personal
+  sign-off and reply context. No model call, OAuth refresh or Gmail fetch is
+  needed to restore it; current local account grants must still allow access.
+  A new review ticket is created, and all preview pages must be read before E:.
+- SOMMAIRE, QUITTER / Q:, logout, session expiry, UART disconnect and service
+  restarts clear transient state and approval, preserving the recovery file.
+  Reading another message or listing mail also leaves it available through B:.
+- ANNULER / A: explicitly deletes the slot. Starting a new draft replaces the
+  previous unsent one only after the new draft has successfully completed and
+  been saved. Failed generation or failed atomic replacement preserves the old
+  file. A storage failure is reported rather than silently claiming a save.
+- Restored replies retain threading headers, thread ID and the original selected
+  history quoted after ENVOYER. No other mailbox messages or attachments are saved
+  for reply context. Credentials and review/approval tickets are never saved.
+- Sending durably marks the attempt **before** the single Gmail send call.
+  Confirmed success removes that exact saved revision. If the process dies, the
+  send is uncertain, or cleanup fails, B: shows the preserved text and Message-ID
+  with an uncertain-send warning and **no approval ticket**. That attempt cannot
+  be resent or revised. Check Gmail / Envoyés, then A: to remove the marker;
+  compose a fresh message only if another send is actually needed.
+- A stale browser or terminal cannot send, revise or delete a newer saved
+  revision from another session. B: reloads the current slot. Switching to a
+  different Gmail account does not expose the previous account's draft; assigning
+  that account back makes it recoverable again.
+
+These are local recovery files, not entries in Gmail's Drafts folder. OAuth
+scopes remain exactly `gmail.readonly` and `gmail.send`; no new dependencies,
+background worker, database migration or Google consent step is required.
 
 ## Validation status
 
@@ -94,7 +134,8 @@ are recorded here.
    If they are missing, enable Gmail API or use the dialog's manual scope entry.
 
    Do not add `gmail.modify`, `gmail.compose`, broad `mail.google.com`, profile or
-   identity scopes. Gmail drafts are not used; the outgoing draft lives in Python RAM.
+   identity scopes. Gmail-hosted drafts are not used; local recovery files need no
+   additional Google permission or reauthorization.
 4. For authorization from the **admin console**, create a **Web application**
    OAuth client with the exact HTTPS callback described in
    [Browser enrollment](#browser-enrollment-through-the-admin-console), and download
@@ -485,7 +526,8 @@ Select an owner-controlled test message, then:
    Gmail thread ID are retained. After `MODIFIER`, the next
    editing instruction directly revises the existing draft instead of being
    classified as a new message. Failed edits retain this editing state and keep
-   the previous review invalid; ANNULER/SOMMAIRE discards it.
+   the previous review invalid. ANNULER deletes the saved draft; SOMMAIRE leaves
+   mail while preserving the latest completed revision for BROUILLON / B:.
 
    Literal edits require no model call. `MODIFIER` shows numbered paragraphs,
    independent of the terminal's wrapped screen rows. The personal sign-off is
@@ -528,8 +570,8 @@ Select an owner-controlled test message, then:
 
 Cancellation/reset can abandon generation; an explicitly approved send already
 submitted to Gmail cannot be recalled by SOMMAIRE. Network uncertainty is never
-resolved by automatically retrying the send. Drafts are intentionally lost on
-restart, reset and logout. Reply-all, CC/BCC, sending aliases, attachments,
+resolved by automatically retrying the send. Local drafts survive restart, reset
+and logout as described below. Reply-all, CC/BCC, sending aliases, attachments,
 full-thread context and multiple accounts are not implemented. New composition
 to recent correspondents is described in Stage 1 below.
 

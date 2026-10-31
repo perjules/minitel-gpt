@@ -2636,7 +2636,7 @@ def mail_entry(username=""):
                         env=lambda: {**os.environ, **read_env()},
                     )
                 ),
-                "pages": ["MAIL pour consulter la boîte.\nL: numéro pour lire.\nECRIRE nom : instructions pour un nouveau mail."],
+                "pages": ["MAIL pour consulter la boîte.\nL: numéro pour lire.\nECRIRE nom : instructions pour un nouveau mail.\nB: reprendre le dernier brouillon sauvegardé."],
                 "page": 0,
                 "ticket": None,
                 "used": now,
@@ -2713,7 +2713,12 @@ def gmail_admin():
         or gmail_mail.cancelling(request.form.get("question", ""))
     )
     if cancelling:
-        item["mail"].reset()
+        discard = (request.form.get("action") == "cancel" or
+                   gmail_mail.expand_command(request.form.get("question", "")).strip().upper() == "ANNULER")
+        try:
+            item["mail"].reset(discard=discard)
+        except gmail_auth.GmailError as error:
+            return "Gmail: " + str(error), 409
         if request.form.get("action") == "reset" or request.form.get("question", "").strip().upper() == "SOMMAIRE":
             discard_memory(session.get("memory_session"))
     if not item["lock"].acquire(blocking=False):
@@ -2744,7 +2749,7 @@ def gmail_admin():
                 if command is None:
                     return "Action inconnue", 400
                 selected.record("user", command, "gmail")
-                memory_request = (not gmail_mail.literal_command(command) and not gmail_mail.shortcut(command) and selected.interested(command) and
+                memory_request = (command.strip().upper() != "BROUILLON" and not gmail_mail.literal_command(command) and not gmail_mail.shortcut(command) and selected.interested(command) and
                                   (not item["mail"].draft or memory_session.explicit_request(command)))
                 result = selected.handle(command) if memory_request else {"passthrough": True}
                 if not result.get("passthrough"):

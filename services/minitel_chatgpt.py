@@ -570,7 +570,8 @@ def call_answer(system_prompt, history, language, options, knowledge,
     question = history[-1]["content"]
     if memory is not None and hasattr(memory, "begin_turn"):
         memory.begin_turn()
-    if mail is not None and gmail_mail.enabled() and (gmail_mail.shortcut(question) or gmail_mail.literal_command(question)):
+    if mail is not None and gmail_mail.enabled() and (gmail_mail.shortcut(question) or gmail_mail.literal_command(question)
+                                                     or question.strip().upper() == "BROUILLON"):
         # Explicit mail instructions cannot be intercepted by welcome, memory,
         # school or calculator routing. Keep the user's actual line for approval.
         return {**mail.handle(question, review_ticket, timeout), "gmail": True}
