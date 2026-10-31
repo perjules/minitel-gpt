@@ -32,11 +32,14 @@ def test_real_local_remote_preview_uses_installed_branch_and_preserves_checkout(
     runtime, state = tmp_path / "runtime.json", tmp_path / "deployment.json"
     runtime.write_text(json.dumps({"branch": "develop", "active": {"commit": head}}))
     state.write_text('{"phase":"ready"}')
+    assert deployment.available(checkout, runtime) is False
     (remote / "test.txt").write_text("second")
     git(remote, "commit", "-am", "Better messages")
+    assert deployment.available(checkout, runtime) is True
     preview = deployment.preview(checkout, runtime, state)
     assert preview == {"ok": True, "behind": 1, "log": "Better messages", "head": head,
-                       "branch": "develop", "target": git(remote, "rev-parse", "HEAD")}
+                       "branch": "develop", "target": git(remote, "rev-parse", "HEAD"),
+                       "commits": [{"id": git(remote, "rev-parse", "HEAD"), "subject": "Better messages"}]}
     assert git(checkout, "rev-parse", "HEAD") == head
     assert (checkout / "test.txt").read_text() == "first"
     # A real tracked edit is refused; no stash/reset/checkout is attempted.
@@ -65,7 +68,7 @@ def test_failed_preflight_never_returns_changes_to_the_model(tmp_path, monkeypat
         if args[0] == "rev-list":
             return 0, "1", ""
         if args[0] == "log":
-            return 0, "Synthetic change", ""
+            return 0, target + "\0Synthetic change", ""
         if args[0] == "rev-parse":
             return 0, target, ""
         return (1 if failure == "diverged" else 0), "", ""
@@ -107,7 +110,9 @@ def test_exact_commands(text):
 
 
 def checked(behind=2):
-    return {"ok": True, "behind": behind, "log": "Clearer mail\nBetter recall",
+    return {"ok": True, "behind": behind, "log": "Clearer mail\nBetter recall" if behind else "",
+            "commits": [{"id": "c" * 40, "subject": "Clearer mail"},
+                        {"id": "d" * 40, "subject": "Better recall"}] if behind else [],
             "branch": "develop", "head": "a" * 40, "target": "b" * 40}
 
 
@@ -119,7 +124,13 @@ def test_text_generation_is_separate_and_only_receives_bounded_change_subjects(m
     monkeypatch.setattr(chat, "ANTHROPIC_KEY", "synthetic")
     monkeypatch.setattr(chat, "call_mistral" if provider == "mistral" else "call_claude", generate)
     for procedure in (False, True):
-        assert chat.prepare_update_text(checked(), "fr", procedure=procedure)[0] == "ALCATEL MF-83"
+        generate.return_value = ("ALCATEL MF-83\nVisa du bureau 83 obtenu." if procedure else
+                                 '["Registre courrier", "Banque a tores"]')
+        rows = chat.prepare_update_text(checked(), "fr", procedure=procedure)
+        if procedure:
+            assert rows[0] == "ALCATEL MF-83"
+        else:
+            assert "Registre courrier" in rows and "Clearer mail" in rows and "Better recall" in rows
         system, history = generate.call_args.args
         assert "Minitel terminal is already perfect" in system
         assert "France Telecom" in system and "untrusted data" in system
@@ -155,7 +166,6 @@ def test_long_generated_procedure_reaches_display_and_records_success(monkeypatc
     assert "Depot du formulaire" not in caplog.text
 
 
-@pytest.mark.parametrize("procedure", [False, True])
 @pytest.mark.parametrize("text", [
     "# ALCATEL MF-83\n- Controle des relais.\n* Visa du bureau 83.",
     "### **ALCATEL MF-83**\n1. Controle des `relais`.\n2) __Visa du bureau 83.__",
@@ -163,18 +173,74 @@ def test_long_generated_procedure_reaches_display_and_records_success(monkeypatc
     "```text\r\nALCATEL MF-83\r\n- Controle des relais.\r\n+ Visa du bureau 83.\r\n```",
     "```plaintext\nALCATEL MF-83\nControle des relais.\nVisa du bureau 83.\n```",
 ])
-def test_harmless_formatting_keeps_generated_narration(monkeypatch, caplog, procedure, text):
+def test_harmless_formatting_keeps_generated_narration(monkeypatch, caplog, text):
     generate = Mock(return_value=text)
     monkeypatch.setattr(chat, "PROVIDER", "mistral")
     monkeypatch.setattr(chat, "MISTRAL_KEY", "synthetic")
     monkeypatch.setattr(chat, "call_mistral", generate)
     caplog.set_level("INFO", logger=chat.log.name)
-    assert chat.prepare_update_text(checked(), "fr", procedure=procedure) == [
+    assert chat.prepare_update_text(checked(), "fr", procedure=True) == [
         "ALCATEL MF-83", "Controle des relais.", "Visa du bureau 83.",
     ]
     generate.assert_called_once()
     assert "status=generated lines=3" in caplog.text
     assert "status=fallback" not in caplog.text
+
+
+@pytest.mark.parametrize('reply', ['["Tore memoire C7", "Relais postal B3"]',
+                                  '```json\n["Tore memoire C7", "Relais postal B3"]\n```',
+                                  '["Only one label"]', 'not JSON'])
+def test_actual_subjects_survive_label_generation_and_fallback(monkeypatch, reply):
+    preview = checked()
+    preview['commits'][0]['subject'] = 'Fix Git branch selection; keep user memory'
+    preview['commits'][1]['subject'] = 'Long original wording ' * 8
+    monkeypatch.setattr(chat, 'PROVIDER', 'mistral')
+    monkeypatch.setattr(chat, 'MISTRAL_KEY', 'synthetic')
+    generate = Mock(return_value=reply)
+    monkeypatch.setattr(chat, 'call_mistral', generate)
+    rows = chat.prepare_update_text(preview, 'fr')
+    text = '\n'.join(rows)
+    assert 'Fix Git branch selection; keep user' in text
+    assert ' '.join(chat.wrap(preview['commits'][1]['subject'])).strip() in ' '.join(rows)
+    assert 'c' * 40 not in text and 'd' * 40 not in text
+    assert all(len(row) <= 39 for row in rows)
+    assert 'Tore memoire C7' in rows or 'ARMOIRE MF-83 / LOT 01' in rows
+    generate.assert_called_once()
+
+
+@pytest.mark.parametrize('case,expected', [('behind', True), ('current', False),
+                                         ('offline', None), ('diverged', None), ('invalid', None)])
+def test_startup_git_check_is_bounded_and_never_reads_messages(tmp_path, monkeypatch, case, expected):
+    runtime = tmp_path / 'runtime.json'
+    runtime.write_text('{"branch":"develop"}')
+    def run(project, *args, **kwargs):
+        if args[0] == 'branch':
+            return 0, 'develop', ''
+        if args[0] == 'fetch':
+            assert kwargs['timeout'] == 3
+            return (1 if case == 'offline' else 0), '', ''
+        if args[0] == 'merge-base':
+            return (1 if case == 'diverged' else 0), '', ''
+        assert args[0] == 'rev-list' and kwargs['timeout'] == 1
+        return 0, ('invalid' if case == 'invalid' else '0' if case == 'current' else '2'), ''
+    git = Mock(side_effect=run)
+    monkeypatch.setattr(deployment, 'git', git)
+    assert deployment.available(tmp_path, runtime) is expected
+    assert not any(call.args[1] == 'log' for call in git.call_args_list)
+
+
+@pytest.mark.parametrize('available', [True, False, None])
+def test_boot_notice_is_plain_local_text_before_continuation(monkeypatch, available):
+    check = Mock(return_value=available)
+    monkeypatch.setattr(deployment, 'available', check)
+    harness = startup.StartupTests()
+    screens, calls = harness.run_session(login_keys() + b'Hello' + fn(chat.K_ENVOI))
+    text = '\n'.join(screens)
+    assert ('MISES A JOUR DISPONIBLES - MAJ' in text) is (available is True)
+    assert len(calls) == 1 and harness.boot_requests == []
+    check.assert_called_once()
+    if available:
+        assert text.index('MISES A JOUR DISPONIBLES - MAJ') < text.index(chat.BOOT_CONTINUE_PROMPT)
 
 
 @pytest.mark.parametrize("failure,reason", [("truncated", "incomplete_response"), ("timeout", "timeout")])

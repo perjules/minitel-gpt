@@ -913,7 +913,9 @@ def prepare_update_text(preview, language, *, procedure=False):
     """One optional call, independent of personal history and factual answers."""
     words = mainframe_update.TEXT[language]
     fallback = (words["procedure"] if procedure else
-                (words["announcement"] if preview["behind"] else words["current"]).splitlines())
+                mainframe_update.message_rows(preview, language, to_ascii))
+    if not procedure and not preview["behind"]:
+        return fallback
     generate, key = ((call_claude, ANTHROPIC_KEY) if PROVIDER == "claude" else
                      (call_mistral, MISTRAL_KEY))
     phase = "procedure" if procedure else "announcement"
@@ -923,11 +925,14 @@ def prepare_update_text(preview, language, *, procedure=False):
     started = time.monotonic()
     try:
         prompt = mainframe_update.PROMPT.read_text(encoding="utf-8")
-        text = generate(prompt, [{"role": "user", "content": mainframe_update.request(
-            preview, language, procedure=procedure)}],
+        text = generate(prompt, [{"role": "user", "content": (
+            mainframe_update.request(preview, language, procedure=True) if procedure else
+            mainframe_update.component_request(preview, language))}],
             timeout=UPDATE_TIMEOUT if procedure else BOOT_TIMEOUT, require_complete=True,
             **({"max_tokens": 1800} if procedure else {}))
-        rows = mainframe_update.validate(text, validate_boot, procedure=procedure)
+        rows = (mainframe_update.validate(text, validate_boot, procedure=True) if procedure else
+                mainframe_update.message_rows(preview, language, to_ascii,
+                    mainframe_update.component_labels(text, len(preview["commits"]), to_ascii)))
         log.info("update_theatre phase=%s status=generated lines=%s elapsed=%.2f",
                  phase, len(rows), time.monotonic() - started)
         return rows
@@ -940,6 +945,7 @@ def prepare_update_text(preview, language, *, procedure=False):
                       "Invalid maintenance length": "line_count",
                       "Invalid maintenance vocabulary": "vocabulary",
                       "Invalid maintenance text": "invalid_text",
+                      "Invalid component labels": "component_labels",
                       "Startup contains Markdown": "markdown",
                       "Startup contains non-printable characters": "control_characters",
                       "Startup contains function-key instructions": "key_instructions",
@@ -1290,7 +1296,13 @@ def run_session(t):
         wait_connection(t)
     t.clear()
     t.center(UI["fr"]["boot_wait"])
-    result = show_boot(t, "fr", prepare_boot("fr"))
+    update_available = deployment.available(Path(__file__).resolve().parents[1])
+    boot_lines = prepare_boot("fr")
+    if update_available:
+        boot_lines = list(boot_lines)
+        # Keep the continuation prompt last and the countdown unchanged.
+        boot_lines[-1:-1] = ["MISES A JOUR DISPONIBLES - MAJ", ""]
+    result = show_boot(t, "fr", boot_lines)
     if result == 'guide':
         show_guide(t, "fr")
 

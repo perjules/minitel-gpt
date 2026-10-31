@@ -20,11 +20,26 @@ ENVOI. Commands are case-insensitive; MISE À JOUR is accepted too. They work
 locally before ordinary chat, welcome, calculator and integration routing.
 
 The terminal checks the installed update branch and retrieves up to twenty pending
-change subjects. A single call to the configured general text provider translates
-these into an absurd France Télécom maintenance dossier in the Minitel's voice.
-Git terminology stays off the screen. If no revisions are available, it stops
+commit subjects with their IDs. Python displays the **original subjects**, without
+rewriting or summarizing them, under fictional mainframe component labels in place
+of the IDs. A small call to the configured general text provider supplies only a
+JSON array of component names; Python keeps control of the actual messages. The
+France Télécom connection introduction is local text. If label generation fails,
+numbered cabinet labels still accompany the original messages. More than twenty
+pending revisions are explicitly indicated; the displayed titles are not clipped
+to the old 1600-character summary budget. Git words within an original subject
+remain visible because the owner requested the real wording. If no revisions are available, it stops
 without asking to update. Failed verification is reported as unavailable, never
 as “up to date”. No private profile or integration data enters this call.
+
+On first startup (after SOMMAIRE), one separate Git-only check fetches the installed
+branch and tests for pending fast-forward changes. Fetch has a three-second limit;
+each local Git check has a one-second limit. A known update appends **MISES A JOUR
+DISPONIBLES - MAJ** before the boot continuation prompt. No count, subjects or
+extra model call enter this notice. Missing installation state, unavailable network,
+wrong branch or divergent history leaves availability unknown and adds no notice;
+it never claims the appliance is current. There is no continuous polling, and the
+check finishes before the existing thirty-second continuation timer begins.
 
 Python then asks **Mettre a jour le mainframe ? OUI/NON**. Only OUI or YES followed
 by ENVOI authorizes the operation. NON, NO, ANNULER, CANCEL or inactivity cancels;
@@ -69,15 +84,19 @@ the final ready status.
 
 ## Contracts and limits
 
-- The LLM writes inert display text only. It receives bounded change subjects,
-  not branch names, hashes, usernames, histories, memories or account credentials.
+- The LLM writes inert display text only. The label call receives the first 200
+  characters of each displayed subject; the procedure receives the bounded change
+  summary. Neither receives separate branch fields, hashes, usernames, histories,
+  memories or account credentials. Original subjects may themselves mention a
+  branch; they are untrusted data and never executed.
   Requests use the configured general Mistral or Claude model. Linkup is a search
   provider and is never called for theatre.
-- The announcement keeps the boot generator's eight-second/700-token budget.
+- The component-label call keeps the eight-second/700-token budget.
   The longer procedure gets twenty seconds and 1800 tokens for 40–60 lines, with
   thirty seconds of interruptible local waiting. Both require a complete response.
-  Common headings, list markers, emphasis and a surrounding plain-text code fence
-  are converted to plain text before validation. Missing keys, API errors,
+  Labels require a matching number of short printable names; a JSON code fence is
+  accepted. In the procedure, common headings, list markers, emphasis and a
+  surrounding plain-text code fence are converted to plain text before validation. Missing keys, API errors,
   truncated output, terminal controls, remaining code fences, excessive text,
   questions or Git jargon use static themed text. No retries or paid calls during
   playback.

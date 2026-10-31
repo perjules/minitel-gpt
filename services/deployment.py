@@ -40,11 +40,39 @@ def check_update(run, branch, *, subjects_only=False):
     rc, behind, _ = run("rev-list", "--count", f"HEAD..origin/{branch}")
     if rc or not behind.isdigit():
         return {"ok": False, "msg": "Comparaison des versions indisponible ; réessayer la vérification."}
-    rc, changes, _ = run("log", "-20", "--format=%s" if subjects_only else "--format=%h  %s",
+    rc, changes, _ = run("log", "-20", "--format=%H%x00%s" if subjects_only else "--format=%h  %s",
                          f"HEAD..origin/{branch}")
     if rc:
         return {"ok": False, "msg": "Liste des mises à jour indisponible ; réessayer la vérification."}
+    if subjects_only:
+        commits = []
+        for line in changes.splitlines():
+            identifier, separator, subject = line.partition("\0")
+            if not separator or not re.fullmatch(r"[0-9a-f]{40}", identifier):
+                return {"ok": False, "msg": "Liste des mises à jour illisible."}
+            commits.append({"id": identifier, "subject": subject})
+        if len(commits) != min(int(behind), 20):
+            return {"ok": False, "msg": "La liste a changé ; réessayez la vérification."}
+        return {"ok": True, "behind": int(behind), "commits": commits,
+                "log": "\n".join(c["subject"] for c in commits)[:1600]}
     return {"ok": True, "behind": int(behind), "log": changes[:1600]}
+
+
+def available(project, runtime=RUNTIME_STATE):
+    """One bounded startup probe. None means unknown, never 'up to date'."""
+    branch = status(runtime).get("branch")
+    if not isinstance(branch, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", branch):
+        return None
+    rc, current, _ = git(project, "branch", "--show-current", timeout=1)
+    if rc or current != branch:
+        return None
+    if git(project, "fetch", "origin", branch, timeout=3)[0]:
+        return None
+    target = f"origin/{branch}"
+    if git(project, "merge-base", "--is-ancestor", "HEAD", target, timeout=1)[0]:
+        return None
+    rc, count, _ = git(project, "rev-list", "--count", f"HEAD..{target}", timeout=1)
+    return int(count) > 0 if not rc and count.isdigit() else None
 
 
 def status(path=DEPLOYMENT_STATUS):
