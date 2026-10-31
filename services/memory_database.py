@@ -5,7 +5,7 @@ import json
 import os
 import sqlite3
 import tempfile
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 
 try:
     from . import persistent_memory as memory
@@ -14,7 +14,34 @@ except ImportError:
     import persistent_memory as memory
     from gmail_auth import GmailError
 
-SQL_MEMORY_SCHEMA = 1
+SQL_MEMORY_SCHEMA = 2
+
+
+def backup_before_sharing(store):
+    """Preserve the pre-v2 database before the additive visibility migration."""
+    destination = store.root / "users.before-profile-sharing.sqlite3"
+    if destination.is_symlink() or (destination.exists() and not destination.is_file()):
+        raise memory.MemoryProblem("Sauvegarde SQL invalide; migration du partage refusée.")
+    if destination.exists():
+        return
+    fd, temporary = tempfile.mkstemp(prefix=".before-profile-sharing-", dir=store.root)
+    os.close(fd)
+    try:
+        # The writer reservation belongs to another connection; use a committed reader.
+        with (closing(sqlite3.connect((store.root / "users.sqlite3").as_uri() + "?mode=ro", uri=True)) as source,
+              closing(sqlite3.connect(temporary)) as target):
+            source.backup(target)
+        with open(temporary, "rb") as stream:
+            os.fsync(stream.fileno())
+        os.replace(temporary, destination)
+        descriptor = os.open(store.root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 @contextmanager
@@ -42,15 +69,19 @@ def connection(store):
  id TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL, text TEXT NOT NULL,
  status TEXT NOT NULL, updated TEXT NOT NULL, origin TEXT NOT NULL,
  source TEXT NOT NULL DEFAULT '[]', embedding BLOB, embedding_model TEXT,
- embedding_hash TEXT, PRIMARY KEY(user_id,id))""",
+ embedding_hash TEXT, shared_hash TEXT, PRIMARY KEY(user_id,id))""",
                     """CREATE TABLE memory_events(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL
  REFERENCES users(id), session_id TEXT NOT NULL, text TEXT NOT NULL, created TEXT NOT NULL,
  barrier INTEGER NOT NULL)""",
                     "CREATE INDEX memory_events_owner ON memory_events(user_id,id)",
-                    "INSERT INTO memory_schema VALUES(1)",
+                    "INSERT INTO memory_schema VALUES(2)",
                 )
                 for statement in statements:
                     db.execute(statement)
+            elif version[0] == 1:
+                backup_before_sharing(store)
+                db.execute("ALTER TABLE memory_items ADD COLUMN shared_hash TEXT")
+                db.execute("UPDATE memory_schema SET version=2")
             elif version[0] != SQL_MEMORY_SCHEMA:
                 raise memory.MemoryProblem(
                     "Version de mémoire SQL non prise en charge."
@@ -72,6 +103,11 @@ def embedding_text(item):
 
 def fingerprint(item):
     return hashlib.sha256(embedding_text(item).encode()).hexdigest()
+
+
+def is_shared(item, user_id):
+    return (user_id != 1 and item["kind"] == "fact" and item["status"] != "done"
+            and item.get("shared_hash") is not None and item["shared_hash"] == fingerprint(item))
 
 
 def put_items(db, user_id, items):
@@ -110,12 +146,12 @@ def put_items(db, user_id, items):
         )
         if changed:
             db.execute(
-                "UPDATE memory_items SET embedding=NULL,embedding_model=NULL,embedding_hash=NULL WHERE user_id=? AND id=?",
+                "UPDATE memory_items SET embedding=NULL,embedding_model=NULL,embedding_hash=NULL,shared_hash=NULL WHERE user_id=? AND id=?",
                 (user_id, item["id"]),
             )
 
 
-def read_data(db, user_id):
+def read_data(db, user_id, *, sharing=True):
     state = db.execute(
         "SELECT * FROM memory_state WHERE user_id=?", (user_id,)
     ).fetchone()
@@ -123,7 +159,8 @@ def read_data(db, user_id):
     if state["language"]:
         data["language"] = state["language"]
     for row in db.execute(
-        "SELECT id,kind,title,text,status,updated,origin,source FROM memory_items WHERE user_id=? ORDER BY rowid",
+        "SELECT id,kind,title,text,status,updated,origin,source" + (",shared_hash" if sharing else "")
+        + " FROM memory_items WHERE user_id=? ORDER BY rowid",
         (user_id,),
     ):
         item = dict(row)
@@ -137,6 +174,8 @@ def read_data(db, user_id):
                 raise ValueError()
             memory.clean_text(item["title"], 160, allow_empty=True)
             memory.clean_text(item["text"])
+            item["shared"] = is_shared(item, user_id)
+            item.pop("shared_hash", None)
         except (ValueError, TypeError):
             raise memory.MemoryProblem(
                 "Souvenir SQL illisible; données conservées."
@@ -250,6 +289,13 @@ def write(store, folder, data):
                 "La mémoire a changé depuis la sélection. Reformulez la demande."
             )
         put_items(db, user["id"], data["items"])
+        if "_share" in data:
+            identifier, share = data["_share"]
+            item = next(r for r in data["items"] if r["id"] == identifier)
+            if share and (user["id"] == 1 or item["kind"] != "fact"):
+                raise memory.MemoryProblem("Seuls les faits des profils nommés peuvent être partagés.")
+            db.execute("UPDATE memory_items SET shared_hash=? WHERE user_id=? AND id=?",
+                       (fingerprint(item) if share else None, user["id"], identifier))
         db.execute(
             "UPDATE memory_state SET revision=?,language=?,barrier=barrier+1,ready=0,lease_until=0,lease_token='',retry_after=0,last_status='explicit' WHERE user_id=?",
             (data["revision"], data.get("language"), user["id"]),

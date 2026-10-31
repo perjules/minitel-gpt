@@ -65,11 +65,12 @@ def snapshot(store, db, identifier):
     tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if "memory_schema" in tables:
         version = db.execute("SELECT version FROM memory_schema").fetchone()
-        if version is None or version[0] != sql.SQL_MEMORY_SCHEMA:
+        if version is None or version[0] not in {1, sql.SQL_MEMORY_SCHEMA}:
             raise MergeProblem("Version de mémoire inconnue; fusion refusée.")
     state = (db.execute("SELECT * FROM memory_state WHERE user_id=?", (identifier,)).fetchone()
              if "memory_state" in tables else None)
-    data = sql.read_data(db, identifier) if state else store._read_legacy(folder)
+    sharing = "memory_schema" in tables and version[0] >= 2
+    data = sql.read_data(db, identifier, sharing=sharing) if state else store._read_legacy(folder)
     events = ([dict(r) for r in db.execute("SELECT * FROM memory_events WHERE user_id=? ORDER BY id", (identifier,))]
               if "memory_events" in tables else [])
     welcome = db.execute("SELECT * FROM user_onboarding WHERE user_id=?", (identifier,)).fetchone()

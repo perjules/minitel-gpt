@@ -151,9 +151,15 @@ def index_pending(store, embeddings, limit=8):
     return count
 
 
-def ordered(store, key, data, question, recent, embeddings, cache=None):
+def record_key(item):
+    return item.get("owner_id"), item["id"]
+
+
+def ordered(store, key, data, question, recent, embeddings, cache=None, *, rows=None, mentioned_owners=()):
     """Return relevance candidates, then the remaining records for explicit planners."""
     lexical = memory.ranked(data["items"], question)
+    if mentioned_owners:
+        lexical.sort(key=lambda item: item.get("owner_id") not in mentioned_owners)
     words = memory.tokens(question)
     selected = [
         item
@@ -162,21 +168,24 @@ def ordered(store, key, data, question, recent, embeddings, cache=None):
     ][:3]
     scores = []
     try:
-        with sql.connection(store) as db:
-            user = sql.owner(db, key)
-            rows = (
-                []
-                if user is None or not user["enabled"]
-                else db.execute(
-                    "SELECT * FROM memory_items WHERE user_id=? AND status!='done' AND embedding_model=? AND embedding IS NOT NULL",
-                    (user["id"], MODEL),
-                ).fetchall()
-            )
+        if rows is None:
+            with sql.connection(store) as db:
+                user = sql.owner(db, key)
+                rows = (
+                    []
+                    if user is None or not user["enabled"]
+                    else db.execute(
+                        "SELECT * FROM memory_items WHERE user_id=? AND status!='done' AND embedding_model=? AND embedding IS NOT NULL",
+                        (user["id"], MODEL),
+                    ).fetchall()
+                )
         usable = []
-        current = {item["id"]: item for item in data["items"]}
+        current = {record_key(item): item for item in data["items"]}
         for row in rows:
-            item = current.get(row["id"])
-            if item is None or row["embedding_hash"] != sql.fingerprint(item):
+            row = dict(row)
+            item = current.get(record_key(row))
+            if (item is None or row.get("embedding_model") != MODEL
+                    or row["embedding_hash"] != sql.fingerprint(item)):
                 continue
             try:
                 usable.append((item, unpack(row["embedding"])))
@@ -191,8 +200,8 @@ def ordered(store, key, data, question, recent, embeddings, cache=None):
             query = question[:2000] + (
                 "\nRecent context: " + context if context else ""
             )
-            # A single ordinary recall may search personal and household records.
-            # Reuse its query vector (including a failed attempt) across both scans.
+            # Personal, household and shared-profile scans use the same query.
+            # Reuse its vector, including a failed attempt, across all scopes.
             if cache is None:
                 cache = {}
             if query not in cache:
@@ -208,14 +217,16 @@ def ordered(store, key, data, question, recent, embeddings, cache=None):
     except memory.MemoryProblem:
         log.info("memory_recall status=local_fallback")
     selected += [
-        item for _, item in sorted(scores, key=lambda r: (-r[0], r[1]["id"]))[:6]
+        item for _, item in sorted(scores, key=lambda r: (
+            r[1].get("owner_id") not in mentioned_owners, -r[0], r[1].get("owner_id", 0), r[1]["id"]))[:6]
     ]
     selected += [
         item
         for item in lexical
         if item["status"] != "done"
-        and memory.tokens(item["title"] + " " + item["text"]) & words
+        and (item.get("owner_id") in mentioned_owners
+             or memory.tokens(item["title"] + " " + item["text"]) & words)
     ][:3]
-    unique = {item["id"]: item for item in selected}
+    unique = {record_key(item): item for item in selected}
     selected = list(unique.values())
-    return selected, selected + [item for item in lexical if item["id"] not in unique]
+    return selected, selected + [item for item in lexical if record_key(item) not in unique]

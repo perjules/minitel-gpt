@@ -25,6 +25,7 @@ Défaut MinitelGPT : apprentissage désactivé, édition uniquement ici. Les aut
 {% if p.error %}<p role=status>{{p.error}}</p>
 {% else %}
 <p>{{p.count}} éléments · {{p.bytes}} octets de texte · dernière modification : {{p.updated}}</p>
+{% if p.user_id!=1 %}<p>{{p.shared_count}} / {{p.shareable}} faits partagés avec les autres profils.</p>{% endif %}
 <p>Vecteurs actuels : {{p.indexed}} / {{p.indexable}} · énoncés en attente : {{p.pending}}.
 Apprentissage : {{'actif' if p.auto_enabled and automatic and p.enabled else 'inactif'}} · état : {{p.processing}}.</p>
 {% if p.onboarding %}<p>Premier accueil : {{p.onboarding.status}} · {{p.onboarding.turns}} échanges.
@@ -38,6 +39,21 @@ Apprentissage : {{'actif' if p.auto_enabled and automatic and p.enabled else 'in
 {% if selected.user_id==1 %}<p>Les faits et préférences cochés « Partager » sont accessibles à tous les profils.
 Les anciens éléments restent non partagés jusqu’à votre choix explicite. Utilisez des noms précis :
 « Le frère d’Alice est Bob », « Le Minitel est installé à… ». Ne saisissez que des informations destinées à tous.</p>{% endif %}
+{% if selected.user_id!=1 %}
+<p>Les faits privés restent dans ce profil. Un fait partagé est une déclaration attribuée à
+<strong>{{selected.name}} (#{{selected.user_id}})</strong>, lisible par tous les autres profils,
+y compris MinitelGPT anonyme. « User », « je » et « mon » dans son texte désignent cette personne.
+Les tiers nommés restent distincts; les citations sources ne sont pas partagées.</p>
+<form method=post action="/maintenance/memory/{{selected.user_id}}/change">
+<input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=sharing>
+<input type=hidden name=profile_revision value="{{selected.profile_revision}}">
+<input type=hidden name=memory_revision value="{{selected.data.revision}}">
+<label><input type=checkbox name=share value=yes {{'checked' if selected.shareable and selected.shared_count==selected.shareable}}> Partager tous les faits actuels</label>
+<p>{{selected.shared_count}} / {{selected.shareable}} faits partagés. Cocher puis appliquer partage les faits affichés;
+décocher puis appliquer les rend tous privés. Les futurs faits et les changements automatiques restent privés.
+Préférences, notes, listes et tâches restent privées dans cette phase.</p>
+<button>Appliquer à tous les faits</button></form>
+{% endif %}
 <details><summary>Ajouter un souvenir</summary>
 <form method=post action="/maintenance/memory/{{selected.user_id}}/change">
 <input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=add>
@@ -47,13 +63,22 @@ Les anciens éléments restent non partagés jusqu’à votre choix explicite. U
 {% if selected.user_id!=1 %}<option value=note>Note</option><option value=list>Entrée de liste</option><option value=task>Tâche</option>{% endif %}</select></label>
 <label>Titre (obligatoire pour une note ou une liste)<input name=title maxlength=160></label>
 <label>Texte<textarea name=text rows=5 maxlength=32000 required></textarea></label>
-{% if selected.user_id==1 %}<label><input type=checkbox name=publish value=yes> Partager avec tous les utilisateurs</label>{% endif %}
+{% if selected.user_id==1 %}<label><input type=checkbox name=publish value=yes> Partager avec tous les utilisateurs</label>
+{% else %}<label><input type=checkbox name=share value=yes> Partager ce nouveau fait (faits uniquement)</label>{% endif %}
 <button>Ajouter</button></form></details>
 {% for item in selected.data['items'] %}<article>
 <h3>{{item.title or item.kind}} {{'[fait]' if item.status=='done'}}</h3>
 <p>{{item.kind}} · {{item.origin}} · {{item.updated}} · <code>{{item.id}}</code></p>
 <pre>{{item.text}}</pre>
-{% if selected.user_id==1 %}<p>{{"Partagé avec tous les utilisateurs" if item.origin=='household' else "Non partagé"}}</p>{% endif %}
+{% if selected.user_id==1 %}<p>{{"Partagé avec tous les utilisateurs" if item.origin=='household' else "Non partagé"}}</p>
+{% else %}<p>{{"Fait partagé — déclaration de " ~ selected.name ~ " (#" ~ selected.user_id ~ ")" if item.shared else "Privé"}}</p>
+{% if item.kind=='fact' %}<form method=post action="/maintenance/memory/{{selected.user_id}}/change">
+<input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=sharing>
+<input type=hidden name=profile_revision value="{{selected.profile_revision}}">
+<input type=hidden name=memory_revision value="{{selected.data.revision}}">
+<input type=hidden name=identifier value="{{item.id}}">
+<label><input type=checkbox name=share value=yes {{'checked' if item.shared}}> Partager ce fait avec les autres profils</label>
+<button>Appliquer le partage</button></form>{% endif %}{% endif %}
 <details><summary>Modifier cet élément</summary>
 <form method=post action="/maintenance/memory/{{selected.user_id}}/change">
 <input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=edit>
@@ -63,7 +88,9 @@ Les anciens éléments restent non partagés jusqu’à votre choix explicite. U
 <label>Titre<input name=title value="{{item.title}}" maxlength=160></label>
 <label>Texte<textarea name=text rows=5 maxlength=32000 required>{{item.text}}</textarea></label>
 {% if selected.user_id==1 and item.kind in ['fact','preference'] %}<label><input type=checkbox name=publish value=yes {{'checked' if item.origin=='household'}}> Partager avec tous les utilisateurs</label>{% endif %}
-<p>L’enregistrement remplace le contenu et son origine par une correction administrative.</p>
+{% if selected.user_id!=1 and item.kind=='fact' %}<label><input type=checkbox name=share value=yes {{'checked' if item.shared}}> Partager ce texte corrigé après relecture</label>{% endif %}
+<p>L’enregistrement remplace le contenu et son origine par une correction administrative.
+Une correction au terminal ou par apprentissage automatique rend un texte modifié privé jusqu’à nouvelle publication.</p>
 <button>Enregistrer les modifications</button></form></details>
 <details><summary>Supprimer cet élément</summary>
 <form method=post action="/maintenance/memory/{{selected.user_id}}/change">

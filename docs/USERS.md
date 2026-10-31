@@ -48,8 +48,10 @@ uses SQLite foreign keys and short transactions, and schema version 2. It contai
 profiles, aliases, Gmail metadata, one-mailbox assignments, read/send permissions
 and PRONOTE child grants. Memory tables now hold per-user saved content, embeddings
 and bounded pending user statements; see [MEMORY.md](MEMORY.md). Their independent
-`memory_schema` version is 1; the identity/grant schema remains version 2. No OAuth
-secrets, passwords or mailbox bodies are stored by the account registry.
+`memory_schema` version is 2; the identity/grant schema remains version 2.
+The memory 1 → 2 upgrade backs up the SQL database before adding explicit fact
+publication, with existing facts private; see [PROFILE_SHARING.md](PROFILE_SHARING.md).
+No OAuth secrets, passwords or mailbox bodies are stored by the account registry.
 Connections are short-lived with a three-second lock
 wait. An invalid database is reported, not silently replaced.
 

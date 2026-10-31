@@ -26,6 +26,7 @@ For example, if #7 is the misspelled profile and #2 is the correct profile:
 Without `--apply` this is a read-only preview: names, direction, memory/pending
 counts, aliases policy and presence of source journal/drafts. It does not create
 folders/profiles, migrate JSON, modify memory or contact systemd/providers.
+Memory schemas 1 and 2 are accepted without upgrading during preview.
 Check the displayed **SOURCE SUPPRIMÉE** and **DESTINATION CONSERVÉE**.
 
 Stop both services and close any independent terminal/test console processes.
@@ -56,6 +57,9 @@ is retained in the allocator's history and cannot be reused by later creations.
   including completed items, full long text, origin, timestamps and source quotes.
   IDs stay unchanged unless already used at the destination; collisions get new
   IDs. The archive records the mapping. Existing vectors follow the same text.
+- Imported source facts become private and require fresh publication review under
+  the destination’s identity. Unchanged destination facts retain their sharing.
+  See [PROFILE_SHARING.md](PROFILE_SHARING.md).
 - Duplicates and contradictions are retained. No AI decides which version is
   correct, and nothing is silently truncated or discarded. Review/correct these
   records in the normal admin editor after restarting.

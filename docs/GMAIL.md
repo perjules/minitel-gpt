@@ -707,7 +707,8 @@ References: [Gmail list/search](https://developers.google.com/workspace/gmail/ap
 The optional startup [memory selector](MEMORY.md) also selects the separate
 plaintext conversation archive. Visible Gmail requests/results can appear there;
 mailbox caches, draft internals, OAuth credentials and API payloads are not archived.
-Relevant personal facts/preferences and explicitly published household facts can
+Relevant personal facts/preferences, explicitly published household facts and
+[shared profile facts](PROFILE_SHARING.md) attributed to their owners can
 help **recipient selection** interpret relationships for the selected user (Alice's
 brother is Bob). Notes, tasks, recent chat and archives are excluded. Context is not
 passed to the mail router or outgoing-message writer. Candidate IDs/addresses still

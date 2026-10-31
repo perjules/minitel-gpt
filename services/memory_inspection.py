@@ -66,6 +66,8 @@ def profile(store, user):
         "enabled": bool(user["enabled"]),
         "memory_key": user["memory_key"],
         "count": len(data["items"]),
+        "shareable": sum(r["kind"] == "fact" and r["status"] != "done" for r in data["items"]),
+        "shared_count": sum(r.get("shared", False) for r in data["items"]),
         "bytes": sum(len(r["text"].encode()) for r in data["items"]),
         "updated": max((r["updated"] for r in data["items"]), default="—"),
         "indexed": indexed,

@@ -222,6 +222,8 @@ La [mémoire légère](docs/MEMORY.md) ajoute un nom facultatif au démarrage :
 vide sélectionne le profil MinitelGPT, sans authentification.
 Chaque profil nommé dispose de sa propre mémoire. L’administrateur peut aussi
 publier des faits du foyer, lisibles par tous, depuis le profil MinitelGPT.
+Il peut aussi [publier des faits précis de profils nommés](docs/PROFILE_SHARING.md),
+avec attribution, individuellement ou pour tous les faits actuels d’un profil.
 Préférences, notes,
 listes et tâches se gèrent en langage naturel. Les profils nommés bénéficient
 aussi d’un apprentissage périodique et d’un rappel sémantique Mistral; les commandes

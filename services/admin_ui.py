@@ -2864,17 +2864,26 @@ def memory_admin_change(user_id):
     if action == "delete" and request.form.get("confirm") != "yes":
         abort(400, "Confirmez la suppression de cet élément.")
     try:
-        memory_administration.change(
-            inspection_store(), user_id, int(request.form.get("profile_revision", "-1")),
-            int(request.form.get("memory_revision", "-1")), action,
-            request.form.get("identifier", ""), request.form.get("kind", "fact"),
-            request.form.get("title", ""), request.form.get("text", ""),
-            publish=request.form.get("publish") == "yes")
+        store = inspection_store()
+        profile_revision = int(request.form.get("profile_revision", "-1"))
+        memory_revision = int(request.form.get("memory_revision", "-1"))
+        if action == "sharing":
+            memory_administration.share_facts(store, user_id, profile_revision, memory_revision,
+                                               request.form.get("share") == "yes",
+                                               request.form.get("identifier") or None)
+        else:
+            memory_administration.change(
+                store, user_id, profile_revision, memory_revision, action,
+                request.form.get("identifier", ""), request.form.get("kind", "fact"),
+                request.form.get("title", ""), request.form.get("text", ""),
+                publish=request.form.get("publish") == "yes",
+                share=request.form.get("share") == "yes" if user_id != 1 else None)
     except ValueError:
         abort(400, "Formulaire mémoire invalide.")
     except memory_session.memory.MemoryProblem as error:
         abort(409, str(error))
-    session["memory_message"] = "Élément supprimé." if action == "delete" else "Souvenir enregistré."
+    session["memory_message"] = ("Partage mis à jour." if action == "sharing" else
+                                 "Élément supprimé." if action == "delete" else "Souvenir enregistré.")
     return redirect(url_for("memory_admin_profile", user_id=user_id))
 
 

@@ -2,6 +2,8 @@
 
 Chaque profil nommé possède ses souvenirs personnels. Les faits du foyer sont
 partagés explicitement par l’administrateur depuis le profil réservé MinitelGPT.
+L’administrateur peut également publier des faits précis d’un profil nommé,
+attribués à leur propriétaire : voir [PROFILE_SHARING.md](PROFILE_SHARING.md).
 Un nom vide sélectionne ce profil, dont l’apprentissage **automatique** et les
 modifications au terminal sont désactivés. Les noms et alias sélectionnent une identité;
 ils ne constituent pas encore une authentification. Voir [USERS.md](USERS.md).
@@ -115,7 +117,8 @@ Les vecteurs ne remplacent jamais le texte original et ne sont pas exportés.
 
 Pour une réponse ordinaire, le programme vectorise la question et au plus deux
 courts messages récents du canal chat, recherche uniquement les souvenirs actifs
-du profil sélectionné, puis transmet leurs textes au modèle de réponse. La
+du profil sélectionné, les publications du foyer et les faits explicitement publiés
+des autres profils, puis transmet leurs textes attribués au modèle de réponse. La
 comparaison est un parcours exact des vecteurs, sans serveur/index vectoriel tiers.
 Les demandes d’embedding sont bornées à quatre secondes. Les textes vectorisés
 sont limités aux premiers 6000 caractères; les notes plus longues restent complètes
@@ -135,7 +138,7 @@ mais ne sont pas injectés dans la rédaction des mails ni les requêtes scolair
 fonctionnement de recherche isolée, sans prompt mémoire.
 
 Limites par profil conservées : 256 éléments / 1 Mio; contenu de 32000 caractères,
-titre de 160. Les réponses ordinaires reçoivent au plus environ 4000 caractères au total pour les contextes personnel/foyer,
+titre de 160. Les réponses ordinaires reçoivent au plus 4000 caractères au total pour les contextes personnel/foyer/profils publiés,
 avec extraits de 900 caractères et identité sélectionnée explicite. Le planificateur explicite reçoit un catalogue
 borné à environ 14000 caractères, avec extraits de 2000 caractères; un catalogue
 partiel ne prouve pas l’absence d’un élément. Les éléments terminés restent
@@ -150,16 +153,20 @@ services. Aucun souvenir n’est placé dans Git ou dans les cookies.
 | Élément | Contenu |
 | --- | --- |
 | `users.sqlite3` | Identités/droits existants, souvenirs et métadonnées mémoire |
-| `memory_items` | Texte, propriétaire, type, origine, citations, état, vecteur |
+| `memory_items` | Texte, propriétaire, type, origine, citations, état, vecteur, empreinte de publication |
 | `memory_state` | Révision/langue, apprentissage, barrière explicite, bail et état |
 | `memory_events` | Énoncés admissibles en attente, retirés après traitement |
-| `memory_schema` | Version du sous-schéma mémoire, actuellement 1 |
+| `memory_schema` | Version du sous-schéma mémoire, actuellement 2 |
+| `users.before-profile-sharing.sqlite3` | Sauvegarde SQL privée avant migration mémoire 1 → 2 |
 | `users/<clé-stable>/logs/*.jsonl` | Archives de conversations visibles |
 | `shared/logs/*.jsonl` | Archives du profil MinitelGPT uniquement |
 | `<profil>/memory.before-sqlite.json` | Copie intacte de l’ancien fichier importé |
 | `<profil>/memory.json` | Marqueur de migration, pas le fichier à éditer |
 
 Le sous-schéma mémoire ne change pas la version 2 du registre utilisateurs/droits.
+La migration 1 → 2 ajoute seulement `shared_hash`, après sauvegarde SQL complète;
+les anciens faits personnels restent privés. Voir [PROFILE_SHARING.md](PROFILE_SHARING.md)
+pour l’usage, les limites et le retour à une version antérieure.
 Ses futures migrations doivent vérifier leur version et préserver les données;
 une version inconnue est refusée. Les dossiers restent stables après changement
 de nom/alias. Une base ou source invalide est signalée sans remplacement silencieux.
@@ -196,7 +203,8 @@ session admin courante, l’affichage/édition des textes et l’export JSON ind
 Le bouton Verrouiller et la déconnexion ferment cet accès. Le mot de passe Linux
 n’est jamais demandé. Pages et téléchargements ne sont pas mis en cache.
 
-L’export contient les textes, langue, IDs, origines et citations; pas les vecteurs,
+L’export contient les textes, langue, IDs, origines, citations et le booléen `shared`
+des faits personnels; pas l’empreinte interne, les vecteurs,
 journaux, credentials ou droits Gmail/PRONOTE. Il ne constitue donc pas une sauvegarde
 complète du Pi. L’export global inclut les anciens dossiers sans identité et porte
 `complete: false` si des données illisibles n’ont pas pu être exportées. Les liens « Afficher / modifier » restent visibles quand la page est verrouillée et
@@ -229,7 +237,7 @@ le foyer ni consulter les souvenirs privés des autres. MEMOIRE GLOBALE expose
 uniquement les faits publiés; MEMOIRE reste l’inventaire personnel. Les ambiguïtés
 ou contradictions demandent clarification, sans fusion automatique des espaces.
 
-Le rappel réutilise un vecteur de question pour les deux espaces et conserve le
+Le rappel réutilise un vecteur de question pour les trois espaces et conserve le
 repli lexical. Les faits retirés/modifiés pendant la recherche sont revalidés
 avant injection. Les limites de stockage par profil restent inchangées. Les
 archives, anciens JSON, journal intime et Rose ne sont jamais publiés par ce mécanisme.
@@ -285,7 +293,7 @@ COMMIT;
 ```
 
 Pour modifier un texte, utiliser UPDATE et mettre `embedding`, `embedding_model`
-et `embedding_hash` à NULL dans la même transaction. Ne pas modifier les IDs,
+et `embedding_hash`, ainsi que `shared_hash`, à NULL dans la même transaction. Ne pas modifier les IDs,
 les alias ou les droits à cette occasion. Les vecteurs seront reconstruits au fil
 des prochains déclenchements. Les sauvegardes/journaux se nettoient séparément;
 ne pas supprimer les identités pour retirer leurs souvenirs.

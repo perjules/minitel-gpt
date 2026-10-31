@@ -1,5 +1,9 @@
 # First conversation / Faire connaissance
 
+New welcome memories are private. Editing a previously published fact retracts its
+publication until an administrator reviews it again. Other users’ shared facts are
+not supplied as onboarding evidence. See [PROFILE_SHARING.md](PROFILE_SHARING.md).
+
 Implementation sequence:
 
 1. Add durable per-profile welcome progress and a bounded Mistral dialogue engine.

@@ -47,7 +47,7 @@ def test_import_preserves_ids_language_bytes_and_is_idempotent(tmp_path):
         store._read_legacy(store.folder(alice.memory_key))
     with sql.connection(store) as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 2
-        assert db.execute("SELECT version FROM memory_schema").fetchone()[0] == 1
+        assert db.execute("SELECT version FROM memory_schema").fetchone()[0] == sql.SQL_MEMORY_SCHEMA
         assert db.execute("SELECT count(*) FROM memory_items").fetchone()[0] == 1
 
 

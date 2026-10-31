@@ -182,3 +182,14 @@ Le profil MinitelGPT contient aussi la mémoire du foyer : seuls les faits/préf
 cochés Partager sont lus par tous les profils. Aucun ancien élément n’est publié
 automatiquement. Gestion, limites et récupération : [MEMORY.md](MEMORY.md).
 Les exports ordinaires n’incluent toujours ni journal intime, ni Rose, ni credentials.
+
+
+Pour un profil nommé, chaque **fait** possède aussi une commande **Appliquer le
+partage**, séparée de l’édition du texte. **Partager tous les faits actuels** et
+son bouton appliquent la décision aux faits actuellement affichés; décocher puis
+appliquer retire tous les partages. Les futurs souvenirs restent privés. Une
+modification ultérieure du contenu retire le partage, sauf relecture/approbation
+explicite dans l’éditeur admin. Les faits publiés sont attribués à leur propriétaire
+et lisibles par tous, y compris le profil sans nom. Préférences, notes, listes,
+tâches et citations sources ne sont pas publiées par cette fonction.
+Usage et migration : [PROFILE_SHARING.md](PROFILE_SHARING.md).
