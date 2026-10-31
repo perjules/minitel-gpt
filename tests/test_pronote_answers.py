@@ -117,6 +117,7 @@ class LocalAnswerTests(unittest.TestCase):
             self.assertNotIn("web_search", json.dumps(payload["tools"]))
             self.assertNotIn("SECRET FULLNAME", json.dumps(payload))
             self.assertNotIn("conversation_id", payload)
+            self.assertNotIn("MF-83", payload["instructions"])
         resumed = calls[1].kwargs["json"]["inputs"]
         self.assertEqual(resumed[-2], call())
         self.assertEqual(resumed[-1]["type"], "function.result")
@@ -136,6 +137,9 @@ class LocalAnswerTests(unittest.TestCase):
         self.assertEqual(public["tools"], [{"type": "web_search"}])
         self.assertNotIn("PRIVATE", json.dumps(public))
         self.assertEqual(public["inputs"], [history[-1]])
+        self.assertNotIn("MF-83", requests[0].kwargs["json"]["instructions"])
+        self.assertTrue(public["instructions"].startswith(
+            engine.CHAT_PROMPT_FILE.read_text(encoding="utf-8").strip()))
         self.local.execute.assert_not_called()
         self.assertNotIn("private", result)
 

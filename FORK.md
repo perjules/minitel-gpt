@@ -188,7 +188,8 @@ and service restart independently of the locally stored chat personality.
 ## Planned direction
 
 - Develop and play-test the character without requiring a physical terminal.
-- Extend the new neutral Mistral factual path with separately reviewed performance, if desired.
+- Tune the ordinary Mistral chat voice through real conversations; see
+  [docs/PERSONALITY.md](docs/PERSONALITY.md).
 - Add coherent startup/recovery/shutdown diagnostics, reviewed situation-dependent
   messages and optional fictional idle scenes beyond the initial generated startup.
 - Preserve useful answers, uncertainty, technical details and honest real status.
@@ -198,10 +199,11 @@ and service restart independently of the locally stored chat personality.
   environment, and use Ruff plus proportionate integration/regression checks.
 
 These further steps are plans, not implemented features. Fictional hacking and telemetry never
-grant real permissions or establish real access. The Mistral Conversations answer path now separates neutral factual reasoning
-from preset presentation; styled factual prose and the independent idle/actor lab
-remain future integration work. Explicit Chat Completions rollback retains the
-previous single-prompt behavior.
+grant real permissions or establish real access. The Mistral Conversations answer
+path now combines a restrained public chat voice with factual and operational
+rules in the existing request. The independent idle/actor lab remains future
+integration work. Explicit Chat Completions rollback retains the previous
+single-prompt behavior.
 
 Development takes place on `develop`. Stable changes reach `main` after physical
 Minitel validation. Valuable upstream fixes and improvements will be considered
@@ -230,8 +232,9 @@ live-model review or validation on the physical Minitel.
 
 ## Hosted Mistral web search
 
-Normal Mistral answers now use `POST /v1/conversations` with neutral factual
-instructions (`config/factual_prompt.txt`), the actual date, locally owned factual
+Normal Mistral answers use `POST /v1/conversations` with the ordinary chat voice
+(`config/chat_personality.txt`), factual rules (`config/factual_prompt.txt`),
+the actual date, locally owned answer
 history, `store: false` and basic `web_search`. The configured model is retained.
 Mistral decides when useful searches run and handles them remotely; enabling the
 tool does not guarantee a search. There is no local search engine, scraper,
@@ -242,8 +245,8 @@ The terminal keeps at most ten complete factual turns and 60,000 serialized
 characters, including ordered real source metadata. Oldest pairs are dropped;
 a single oversized pair is displayed but not retained. Each request starts a new
 unstored provider conversation with this context. No conversation IDs, raw search
-results, boot text, personality prompt, waiting theater or source footers enter
-factual memory. Preset knowledge files remain user-supplied factual reference
+results, boot text, personality instructions, waiting theater or source footers enter
+answer history. Preset knowledge files remain user-supplied factual reference
 material; put fictional world-building in the personality prompt, not those files.
 Source follow-ups retain the preceding answer's ordered real references; Mistral
 may search again because previous tool execution state is not replayed.
@@ -266,8 +269,10 @@ equivalents; unsupported glyphs get visible code points instead of disappearing.
 URLs and code now wrap without tail truncation. The browser's existing preset test
 shows titles and exact full URLs, including Unicode paths, as plain text. No new
 export surface is added. The preset still supplies the logo, question/waiting
-messages and Minitel 722079V / ALCATEL MF-83 boot theater. It no longer styles or
-rewrites the neutral Mistral factual answer. Other provider adapters and generated
+messages and Minitel 722079V / ALCATEL MF-83 boot theater. Ordinary Conversations
+answers use the repository-owned chat voice, independently of the local preset;
+there is no rewriting pass. School records and outgoing messages retain their own
+rules. See [the personality guide](docs/PERSONALITY.md). Other provider adapters and generated
 startup calls retain their existing APIs; startup never receives a search tool.
 
 Installation settings in `.env` (restart the chat service after changes):
@@ -312,7 +317,7 @@ multiple final entries fail recoverably; verify this rule with a real response
 before relaxing it. Failed search `info` metadata varies by provider: recognized
 error/status fields and missing completion timestamps are treated conservatively.
 
-Mocked API and simulated UART tests cover neutral payloads, local source follow-ups,
+Mocked API and simulated UART tests cover answer payloads, local source follow-ups,
 fiction isolation, ordinary/off paths, mixed chunks, duplicate sources, malformed
 responses, preserved code/URLs, recoverable errors, deadlines, reset while blocked,
 late replies and prevention of overlapping requests. Existing startup tests remain

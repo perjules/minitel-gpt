@@ -1,4 +1,4 @@
-"""Mistral's hosted factual engine. No theatrical context; optional local school tools."""
+"""Mistral answers with a restrained public chat voice and optional school tools."""
 import json
 import logging
 import re
@@ -11,6 +11,7 @@ import requests
 
 URL = "https://api.mistral.ai/v1/conversations"
 PROMPT_FILE = Path(__file__).resolve().parent.parent / "config" / "factual_prompt.txt"
+CHAT_PROMPT_FILE = PROMPT_FILE.with_name("chat_personality.txt")
 log = logging.getLogger(__name__)
 
 
@@ -144,8 +145,11 @@ def parse_response(data, previous_references=None):
             "search": search, "usage": usage, "status": status}
 
 
-def request_payload(history, language, model, web_search=True, knowledge=""):
+def request_payload(history, language, model, web_search=True, knowledge="", *, character=True):
     instructions = PROMPT_FILE.read_text(encoding="utf-8")
+    if character:
+        instructions = (CHAT_PROMPT_FILE.read_text(encoding="utf-8")
+                        + "\n\nFACTUAL AND OPERATIONAL RULES\n" + instructions)
     instructions += f"\nCurrent date: {date.today().isoformat()}. Reply in " + (
         "English." if language == "en" else "French.")
     if not web_search:

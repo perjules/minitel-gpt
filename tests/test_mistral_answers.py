@@ -29,6 +29,7 @@ class AnswerTests(unittest.TestCase):
         with patch.object(engine.requests, "post", return_value=response) as post:
             result = engine.answer(history or [{"role": "user", "content": "Search the web now"}],
                                    "en", "test-secret", "configured-model", enabled, 12)
+        post.assert_called_once()
         return result, post.call_args
 
     def test_ordered_chunks_final_answer_and_deduplicated_references(self):
@@ -51,7 +52,7 @@ class AnswerTests(unittest.TestCase):
         for part in parts:
             self.assertIn(part, rendered)
 
-    def test_payload_store_false_model_date_no_fiction_and_source_followup(self):
+    def test_payload_character_with_factual_rules_and_unchanged_source_followup(self):
         first = engine.parse_response(fixture())
         history = [{"role": "user", "content": "Current value?"},
                    {"role": "assistant", "content": first["text"],
@@ -69,7 +70,10 @@ class AnswerTests(unittest.TestCase):
         self.assertEqual(payload["completion_args"]["max_tokens"], 700)
         self.assertIn(date.today().isoformat(), payload["instructions"])
         self.assertIn("Reply in English", payload["instructions"])
-        self.assertNotIn("MF-83", json.dumps(payload))
+        voice = engine.CHAT_PROMPT_FILE.read_text(encoding="utf-8").strip()
+        self.assertTrue(payload["instructions"].startswith(voice))
+        self.assertIn(engine.PROMPT_FILE.read_text(encoding="utf-8"), payload["instructions"])
+        self.assertNotIn(voice, json.dumps(payload["inputs"]))
         self.assertNotIn("conversation_id", payload)
         self.assertNotIn("Sources:", json.dumps(payload["inputs"]))
         self.assertNotIn("tool.execution", json.dumps(payload["inputs"]))

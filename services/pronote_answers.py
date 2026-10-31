@@ -66,7 +66,7 @@ def answer(history, language, key, model, web_search, timeout, knowledge, backen
         raise ValueError("Mistral key missing")
     deadline = time.monotonic() + timeout
     tools = backend.tools()
-    payload = engine.request_payload(history, language, model, False, knowledge)
+    payload = engine.request_payload(history, language, model, False, knowledge, character=False)
     payload["tools"] = tools
     payload["instructions"] += (
         f"\nLocal school date (Europe/Paris): {today().isoformat()}.\n"
