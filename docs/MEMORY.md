@@ -242,6 +242,15 @@ actuel des 50 messages récents); une relation ou adresse mémorisée ne crée p
 de candidat. Plusieurs Bob restent un choix à préciser. Routeur, rédaction,
 permissions d’accès et confirmation explicite d’envoi restent séparés.
 
+## Fusion exceptionnelle après une faute de nom
+
+Le script SSH [merge_users.py](../scripts/merge_users.py) propose un aperçu sans modification,
+puis une fusion hors ligne avec sauvegarde. Il déplace toute la mémoire ordinaire,
+les énoncés en attente et les conversations vers un profil existant, supprime la
+source et conserve ses noms comme alias de la destination. Les droits ne sont
+pas additionnés et les journaux chiffrés restent séparés. Aucun appel IA ni envoi
+Google n’est nécessaire. Voir USER_MERGE.md pour les commandes et la récupération.
+
 ## Nettoyage manuel et récupération
 
 Avant le premier déploiement et avant une intervention manuelle, arrêter les deux

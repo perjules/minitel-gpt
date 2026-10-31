@@ -95,6 +95,15 @@ the test console. New clear conflicting answers replace the corresponding older
 facts; unrelated memories remain. See [ONBOARDING.md](ONBOARDING.md) for the
 reset/resume distinction and handling of in-flight requests.
 
+## Merge an accidental duplicate
+
+For a misspelled username, the exceptional SSH-only [merge command](USER_MERGE.md)
+previews two existing profile IDs, then combines ordinary saved memory, pending
+learning and conversations while retiring the source. It keeps the destination's
+access rights and redirects source aliases to it. A recovery backup precedes the
+operation; app services must be stopped for --apply. Private journals/drafts are
+archived separately rather than silently combined.
+
 ## Delete a test profile
 
 In **Services → Utilisateurs et accès**, expand **Supprimer le profil et toutes
