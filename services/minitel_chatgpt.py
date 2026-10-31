@@ -1301,6 +1301,8 @@ def run_session(t):
         if mail is not None:
             mail.reset()
         if memory is not None:
+            if isinstance(getattr(memory, "welcome", None), memory_session.onboarding.Session):
+                memory.welcome.pause()
             memory.close()
         memory = None
         mail = None
@@ -1381,6 +1383,8 @@ def run_session(t):
             else:
                 question, action = read_question(t, calculator_mode=calc.mode or school_mode.mode,
                                                  navigation_mode=school_mode.grade_view)
+            if action == 'envoi' and (question or '').strip().upper() == 'SOMMAIRE':
+                action = 'sommaire'
             if action == 'guide':
                 show_guide(t, language)
                 break          # retour au sommaire après l'écran d'aide
@@ -1703,6 +1707,8 @@ def run_session(t):
         if mail is not None:
             mail.reset()
         if memory is not None:
+            if isinstance(getattr(memory, "welcome", None), memory_session.onboarding.Session):
+                memory.welcome.pause()
             memory.close()
 
 if __name__ == "__main__":

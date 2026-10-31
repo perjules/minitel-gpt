@@ -1532,9 +1532,10 @@ def test_preset_route():
                                 reset=bool(j.get("reset")) or msg.upper() == "SOMMAIRE")
         with selected.turn_lock:
             if j.get("reset") or msg.upper() == "SOMMAIRE":
+                selected.welcome.pause()
                 selected.close()
                 discard_memory(session.get("memory_session"))
-                return jsonify(ok=True, answer="Session effacée. Choisissez un nom ou laissez vide; la mémoire enregistrée est conservée.")
+                return jsonify(ok=True, answer="Session effacée; souvenirs conservés. Accueil en pause : REPRENDRE ACCUEIL permet de le poursuivre.")
             selected.private_turn = False
             selected.begin_turn()
             try:

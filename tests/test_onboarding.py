@@ -368,3 +368,58 @@ def test_actual_http_prompt_preserves_character_only_for_welcome(newcomer, monke
     assert (
         "no fictional banter" in post.call_args.kwargs["json"]["messages"][0]["content"]
     )
+
+
+@pytest.mark.parametrize('command', ["Passons à autre chose !", "Changeons de sujet",
+                                    "Parlons d’autre chose", "Let's move on"])
+def test_explicit_topic_change_cannot_be_ignored_or_memorized(newcomer, command):
+    run(newcomer, topic='interests', reply='Que dessinez-vous ?')
+    result = run(newcomer, command, topic='interests', reply='Parlez-moi encore du dessin ?')
+    sent = newcomer.model.client.complete.call_args.args[1]
+    assert sent['change_subject'] is True
+    assert sent['progress']['interests'] == 'covered'
+    assert 'dessin' not in result['display']
+    assert newcomer.welcome.state()['asked'] == 'age'
+    assert not newcomer.store.read(newcomer.key)['items']
+
+
+def test_model_can_choose_a_new_uncovered_subject_naturally(newcomer):
+    run(newcomer, topic='interests', reply='Que dessinez-vous ?')
+    result = run(newcomer, 'Passons à autre chose', topic='household',
+                 reply='D’accord. Avec qui aimez-vous passer du temps ?')
+    assert result['display'] == 'D’accord. Avec qui aimez-vous passer du temps ?'
+    assert newcomer.welcome.state()['asked'] == 'household'
+
+
+def test_move_on_finishes_instead_of_looping_when_no_topics_remain(newcomer):
+    from services import onboarding
+    run(newcomer, topic='interests', reply='Que dessinez-vous ?')
+    with newcomer.registry.connection() as db:
+        db.execute('UPDATE user_onboarding SET progress=? WHERE user_id=?',
+                   (json.dumps({topic: 'covered' for topic in onboarding.TOPICS}), newcomer.user.id))
+    result = run(newcomer, 'passons à autre chose', topic='interests', reply='Encore du dessin ?')
+    assert result['onboarding'] and newcomer.welcome.state()['status'] == 'complete'
+    assert newcomer.welcome.respond('Bonjour', 'persona') is None
+
+
+def test_ui_pause_fences_inflight_reply_and_persists_until_explicit_resume(newcomer):
+    run(newcomer)
+
+    def delayed(*args, **kwargs):
+        newcomer.welcome.pause()
+        return response(memories=[fact('10')])
+
+    newcomer.model.client.complete.side_effect = delayed
+    newcomer.welcome.respond('10', 'persona')
+    assert newcomer.welcome.state()['status'] == 'paused'
+    assert not newcomer.store.read(newcomer.key)['items']
+    assert newcomer.welcome.respond('Bonjour', 'persona') is None
+    newcomer.close()
+    again = sessions.MemorySession('Camille', root=newcomer.store.root, model=Mock())
+    try:
+        assert not again.welcome.should_greet()
+        again.model.client.complete.return_value = response()
+        again.welcome.respond('REPRENDRE ACCUEIL', 'persona')
+        assert again.welcome.state()['status'] == 'active'
+    finally:
+        again.close()

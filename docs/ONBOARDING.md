@@ -45,12 +45,24 @@ are still deferred. No new dependency, service or polling loop is introduced.
 ## Operation
 
 After boot and name/language selection, a new named profile receives a generated
-introduction before the first answer. On SOMMAIRE/LOGOUT or a later connection,
-an unfinished welcome resumes from its checklist/history without replaying the
-mainframe boot or grand first introduction. Completed/declined welcomes do not
+introduction before the first answer. SOMMAIRE (key or typed command), GUIDE,
+LOGOUT and an idle session exit pause an unfinished welcome. The next ordinary
+conversation does not automatically replay its last question. REPRENDRE ACCUEIL
+explicitly resumes the saved checklist/history without replaying the mainframe
+boot or grand first introduction. An abrupt transport interruption can still
+resume the unfinished phase on reconnection. Completed/declined welcomes do not
 restart automatically. MinitelGPT (blank name) is excluded.
 
 - `PASSER` / `SKIP` skips the current topic; natural refusals are also understood.
+- `PASSONS À AUTRE CHOSE`, `CHANGEONS DE SUJET`, `PARLONS D'AUTRE CHOSE` or
+  `LET'S MOVE ON` covers the current topic and moves to another area. These common
+  phrases are recognized locally, with case/accent/apostrophe normalization. They
+  are not personal evidence. Unlike a privacy refusal, moving on does not prohibit
+  remembering a new volunteered fact about that area later. If the model proposes
+  another question in the same/already-covered area, a short local fallback picks
+  an uncovered topic, or ends gently if none remain. Normal dialogue remains
+  model-led, with usually one or two follow-ups before another area unless the
+  user wants to continue.
 - `PLUS TARD` / `LATER` pauses, then returns to ordinary conversation.
 - `FIN ACCUEIL` / `STOP INTRO` ends the optional phase.
 - `FAISONS CONNAISSANCE` / `GET TO KNOW ME` opts an existing named profile in.
@@ -120,6 +132,12 @@ and covered/skipped topic IDs. The existing password gate protects saved facts,
 source quotes and their question context. The export includes progress metadata,
 not raw welcome history. No new top-level section or memory editor is added.
 
+To inspect what was actually saved, type **MEMOIRE**/**MEMORY** on the terminal,
+or unlock **Maintenance → Mémoire des utilisateurs** with ADMIN_PASSWORD and
+choose **Afficher les souvenirs** (or **Télécharger ce profil**). The saved items
+show their origin and supporting source quotes. This is distinct from the visible
+conversation archive: not everything discussed becomes a saved fact.
+
 `user_onboarding` is an additive table in the existing users.sqlite3. Its version
 is 1, independent of the identity/grant and memory schemas. Each profile stores
 status/revision, a small topic map, current topic and at most 16 recent user/assistant
@@ -138,10 +156,14 @@ convert or erase the underlying memory data.
 
 Offline tests use structured fake model output and real temporary SQLite files.
 The terminal integration test runs the real UART decoder and conversation loop:
-introduction -> short age answer -> SOMMAIRE/resume -> finish -> normal chat, with
+introduction -> short age answer -> SOMMAIRE -> normal chat -> explicit resume ->
+finish -> normal chat, with
 one boot and no welcome turns entering the ordinary answer history. Other cases
 cover ownership, opt-in, refusals, short-answer provenance, dialogue continuation,
 API failure, malformed output, explicit forget and late/session-close writes.
+Topic-change tests deliberately return another hobby question and verify the
+local redirect; pause tests fence an in-flight answer and cover both the browser's
+reset button and typed SOMMAIRE.
 
 On the Pi, create a fresh test username (or opt in an existing one), check the
 introduction and adaptation to a 10-year-old/student/adult, decline a subject,

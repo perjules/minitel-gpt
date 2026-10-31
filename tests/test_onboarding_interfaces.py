@@ -18,8 +18,9 @@ def welcome_enabled(monkeypatch):
     monkeypatch.setenv("MINITEL_ONBOARDING", "1")
 
 
-def test_real_terminal_introduces_before_first_answer_and_resumes_without_boot(
-    welcome_enabled, monkeypatch
+@pytest.mark.parametrize('typed_sommaire', [False, True])
+def test_real_terminal_sommaire_leaves_welcome_and_resume_is_explicit_without_boot(
+    welcome_enabled, monkeypatch, typed_sommaire
 ):
     phases = []
 
@@ -79,7 +80,10 @@ def test_real_terminal_introduces_before_first_answer_and_resumes_without_boot(
         + b"fr"
         + fn(chat.K_ENVOI)
     )
-    keys += b"10" + fn(chat.K_ENVOI) + fn(chat.K_SOMMAIRE)
+    keys += b"10" + fn(chat.K_ENVOI)
+    keys += b"SOMMAIRE" + fn(chat.K_ENVOI) if typed_sommaire else fn(chat.K_SOMMAIRE)
+    keys += b"Bonjour" + fn(chat.K_ENVOI)
+    keys += b"REPRENDRE ACCUEIL" + fn(chat.K_ENVOI)
     keys += b"FIN ACCUEIL" + fn(chat.K_ENVOI) + fn(chat.K_SOMMAIRE)
     keys += b"Bonjour" + fn(chat.K_ENVOI)
     uart = FakeSerial(keys)
@@ -92,8 +96,8 @@ def test_real_terminal_introduces_before_first_answer_and_resumes_without_boot(
         and "Reprenons tranquillement" in output
     )
     assert phases == ["first", "reply", "resume"]
-    assert boot.call_count == 1 and ordinary.call_count == 1
-    assert ordinary.call_args.args[0] == [{"role": "user", "content": "Bonjour"}]
+    assert boot.call_count == 1 and ordinary.call_count == 2
+    assert all(call.args[0] == [{"role": "user", "content": "Bonjour"}] for call in ordinary.call_args_list)
     selected = sessions.MemorySession("Camille")
     try:
         assert (
@@ -275,3 +279,29 @@ def test_admin_continues_after_intro_with_real_http_adapter_and_imperfect_memory
     assert selected.welcome.state()["status"] == "active"
     assert len(selected.store.read(selected.key)["items"]) == 1
     client.post("/logout", headers=headers)
+
+
+@pytest.mark.parametrize('reset_button', [False, True])
+def test_admin_sommaire_or_reset_leaves_welcome_until_explicit_resume(
+    console, welcome_enabled, monkeypatch, reset_button
+):
+    client, headers, _ = console
+    model = Mock()
+    model.client.complete.return_value = response()
+    monkeypatch.setattr(sessions, 'MemoryModel', lambda **kwargs: model)
+    ordinary = Mock(return_value='Conversation libre.')
+    monkeypatch.setattr(admin, 'llm_answer', ordinary)
+    base = {'preset_key': 'main', 'memory_user': 'Exit test'}
+    assert client.post('/test-preset', headers=headers, json={**base, 'welcome_start': True}).json['ok']
+    request = {**base, 'message': '' if reset_button else 'SOMMAIRE', 'reset': reset_button}
+    assert 'pause' in client.post('/test-preset', headers=headers, json=request).json['answer']
+    model.client.complete.assert_called_once()
+    result = client.post('/test-preset', headers=headers, json={**base, 'message': 'Bonjour'})
+    assert result.json['answer'] == 'Conversation libre.' and ordinary.call_count == 1
+    model.client.complete.assert_called_once()
+    with client.session_transaction() as cookie:
+        selected = admin.MEMORY_SESSIONS[cookie['memory_session']]['memory']
+    assert selected.welcome.state()['status'] == 'paused'
+    assert client.post('/test-preset', headers=headers, json={**base, 'message': 'REPRENDRE ACCUEIL'}).json['ok']
+    assert model.client.complete.call_count == 2
+    client.post('/logout', headers=headers)

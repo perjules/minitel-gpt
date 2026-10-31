@@ -35,7 +35,28 @@ SKIP = {
     "je prefere ne pas repondre",
     "rather not say",
 }
+MOVE_ON = {
+    "passons a autre chose", "parlons d'autre chose", "changeons de sujet",
+    "change de sujet", "changer de sujet", "autre chose", "un autre sujet",
+    "on passe a autre chose", "on peut changer de sujet", "passons au sujet suivant",
+    "let's move on", "move on", "change the subject", "another topic",
+    "let's talk about something else", "something else",
+}
+# A model that ignores an explicit topic change must not trap the user in a loop.
+NEXT_QUESTIONS = {
+    "age": ("Quel âge avez-vous ?", "How old are you?"),
+    "household": ("Avec qui aimez-vous passer du temps ?", "Who do you enjoy spending time with?"),
+    "daily_life": ("Qu'est-ce qui vous plaît dans vos journées ?", "What do you enjoy in your day-to-day life?"),
+    "friends": ("Qu'aimez-vous faire avec vos amis ?", "What do you like doing with your friends?"),
+    "interests": ("Qu'aimez-vous faire de votre temps libre ?", "What do you enjoy in your free time?"),
+    "preferences": ("Préférez-vous des explications courtes ou détaillées ?", "Do you prefer brief or detailed explanations?"),
+    "expectations": ("Que souhaitez-vous que nous fassions ensemble ?", "What would you like us to do together?"),
+}
 log = logging.getLogger(__name__)
+
+
+def command_text(text):
+    return " ".join(memory.normalized(text or "").replace("’", "'").strip(" .!?").split())
 
 
 def enabled():
@@ -132,6 +153,20 @@ class Session:
             self.selected.warning = str(error)
             return False
 
+    def pause(self):
+        """Leaving the UI is an atomic pause, including against an in-flight reply."""
+        selected = self.selected
+        with selected.lock:
+            if selected.closed:
+                return
+            try:
+                selected.active()
+                with memory_database.connection(selected.store) as db:
+                    db.execute("""UPDATE user_onboarding SET status='paused',revision=revision+1
+ WHERE user_id=? AND status IN ('new','active')""", (selected.user.id,))
+            except memory.MemoryProblem as error:
+                selected.warning = str(error)
+
     def control(self, state, status):
         with self.selected.lock:
             self.selected.active()
@@ -162,7 +197,7 @@ class Session:
                     )
 
     def respond(self, question, persona, language="fr", timeout=30, start=False):
-        command = memory.normalized(question or "").strip(" .!?")
+        command = command_text(question)
         requested = command in RESUME
         if not enabled():
             return None
@@ -221,9 +256,10 @@ class Session:
                 memory.normalized(question),
             )
         )
-        control = command in SKIP or private_answer
+        moving = command in MOVE_ON
+        control = command in SKIP or private_answer or moving
         if control and state["asked"]:
-            state["progress"][state["asked"]] = "skipped"
+            state["progress"][state["asked"]] = "covered" if moving else "skipped"
             self.control(state, "active")
             state = self.state()
         if private_answer:
@@ -253,6 +289,23 @@ class Session:
             plan = self.plan(
                 state, question, persona, language, snapshot, event_id, start, timeout
             )
+            if moving and isinstance(plan, dict) and plan.get("action") == "continue":
+                plan["memories"] = []
+                plan["skipped"] = []  # Changing subject is not a refusal to remember that area.
+                topic = plan.get("asked_topic")
+                if not isinstance(topic, str) or topic == state["asked"] or topic in state["progress"]:
+                    available = [t for t in TOPICS if t not in state["progress"]]
+                    next_topic = available[0] if available else None
+                    if next_topic:
+                        reply = ("D'accord. " if language != "en" else "Of course. ") + NEXT_QUESTIONS[next_topic][language == "en"]
+                    else:
+                        reply = ("Je reste à votre service. Nous pouvons converser librement."
+                                 if language != "en" else "I remain at your service. We can chat freely.")
+                    plan.update(
+                        asked_topic=next_topic, action="continue" if next_topic else "finish",
+                        reply=reply,
+                        memories=[], covered=[], skipped=[],
+                    )
             stage = "dialogue_validation"
             progress = self.validate(plan, state, question, control)
             candidates = {
@@ -413,7 +466,15 @@ class Session:
             "Respect refusals without persuasion, mark declined topics skipped and never revisit "
             "them. A global refusal pauses/finishes; no more personal question. If the user wants "
             "to expand a passion, follow their enthusiasm with a specific follow-up instead of "
-            "rushing to the next topic. Track the purpose: around 6-10 exchanges usually suffice, "
+            "rushing to the next topic. Enthusiasm is not permission to stay on that subject "
+            "forever: usually one or two relevant follow-ups suffice before another uncovered "
+            "area, unless the user explicitly wants more. A request to change subject means "
+            "leave that subject NOW, not another question or invitation to expand on it. "
+            "Do not revisit covered topics unless the user explicitly reopens them. "
+            "Mark a topic covered when ready to leave it, not merely because one fact was saved. "
+            "When change_subject is true choose an uncovered, unskipped catalogue topic, not "
+            "last_topic or the previous hobby under a new label. Do not memorize that command. "
+            "Track the purpose: around 6-10 exchanges usually suffice, "
             "but do not cut off an engaged user. Finish gently once useful context exists, without "
             "requiring all subjects; ordinary chat can continue. Unrelated requests can use action "
             "public with an empty reply to hand back to the normal assistant. Requests requiring "
@@ -458,6 +519,7 @@ class Session:
                 "topic_catalogue": TOPICS,
                 "progress": state["progress"],
                 "last_topic": state["asked"],
+                "change_subject": command_text(question) in MOVE_ON,
                 "history": state["history"],
                 "current_reply": question,
                 "current_event_id": event_id,
