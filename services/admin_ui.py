@@ -44,6 +44,7 @@ try:
         admin_service_pages,
         admin_session_pages,
         calculator,
+        christmas_list,
         config_store,
         conversation_store,
         deployment,
@@ -78,6 +79,7 @@ except ImportError:
     import admin_service_pages
     import admin_session_pages
     import calculator
+    import christmas_list
     import config_store
     import conversation_store
     import deployment
@@ -1630,6 +1632,8 @@ def test_preset_route():
                     result = {"display": "Précisez ce que vous voulez retenir ou reformulez la demande.", "memory": True}
             else:
                 result = None
+            if result is None and not j.get("welcome_start"):
+                result = christmas_list.route(selected, msg, settings=lambda: (mistral_key(), mistral_model()))
             if result is None:
                 result = (selected.welcome.respond("FAISONS CONNAISSANCE", system, language, start=True)
                       if j.get("welcome_start") else None)

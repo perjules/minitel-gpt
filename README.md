@@ -414,3 +414,9 @@ signature fixe et confirmation explicite `ENVOYER` après pagination complète.
 OAuth Desktop sur ordinateur, credentials chiffrés systemd, aucun mot de passe
 Google et aucune modification de boîte mail. Installation, enrollment et contrôles
 réels Pi/Minitel : [docs/GMAIL.md](docs/GMAIL.md).
+
+## Liste au Père Noël
+
+`NOEL` ouvre une liste publique par profil : ajouts assistés par IA ou texte exact,
+suppression et cases à cocher par numéro. JSON et Markdown locaux.
+Commandes et vérification : [docs/CHRISTMAS_LIST.md](docs/CHRISTMAS_LIST.md).

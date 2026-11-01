@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 try:  # Support both systemd's direct script and package imports in tests.
     from . import (
         calculator,
+        christmas_list,
         deployment,
         gmail_mail,
         io_limits,
@@ -42,6 +43,7 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from services import (
         calculator,
+        christmas_list,
         deployment,
         gmail_mail,
         io_limits,
@@ -570,6 +572,10 @@ def call_answer(system_prompt, history, language, options, knowledge,
     question = history[-1]["content"]
     if memory is not None and memory_session.household_command(question):
         return memory.handle(question, language, timeout)
+    if isinstance(getattr(memory, "user", None), user_services.user_registry.User):
+        christmas = christmas_list.route(memory, question, settings=lambda: (MISTRAL_KEY, MISTRAL_MODEL), timeout=timeout)
+        if christmas is not None:
+            return christmas
     if memory is not None and hasattr(memory, "begin_turn"):
         memory.begin_turn()
     if mail is not None and gmail_mail.enabled() and (gmail_mail.shortcut(question) or gmail_mail.literal_command(question)
@@ -1789,8 +1795,8 @@ def run_session(t):
                     t, answer, language,
                     reviewed=(lambda mail=mail, ticket=ticket: mail.acknowledge(ticket)) if ticket else None,
                 )
-            elif response and response.get("memory"):
-                # Memory inventories/choices accept commands on every page, including
+            elif response and (response.get("memory") or response.get("christmas")):
+                # Memory inventories and Christmas lists accept commands on every page, including
                 # the last. Reuse mail's reader instead of trapping input in SUITE-only paging.
                 queued_question, result = terminal_documents.read(t, answer, language)
             else:
