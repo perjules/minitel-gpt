@@ -67,7 +67,7 @@ def bypass(question):
     # Explicit tools/memory remain available; ordinary biographical words are not tools.
     return bool(
         re.match(
-            r"^(?:memoire|memory|liste|list|retiens|remember|oublie|forget|garde|save|corrige|remplace|supprime|retire|"
+            r"^(?:memoire|memory|liste|list|retiens|souviens|memorise|enregistre|remember|oublie|forget|garde|save|store|corrige|remplace|supprime|retire|"
             r"mail|gmail|pronote|calc|imprimer|lire|repondre|envoyer|modifier)\b|"
             r"^(?:ecris|redige|envoie|write|send|compose)\b.*\b(?:mail|email|courriel)\b",
             memory.normalized(question).strip(),

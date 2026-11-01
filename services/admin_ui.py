@@ -604,6 +604,10 @@ def llm_answer(system_prompt, user_message, knowledge="", selected=None):
     import requests
     history = [{"role": "user", "content": user_message}]
     provider = llm_provider()
+    session_context = (selected.session_instructions()
+                       if isinstance(getattr(selected, "user", None), user_services.user_registry.User) else "")
+    if session_context:
+        system_prompt += "\n\nRUNTIME SESSION:\n" + session_context
     if provider == "linkup":
         key = linkup_key()
         if not is_real_key(key):
@@ -656,7 +660,8 @@ def llm_answer(system_prompt, user_message, knowledge="", selected=None):
     if options[0] == "conversations":
         result = mistral_answers.answer(history, "fr", key, mistral_model(),
                                         options[1], options[2], knowledge,
-                                        **({"pronote": school} if school.tools() else {}))
+                                        **({"pronote": school} if school.tools() else {}),
+                                        **({"session_context": session_context} if session_context else {}))
         if selected is not None:
             selected.private_turn = bool(result.get("private"))
         return (mistral_answers.notice(result["status"], "fr")

@@ -39,6 +39,15 @@ Les commandes explicites personnelles restent prioritaires pour les profils nomm
 | LISTE courses / LIST courses | Liste nommée, sans appel IA |
 | MEMOIRE GLOBALE / MEMORY GLOBAL | Faits du foyer publiés, en lecture seule, sans appel IA |
 
+SOUVIENS-TOI, MÉMORISE et ENREGISTRE sont aussi des demandes mémoire explicites;
+elles contournent le premier accueil. Sur le profil MinitelGPT sans nom, ces
+demandes répondent **lecture seule** : la publication du foyer se gère dans
+Maintenance, jamais par une promesse de sauvegarde du modèle de conversation.
+La lecture mémoire sur le terminal utilise le lecteur de documents : **SUITE /
+RETOUR** et **Commande + ENVOI / SOMMAIRE** restent visibles, même sur une seule
+page. Une correction ou une nouvelle question peut être saisie dès la première
+page sans devoir parcourir toute la mémoire.
+
 Le langage naturel utilise toujours le modèle Mistral général pour interpréter
 les opérations explicites. Sans lui, MEMOIRE et LISTE restent disponibles; une
 opération naturelle échouée ne modifie rien. Une cible ambiguë demande de choisir;

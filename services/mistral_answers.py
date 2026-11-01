@@ -145,7 +145,7 @@ def parse_response(data, previous_references=None):
             "search": search, "usage": usage, "status": status}
 
 
-def request_payload(history, language, model, web_search=True, knowledge="", *, character=True):
+def request_payload(history, language, model, web_search=True, knowledge="", *, character=True, session_context=""):
     instructions = PROMPT_FILE.read_text(encoding="utf-8")
     if character:
         instructions = (CHAT_PROMPT_FILE.read_text(encoding="utf-8")
@@ -156,27 +156,30 @@ def request_payload(history, language, model, web_search=True, knowledge="", *, 
         instructions += "\nWeb search is disabled. Do not claim online verification."
     if knowledge:
         instructions += "\nUser-supplied reference material (not independently verified):\n" + knowledge
+    if session_context:
+        instructions += "\n\nRUNTIME SESSION — identity and capabilities, not reference material:\n" + session_context
     return {"model": model, "store": False, "stream": False,
             "instructions": instructions, "inputs": inputs(history),
             "tools": [{"type": "web_search"}] if web_search else [],
             "completion_args": {"max_tokens": 700}}
 
 
-def answer(history, language, key, model, web_search=True, timeout=60, knowledge="", pronote=None):
+def answer(history, language, key, model, web_search=True, timeout=60, knowledge="", pronote=None, *, session_context=""):
     """One complete request; no retry, stored session or endpoint fallback."""
     if pronote is not None and pronote.tools():
         try:
             from . import pronote_answers
         except ImportError:
             import pronote_answers
-        return pronote_answers.answer(history, language, key, model, web_search, timeout, knowledge, pronote)
+        return pronote_answers.answer(history, language, key, model, web_search, timeout, knowledge, pronote,
+                                      **({"session_context": session_context} if session_context else {}))
     if any(turn.get("private") for turn in history):
         try:
             from .pronote_answers import public_history
         except ImportError:
             from pronote_answers import public_history
         history = public_history(history)
-    payload = request_payload(history, language, model, web_search, knowledge)
+    payload = request_payload(history, language, model, web_search, knowledge, session_context=session_context)
     started = time.monotonic()
     status, result = "api_error", None
     try:

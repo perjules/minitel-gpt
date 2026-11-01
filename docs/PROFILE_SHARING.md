@@ -50,6 +50,16 @@ even while Charlie is speaking. Alice's `Bob works at X` is an assertion by Alic
 about Bob, not an assertion that Alice works there. Beliefs remain attributed
 claims, not independently verified truths. Ambiguities/conflicts require clarification.
 
+Ordinary model requests also receive runtime identity/capability instructions
+independently of recalled reference material, including when recall is empty. In
+the default session the speaker is an anonymous visitor; the MinitelGPT label does
+not identify that visitor as Alice or any other shared owner. Mentioning another
+person never switches the selected profile. Ordinary response generation has no
+memory write tool and must not claim a confirmed save; only local memory handling
+can acknowledge a durable explicit change. The same session instructions survive
+the PRONOTE public-question fallback and reach the browser preview and rollback
+chat providers. Linkup remains an isolated search adapter without session context.
+
 Python filters visibility before ranking. Shared facts form one foreign-owner
 pool, using the existing cosine scan and lexical fallback. Mentioned owner names
 and aliases help ranking; record identity includes the owner ID to avoid collisions

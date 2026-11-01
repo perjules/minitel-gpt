@@ -621,10 +621,15 @@ def call_answer(system_prompt, history, language, options, knowledge,
     if remembered:
         knowledge = knowledge + "\n\n" + remembered
         system_prompt += "\n\n" + remembered
+    session_context = (memory.session_instructions()
+                       if isinstance(getattr(memory, "user", None), user_services.user_registry.User) else "")
+    if session_context:
+        system_prompt += "\n\nRUNTIME SESSION:\n" + session_context
     if PROVIDER == "mistral" and api == "conversations":
         result = mistral_answers.answer(history, language, MISTRAL_KEY,
                                         MISTRAL_MODEL, web_search, timeout, knowledge,
-                                        **({"pronote": school} if school_enabled else {}))
+                                        **({"pronote": school} if school_enabled else {}),
+                                        **({"session_context": session_context} if session_context else {}))
         if memory is not None:
             memory.active()
         notice = mistral_answers.notice(result["status"], language)
@@ -1690,6 +1695,10 @@ def run_session(t):
                     t, answer, language,
                     reviewed=(lambda mail=mail, ticket=ticket: mail.acknowledge(ticket)) if ticket else None,
                 )
+            elif response and response.get("memory"):
+                # Memory inventories/choices accept commands on every page, including
+                # the last. Reuse mail's reader instead of trapping input in SUITE-only paging.
+                queued_question, result = terminal_documents.read(t, answer, language)
             else:
                 result = (show_calculator_scene(t, response["scene"], language)
                           if response and response.get("scene") else show_response(t, safe_display(answer), language))

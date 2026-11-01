@@ -49,7 +49,8 @@ def shared_request(question):
 def explicit_request(question):
     return bool(
         re.search(
-            r"memoire|liste|tache|preference|retiens|souviens|oublie|remember|forget|saved|recette",
+            r"memoire|liste|tache|preference|retiens|souviens|oublie|remember|forget|saved|recette|"
+            r"\b(?:memoriser?|enregistrer?|save|store)\b",
             memory.normalized(question),
         )
     )
@@ -303,6 +304,23 @@ class MemorySession:
         selected = profile_sharing.revalidate(self.store, self.user.id, selected)
         return memory.context({"items": selected}, query, "", retrieved=True, limit=2200, attributed=True)
 
+    def session_instructions(self):
+        """Runtime identity/capabilities, independent of whichever facts were recalled."""
+        self.active()
+        identity = "Selected user: " + json.dumps(self.username, ensure_ascii=False) + "; profile_id=" + str(self.user.id) + ". "
+        if self.user.id == 1:
+            identity += ("This is an anonymous visitor: no named person is logged in. MinitelGPT is the "
+                         "appliance's default profile label, not the visitor's personal identity. "
+                         "Its memory is read only at the terminal; additions/corrections require Maintenance. ")
+        else:
+            identity += "Only this named profile is selected; I/my in the current question refers to this speaker. "
+        return (identity + "A person named in a question or recalled fact is a subject, not a profile switch. "
+                "Shared owner_id/name identifies the fact's owner, never the active speaker unless IDs match. "
+                "Answer naturally about the person; do not call a shared owner the active profile. "
+                "This ordinary-answer call has no memory write tool. Never claim you saved, updated or forgot "
+                "anything: only a successful local memory operation confirms a durable change. "
+                "Later automatic learning is separate and is not a confirmed save by this response.")
+
     def context(self, question, *, recipient=False):
         """Bounded personal, household and attributed public-profile facts."""
         try:
@@ -380,12 +398,12 @@ class MemorySession:
         if self.pending or shared_request(question):
             return True
         if re.match(
-            r"^(?:memoire|memory|liste|list|retiens|note|garde|oublie|corrige|remplace|supprime|retire|modifie|remember|save|forget)\b",
+            r"^(?:memoire|memory|liste|list|retiens|souviens|memoriser?|enregistrer?|note|garde|oublie|corrige|remplace|supprime|retire|modifie|remember|save|store|forget)\b",
             q,
         ):
             return True
         if re.search(
-            r"\b(?:memoire|souviens|souvient|souvenir|remember|saved|notes?|listes?|taches?|preferences?)\b|sais.*sur moi|know.*about me|rappelle",
+            r"\b(?:memoire|souviens|souvient|souvenir|memoriser?|enregistrer?|remember|saved|store|notes?|listes?|taches?|preferences?)\b|sais.*sur moi|know.*about me|rappelle",
             q,
         ):
             return True

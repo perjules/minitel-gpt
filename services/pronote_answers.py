@@ -61,12 +61,13 @@ def school_record_request(question, aliases):
     )
 
 
-def answer(history, language, key, model, web_search, timeout, knowledge, backend):
+def answer(history, language, key, model, web_search, timeout, knowledge, backend, *, session_context=""):
     if not key or key == "...":
         raise ValueError("Mistral key missing")
     deadline = time.monotonic() + timeout
     tools = backend.tools()
-    payload = engine.request_payload(history, language, model, False, knowledge, character=False)
+    payload = engine.request_payload(history, language, model, False, knowledge, character=False,
+                                     session_context=session_context)
     payload["tools"] = tools
     payload["instructions"] += (
         f"\nLocal school date (Europe/Paris): {today().isoformat()}.\n"
@@ -130,7 +131,8 @@ def answer(history, language, key, model, web_search, timeout, knowledge, backen
                 is_school = school_question(history, backend.config()["children"])
                 if not is_school:
                     return engine.answer(public_history(history), language, key, model,
-                                         web_search, max(.01, deadline - time.monotonic()), knowledge)
+                                         web_search, max(.01, deadline - time.monotonic()), knowledge,
+                                         **({"session_context": session_context} if session_context else {}))
                 # No tool read: don't turn the planner's guesses into school facts.
                 result = engine.parse_response({"outputs": [{"type": "message.output", "content": (
                     "Aucune donnee PRONOTE consultee. Precisez l'enfant et la rubrique souhaitee."
