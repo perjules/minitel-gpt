@@ -12,6 +12,7 @@ global.alert = () => {};
 global.CSRF_TOKEN = "feature-test-csrf-token";
 global.PRESET = "test";
 global.DRAFT_SYSTEM = null;
+global.MEMORY_TARGET = null;
 global.performance = {now: () => 0};
 vm.runInThisContext(script + '\nglobal.preview = testPreset;');
 const tick = () => new Promise(resolve => setImmediate(resolve));

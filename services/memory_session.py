@@ -170,11 +170,11 @@ class MemoryModel:
 
 class MemorySession:
     def __init__(
-        self, username="", store=None, model=None, extra_secrets=(), root=None
+        self, username="", store=None, model=None, extra_secrets=(), root=None, *, user_id=None
     ):
         self.registry = user_registry.Registry(root or (store.root if store else None))
         try:
-            self.user = self.registry.resolve(username)
+            self.user = self.registry.get(user_id) if user_id is not None else self.registry.resolve(username)
         except GmailError:
             raise memory.MemoryProblem("Profil indisponible ou désactivé.") from None
         self.key, self.username = self.user.memory_key, self.user.display_name

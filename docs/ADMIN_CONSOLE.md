@@ -171,6 +171,19 @@ placeholders restent différés. Aucun push ni merge effectué pendant ces trava
 
 ## Éditeur mémoire et faits du foyer
 
+Le bouton **Ajouter une mémoire (IA)** ouvre une saisie en langage naturel liée au
+profil choisi, avec le même interpréteur et la même écriture que RETIENS au Minitel.
+Les précisions éventuelles et confirmations s’affichent dans cet écran; le retour
+aux souvenirs permet de vérifier le résultat. Les nouveaux souvenirs nommés restent
+privés. Pour le foyer, utiliser **Activer la mémoire du foyer** et le champ de mot
+de passe masqué avant l’ajout. Login, déverrouillage Maintenance de cinq minutes et
+CSRF restent requis; un ancien formulaire de profil renommé/supprimé est refusé.
+L’ancien formulaire reste disponible sous **saisie manuelle (sans IA)**.
+Validation hors ligne : 1116 tests et 400 sous-tests réussis, dont 13 cas pour ce
+parcours (garde admin/CSRF, profil stable, précisions, refus sans écriture, foyer et
+formulaire navigateur). Ruff, exports requirements et espaces vérifiés. Aucun
+appel fournisseur réel ni test physique du Pi n’a été effectué.
+
 Maintenance → Mémoire des utilisateurs propose un lien Afficher / modifier sur
 chaque profil, visible même verrouillé. Ressaisir ADMIN_PASSWORD déverrouille les
 contenus et leurs formulaires pendant cinq minutes. Ajouter, modifier le titre/texte

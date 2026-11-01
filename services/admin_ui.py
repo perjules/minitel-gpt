@@ -1552,7 +1552,7 @@ def test_preset_route():
     j = request.json or {}
     key = (j.get("preset_key") or "").strip()
     msg = (j.get("message") or "").strip()
-    if journal.entry(msg):
+    if journal.entry(msg) and "memory_profile" not in j:
         # No memory_entry, recorder, model or welcome workflow sees journal input.
         return jsonify(ok=True, answer="Ouvrez le journal intime dans sa console privée.", journal_url="/journal")
     if not msg and not j.get("reset") and not j.get("welcome_start"):
@@ -1566,10 +1566,20 @@ def test_preset_route():
     if kb:
         system += ("\n\nCONNAISSANCES DE REFERENCE (utilise ces informations "
                    "en priorite pour repondre) :\n" + kb)
+    bound_profile = "memory_profile" in j
+    if bound_profile:
+        if not memory_unlocked():
+            return jsonify(ok=False, error="Déverrouillez la mémoire dans Maintenance, puis revenez à l’ajout."), 403
+        if type(j.get("memory_profile")) is not int or type(j.get("memory_profile_revision")) is not int:
+            return jsonify(ok=False, error="Profil mémoire invalide. Rechargez la page."), 400
     try:
         # Pause the UI that actually saw the welcome, before retiring its session.
         # Creating a replacement first would lose its revision guard against resets.
-        selected = memory_entry(j.get("memory_user", ""))
+        if bound_profile:
+            identifier, revision = j.get("memory_profile"), j.get("memory_profile_revision")
+            selected = memory_entry(user_id=identifier, profile_revision=revision)
+        else:
+            selected = memory_entry(j.get("memory_user", ""))
         with selected.turn_lock:
             if j.get("reset") or msg.upper() == "SOMMAIRE":
                 selected.welcome.pause()
@@ -1600,9 +1610,20 @@ def test_preset_route():
                 private_question = True
             language = selected.saved_language() or "fr"
             calc = selected.calculator
-            result = (selected.welcome.respond("FAISONS CONNAISSANCE", system, language, start=True)
+            if bound_profile:
+                # The add screen uses the actual RETIENS interpreter/persistence,
+                # without welcome, calculator or integration routing.
+                if not re.match(r"^(?:retiens|remember)\b", memory_session.memory.normalized(msg)):
+                    msg = "RETIENS " + msg
+                result = selected.handle(msg, language)
+                if result.get("passthrough"):
+                    result = {"display": "Précisez ce que vous voulez retenir ou reformulez la demande.", "memory": True}
+            else:
+                result = None
+            if result is None:
+                result = (selected.welcome.respond("FAISONS CONNAISSANCE", system, language, start=True)
                       if j.get("welcome_start") else None)
-            if j.get("welcome_start"):
+            if j.get("welcome_start") and not bound_profile:
                 calc.mode = False
                 if result is None:
                     result = {"display": "Choisissez un profil nommé; l’accueil doit être activé.",
@@ -2485,8 +2506,12 @@ def discard_memory(identifier):
             item["memory"].close()
 
 
-def memory_entry(username=None, reset=False):
+def memory_entry(username=None, reset=False, *, user_id=None, profile_revision=None):
     with MEMORY_SESSIONS_LOCK:
+        if user_id is not None:
+            chosen = user_services.user_registry.Registry(read_env().get("MINITEL_MEMORY_DIR")).get(user_id)
+            if profile_revision is not None and chosen.revision != profile_revision:
+                raise memory_session.memory.MemoryProblem("Profil modifié. Rechargez la page avant d’ajouter un souvenir.")
         now = time.monotonic()
         for identifier, item in list(MEMORY_SESSIONS.items()):
             if now - item["used"] > 1200:
@@ -2504,7 +2529,9 @@ def memory_entry(username=None, reset=False):
                 discard_memory(identifier)
                 item=None
         changed = False
-        if item and username is not None and not reset:
+        if item and user_id is not None:
+            changed = item["memory"].user.id != user_id
+        elif item and username is not None and not reset:
             try:
                 changed = item["memory"].registry.resolve(username).id != item["memory"].user.id
             except gmail_auth.GmailError:
@@ -2524,13 +2551,16 @@ def memory_entry(username=None, reset=False):
                     username or "", root=read_env().get("MINITEL_MEMORY_DIR"),
                     model=memory_session.MemoryModel(
                         settings=lambda: (mistral_key(), mistral_model())),
-                    extra_secrets=private_values),
+                    extra_secrets=private_values, **({"user_id": user_id} if user_id is not None else {})),
                 "used": now,
             }
             item["memory"].calculator = calculator.Session()
             MEMORY_SESSIONS[identifier] = item
         item["used"] = now
         MEMORY_SESSIONS.move_to_end(identifier)
+        if profile_revision is not None and item["memory"].user.revision != profile_revision:
+            discard_memory(identifier)
+            raise memory_session.memory.MemoryProblem("Profil modifié. Rechargez la page avant d’ajouter un souvenir.")
         return item["memory"]
 
 
@@ -2871,6 +2901,8 @@ def memory_admin():
             session["memory_unlock_until"] = time.time() + MEMORY_GATE_SECONDS
             target = request.form.get("profile", "")
             if target.isdecimal() and len(target) < 12:
+                if request.form.get("after_add") == "yes":
+                    return redirect(url_for("memory_admin_add", user_id=int(target)))
                 return redirect(url_for("memory_admin_profile", user_id=int(target)))
             return redirect(url_for("memory_admin"))
         message, status = "Mot de passe incorrect.", 401
@@ -2881,7 +2913,7 @@ def memory_admin():
     return render_template_string(
         admin_service_pages.HEAD + admin_memory_pages.BODY,
         title="Mémoire des utilisateurs", message=message, profiles=visible, selected=None,
-        target=request.args.get("profile", ""),
+        target=request.args.get("profile", ""), next_add=request.args.get("next") == "add",
         unlocked=memory_unlocked(), automatic=memory_automation.enabled(),
         legacy=memory_inspection.unassigned(store, profiles, contents=memory_unlocked()),
         paths=memory_inspection.storage_paths(store)), status
@@ -2937,6 +2969,23 @@ def memory_admin_change(user_id):
     session["memory_message"] = ("Partage mis à jour." if action == "sharing" else
                                  "Élément supprimé." if action == "delete" else "Souvenir enregistré.")
     return redirect(url_for("memory_admin_profile", user_id=user_id))
+
+
+@app.route("/maintenance/memory/<int:user_id>/add")
+@require_login
+def memory_admin_add(user_id):
+    if not memory_unlocked():
+        return redirect(url_for("memory_admin", profile=user_id, next="add", _anchor="memory-unlock"))
+    try:
+        user = user_services.user_registry.Registry(inspection_store().root).get(user_id)
+    except gmail_auth.GmailError:
+        abort(404, "Profil absent ou désactivé.")
+    return render_template_string(
+        admin_service_pages.HEAD + admin_service_pages.CHAT_TEST + "</html>",
+        title="Ajouter une mémoire — " + user.display_name,
+        preset=load_prompts()["active"], draft=None,
+        username="" if user.id == 1 else user.display_name,
+        memory_target={"id": user.id, "revision": user.revision})
 
 
 @app.route("/maintenance/memory/export", defaults={"user_id": None})

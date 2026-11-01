@@ -258,6 +258,21 @@ complète du Pi. L’export global inclut les anciens dossiers sans identité et
 `complete: false` si des données illisibles n’ont pas pu être exportées. Les liens « Afficher / modifier » restent visibles quand la page est verrouillée et
 conduisent au formulaire de déverrouillage. Une fois déverrouillé, chaque profil
 propose **Ajouter un souvenir**, **Modifier cet élément** et **Supprimer cet élément**.
+Le bouton **Ajouter une mémoire (IA)**, sur chaque profil actif, ouvre un écran
+« À retenir » : saisir une phrase, puis **Ajouter avec l’IA**. Le serveur transmet
+la demande au même interpréteur et au même enregistrement que **RETIENS** sur le
+Minitel; aucune sélection manuelle du type/titre n’est nécessaire. Une demande
+imprécise affiche la question du modèle sans annoncer d’enregistrement; compléter
+ou reformuler la phrase, puis renvoyer. Le lien de retour ouvre les souvenirs à jour.
+Les ajouts nommés restent privés, avec l’origine `explicit`; le partage se règle
+ensuite dans l’inventaire. Pour MinitelGPT, **Activer la mémoire du foyer** ouvre le
+champ masqué d’ACTIVER MEMOIRE avant l’ajout de faits/préférences publiés.
+L’écran est lié à l’identifiant et à la révision du profil, sans résoudre un nom
+libre : un profil renommé, désactivé ou supprimé oblige à recharger, sans création
+accidentelle. Ouvrir le formulaire ne lance ni modèle ni conversation; l’envoi
+utilise l’IA et la session mémoire existantes, avec leurs validations et journaux.
+Le déverrouillage Maintenance et le CSRF restent requis à chaque envoi. L’ajout
+manuel sans IA reste dans **Ajouter un souvenir — saisie manuelle (sans IA)**.
 Les modifications portent sur le titre et le texte complets; type et état existants
 sont conservés. La suppression demande une confirmation. Un formulaire périmé
 (mémoire ou profil modifié, supprimé/recréé) est refusé : recharger avant de réessayer.

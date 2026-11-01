@@ -56,16 +56,28 @@ GMAIL = '''<section><h2>Comptes Gmail</h2><p>{{account}}</p>
 PLACEHOLDER = '''<section><h2>En construction</h2><p>Administration inactive. Aucun réglage n’est appliqué depuis cette page.</p></section>'''
 
 TEST_NAV = '''<nav><a href="/test?mode=conversation">Conversation</a> · <a href="/test?mode=gmail">Gmail</a> · <a href="/journal">Journal intime</a></nav>'''
-CHAT_TEST = r'''<p>Test de l’IA configurée. Les requêtes sont réelles et la conversation est journalisée dans la mémoire choisie.</p>
+CHAT_TEST = r'''{% if memory_target %}
+<p><a href="/maintenance/memory/{{memory_target.id}}">Retour aux souvenirs du profil</a></p>
+<p>Décrivez ce que vous voulez retenir pour <strong>{{username or 'MinitelGPT — foyer'}}</strong>.
+L’IA suit le même parcours que RETIENS au Minitel : interprétation, précision éventuelle, puis confirmation de l’enregistrement.</p>
+{% if memory_target.id==1 %}<p>Les faits et préférences du foyer seront lisibles par tous.
+Activez d’abord la mémoire avec le mot de passe admin dans le champ masqué.</p>
+<button type=button onclick="testPreset(false,false,'ACTIVER MEMOIRE')">Activer la mémoire du foyer</button>{% else %}
+<p>Les nouveaux souvenirs restent privés; le partage se règle ensuite dans l’inventaire.</p>{% endif %}
+<input id=memoryUser type=hidden value="{{username}}">
+{% else %}<p>Test de l’IA configurée. Les requêtes sont réelles et la conversation est journalisée dans la mémoire choisie.</p>
 <label>Utilisateur (vide = MinitelGPT)<input id=memoryUser maxlength=60 value="{{username}}" onchange="closeMemoryUnlock(true);++testSequence;document.getElementById('testOut').textContent='';document.getElementById('testSpin').style.display='none'"></label>
-<textarea id=testMsg rows=4 placeholder="Votre question"></textarea>
-<button type=button onclick="testPreset(false)">Envoyer</button><button type=button onclick="testPreset(false,true)">Faire connaissance / reprendre l’accueil</button><button type=button onclick="testPreset(true)">SOMMAIRE / nouvelle session</button>
+{% endif %}
+<label>{{'À retenir' if memory_target else 'Votre question'}}<textarea id=testMsg rows=4 maxlength="{{1900 if memory_target else 2000}}" placeholder="{{'Exemple : Alice aime les échecs' if memory_target else 'Votre question'}}"></textarea></label>
+<button type=button onclick="testPreset(false)">{{'Ajouter avec l’IA' if memory_target else 'Envoyer'}}</button>
+{% if not memory_target %}<button type=button onclick="testPreset(false,true)">Faire connaissance / reprendre l’accueil</button>{% endif %}<button type=button onclick="testPreset(true)">SOMMAIRE / nouvelle session</button>
 <span id=testSpin style="display:none">Consultation…</span><pre id=testOut role=status></pre>
 <form id=memoryUnlock hidden onsubmit="event.preventDefault();submitMemoryPassword()">
 <label>Mot de passe admin (saisie masquée)<input id=memoryPassword type=password autocomplete=off maxlength=2000></label>
 <button>Activer la mémoire du foyer</button><button type=button onclick="++testSequence;closeMemoryUnlock(true)">Annuler</button></form>
 <script>
 const CSRF_TOKEN={{csrf_token()|tojson}}, PRESET={{preset|tojson}}, DRAFT_SYSTEM={{draft|tojson}};
+const MEMORY_TARGET={{memory_target|default(none)|tojson}};
 let testSequence=0;
 let memoryTicket='', memoryPending=false;
 function closeMemoryUnlock(lock=false){
@@ -96,20 +108,21 @@ async function submitMemoryPassword(){
   if(sequence===testSequence){closeMemoryUnlock(true);out.textContent='Déverrouillage non confirmé. Recommencez ACTIVER MEMOIRE.';}
  }finally{password='';}
 }
-async function testPreset(reset=false,welcome=false){
- const msg=document.getElementById('testMsg').value.trim();
+async function testPreset(reset=false,welcome=false,control=null){
+ const msg=control||document.getElementById('testMsg').value.trim();
  if(!msg&&!reset&&!welcome)return;
  if(reset||memoryPending)closeMemoryUnlock(true);
  const sequence=++testSequence, spin=document.getElementById('testSpin'), out=document.getElementById('testOut');
  spin.style.display='block';out.textContent='Consultation…';
  try{
   const response=await fetch('/test-preset',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},
-   body:JSON.stringify({preset_key:PRESET,system:DRAFT_SYSTEM,message:msg,memory_user:document.getElementById('memoryUser').value,reset:reset,welcome_start:welcome})});
+   body:JSON.stringify({preset_key:PRESET,system:DRAFT_SYSTEM,message:msg,memory_user:document.getElementById('memoryUser').value,reset:reset,welcome_start:welcome,
+    ...(MEMORY_TARGET?{memory_profile:MEMORY_TARGET.id,memory_profile_revision:MEMORY_TARGET.revision}:{})})});
   const data=await response.json();if(sequence!==testSequence)return;
   if(data.ok&&data.memory_unlock){
    memoryTicket=data.memory_unlock;memoryPending=true;
    document.getElementById('memoryUnlock').hidden=false;
-   document.getElementById('memoryPassword').focus();document.getElementById('testMsg').value='';
+   document.getElementById('memoryPassword').focus();if(!MEMORY_TARGET)document.getElementById('testMsg').value='';
   }
   if(data.ok&&data.journal_url){document.getElementById('testMsg').value='';location.assign(data.journal_url);return;}
   if(data.ok&&data.scene){

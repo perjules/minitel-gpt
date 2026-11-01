@@ -4,14 +4,16 @@ BODY = '''
 <p><a href="/?section=maintenance#memory">Retour à Maintenance</a></p>
 <p><a href=/users>Gérer les profils / supprimer un utilisateur et ses mémoires</a></p>
 <p>Souvenirs personnels par profil et faits du foyer partagés depuis MinitelGPT. Les noms ne sont pas une authentification.
-Les conversations et sauvegardes héritées restent séparées. Aucun appel IA depuis cette page.</p>
+Les conversations et sauvegardes héritées restent séparées. Consultation et édition manuelle sans appel IA;
+« Ajouter une mémoire (IA) » ouvre le même parcours que RETIENS.</p>
 <p>Apprentissage automatique des profils nommés : <b>{{'actif' if automatic else 'en pause'}}</b>.
-Défaut MinitelGPT : apprentissage désactivé, édition uniquement ici. Les autres profils gardent leurs commandes personnelles.</p>
+Défaut MinitelGPT : apprentissage désactivé, commandes autorisées après ACTIVER MEMOIRE. Les autres profils gardent leurs commandes personnelles.</p>
 {% if not unlocked %}
 <section id=memory-unlock><h2>Consulter / modifier / télécharger les contenus</h2>
 <p>Confirmez le mot de passe d’administration. Le mot de passe Linux n’est pas utilisé.</p>
 <form method=post action=/maintenance/memory><input type=hidden name=csrf value="{{csrf_token()}}">
 <input type=hidden name=profile value="{{target}}">
+{% if next_add %}<input type=hidden name=after_add value=yes>{% endif %}
 <input type=hidden name=action value=unlock>
 <label>ADMIN_PASSWORD<input type=password name=password autocomplete=current-password required></label>
 <button>Déverrouiller pour 5 minutes</button></form></section>
@@ -33,9 +35,11 @@ Apprentissage : {{'actif' if p.auto_enabled and automatic and p.enabled else 'in
 {% if p.retry_after %}<p>Une reprise est différée après un échec; une prochaine interaction relancera le travail.</p>{% endif %}
 {% if unlocked %}<p><a href="/maintenance/memory/{{p.user_id}}">Afficher / modifier les souvenirs</a> ·
 <a href="/maintenance/memory/export/{{p.user_id}}">Télécharger ce profil</a></p>{% else %}<p><a href="/maintenance/memory?profile={{p.user_id}}#memory-unlock">Afficher / modifier les souvenirs — déverrouiller</a></p>{% endif %}
+{% if p.enabled and not selected %}<form method=get action="/maintenance/memory/{{p.user_id}}/add"><button>Ajouter une mémoire (IA)</button></form>{% endif %}
 {% endif %}<p>Dossier historique : <code>{{p.memory_key}}</code></p></section>{% endfor %}
 {% if selected %}
 <section><h2>Souvenirs de {{selected.name}}</h2>
+{% if selected.enabled %}<form method=get action="/maintenance/memory/{{selected.user_id}}/add"><button>Ajouter une mémoire (IA)</button></form>{% endif %}
 {% if selected.user_id==1 %}<p>Les faits et préférences cochés « Partager » sont accessibles à tous les profils.
 Les anciens éléments restent non partagés jusqu’à votre choix explicite. Utilisez des noms précis :
 « Le frère d’Alice est Bob », « Le Minitel est installé à… ». Ne saisissez que des informations destinées à tous.</p>{% endif %}
@@ -54,7 +58,7 @@ décocher puis appliquer les rend tous privés. Les futurs faits et les changeme
 Préférences, notes, listes et tâches restent privées dans cette phase.</p>
 <button>Appliquer à tous les faits</button></form>
 {% endif %}
-<details><summary>Ajouter un souvenir</summary>
+<details><summary>Ajouter un souvenir — saisie manuelle (sans IA)</summary>
 <form method=post action="/maintenance/memory/{{selected.user_id}}/change">
 <input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=add>
 <input type=hidden name=profile_revision value="{{selected.profile_revision}}">
