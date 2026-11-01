@@ -204,6 +204,10 @@ def test_failures_restore_live_folders_and_keep_sql_records(pair, monkeypatch, s
     source_folder, target_folder = source.store.root / source.key, source.store.root / target.key
     before_source, before_target = files(source_folder), files(target_folder)
     if stage == "copy":
+        # Existing legacy archives are still copied; new chat is now in SQL.
+        (source_folder / "logs").mkdir(exist_ok=True)
+        (source_folder / "logs" / "legacy.jsonl").write_text("LEGACY SOURCE")
+        before_source = files(source_folder)
         original = merges.shutil.copy2
         def disk_failure(src, dst, **kwargs):
             if Path(dst).parent == target_folder / "logs":

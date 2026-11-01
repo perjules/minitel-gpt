@@ -9,6 +9,7 @@ import time
 
 try:
     from . import (
+        conversation_store,
         memory_automation,
         memory_database,
         memory_vectors,
@@ -20,6 +21,7 @@ try:
     from .gmail_auth import GmailError
     from .gmail_mail import MailModel
 except ImportError:
+    import conversation_store
     import memory_automation
     import memory_database
     import memory_vectors
@@ -170,7 +172,7 @@ class MemoryModel:
 
 class MemorySession:
     def __init__(
-        self, username="", store=None, model=None, extra_secrets=(), root=None, *, user_id=None
+        self, username="", store=None, model=None, extra_secrets=(), root=None, *, user_id=None, surface="terminal"
     ):
         self.registry = user_registry.Registry(root or (store.root if store else None))
         try:
@@ -182,6 +184,8 @@ class MemorySession:
         self.welcome = onboarding.Session(self)
         self.session_id = secrets.token_hex(12)
         self.turn_barrier = None
+        self._input_token = None
+        self._captured_text = None
         self.model = model or MemoryModel()
         self.embeddings = memory_vectors.Embeddings(lambda: self.model.client.profile()["key"])
         self.lock = threading.RLock()
@@ -197,20 +201,32 @@ class MemorySession:
         self.store = store
         try:
             self.store = store or memory.MemoryStore(root)
-            self.journal = memory.ConversationLog(
-                self.store, self.key, self.label, extra_secrets, guard=self.active
+            self.journal = conversation_store.SessionLog(
+                self.store, self.user, self.session_id, extra_secrets, guard=self.active, surface=surface
             )
-            self.journal.append("event", "Session ouverte: " + self.label, "session")
         except memory.MemoryProblem as error:
             self.journal = None
             self.warning = str(error)
         try:
             if self.store:
                 self.store.read(self.key, guard=self.active)
+                self.maintain_history()
                 memory_automation.ready(self.store, self.key, self.session_id)
                 memory_automation.kick(self.store, self.model, self.embeddings)
         except memory.MemoryProblem as error:
             self.warning = str(error)
+
+    def maintain_history(self):
+        # Archive/import trouble must not suppress an otherwise valid turn's
+        # barrier capture or stop already-pending memory work from dispatching.
+        for operation in (
+            lambda: conversation_store.import_history(self.store, self.user, self.journal.extra_secrets if self.journal else ()),
+            lambda: conversation_store.maintenance(self.store),
+        ):
+            try:
+                operation()
+            except memory.MemoryProblem as error:
+                self.warning = str(error)
 
     def active(self):
         try:
@@ -226,13 +242,13 @@ class MemorySession:
         if self.store is None:
             raise memory.MemoryProblem("Stockage mémoire indisponible.")
 
-    def close(self):
+    def close(self, reason="closed"):
         with self.lock:
             self.lock_household()
             if not self.closed:
-                self.record("event", "Session terminée", "session")
                 try:
                     if self.store:
+                        conversation_store.close(self.store, self.user.id, self.session_id, reason)
                         memory_automation.ready(self.store, self.key)
                         memory_automation.kick(self.store, self.model, self.embeddings)
                 except memory.MemoryProblem as error:
@@ -243,6 +259,7 @@ class MemorySession:
     def begin_turn(self):
         """Fence delayed ordinary answers against an explicit edit in another session."""
         with self.lock:
+            self._input_token, self._captured_text = None, None
             self.turn_barrier = -1
             try:
                 self.active()
@@ -251,10 +268,41 @@ class MemorySession:
                     self.turn_barrier = db.execute(
                         "SELECT barrier FROM memory_state WHERE user_id=?", (self.user.id,)
                     ).fetchone()[0]
+                self.maintain_history()
             except memory.MemoryProblem as error:
                 self.warning = str(error)
 
-    def record(self, role, text, channel="chat", factual=None):
+    def capture(self, text, channel="chat"):
+        """Persist accepted ordinary input before API work, after private routing.
+
+        Final recording reuses this token, so retries and successful responses do
+        not duplicate the user message. A killed/abandoned call leaves the input.
+        """
+        with self.lock:
+            if household_command(text) or self.journal is None:
+                return None
+            try:
+                self.active()
+                if self._input_token is None or self._captured_text != text:
+                    self._input_token = secrets.token_hex(12)
+                    self._captured_text = text
+                safe = memory.redact(text, self.journal.extra_secrets)
+                eligible = (channel == "chat" and bool(text.strip()) and len(text) <= 2000 and safe == text
+                            and not explicit_request(text) and not shared_request(text)
+                            and memory_automation.enabled())
+                identifier = self.journal.append("user", text, channel, request_id=self._input_token,
+                                                 barrier=self.turn_barrier, eligible=eligible)
+                if eligible:
+                    memory_automation.enqueue(self.store, self.key, self.session_id, safe,
+                                              expected_barrier=self.turn_barrier, expected_user=self.user,
+                                              message_id=identifier)
+                    memory_automation.kick(self.store, self.model, self.embeddings)
+                return identifier
+            except memory.MemoryProblem as error:
+                self.warning = str(error)
+                return None
+
+    def record(self, role, text, channel="chat", factual=None, references=()):
         with self.lock:
             if self.closed:
                 return
@@ -277,21 +325,35 @@ class MemorySession:
                         self.last_answer = safe
             elif role == "assistant":
                 self.last_answer = ""
-            if role == "user" and channel == "chat" and usable is not None:
-                try:
-                    if safe == usable and not explicit_request(safe) and not shared_request(safe):
-                        memory_automation.enqueue(self.store, self.key, self.session_id, safe,
-                                                  expected_barrier=self.turn_barrier, expected_user=self.user)
-                        memory_automation.kick(self.store, self.model, self.embeddings)
-                except memory.MemoryProblem as error:
-                    self.warning = str(error)
-            if role == "user":
+            if role == "user" and channel != "gmail":
+                self.capture(text, channel)
                 self.turn_barrier = None
-            if self.journal:
+                self._input_token, self._captured_text = None, None
+            elif self.journal:
                 try:
-                    self.journal.append(role, text, channel)
+                    self.journal.append(role, text, channel, **({"references": references} if channel != "gmail" else {}))
                 except memory.MemoryProblem as error:
                     self.warning = str(error)
+
+    def exclude_turn(self):
+        """A provider routed an apparently ordinary request into a private tool.
+
+        Remove the provisional input, never store its private answer, and fence
+        an extraction that might already have copied the provisional statement.
+        """
+        with self.lock:
+            if self._input_token is None or self.store is None:
+                return
+            try:
+                with memory_database.connection(self.store) as db:
+                    row = db.execute("""SELECT m.id FROM conversation_messages m JOIN conversation_sessions c ON c.id=m.session_id
+ WHERE c.user_id=? AND c.id=? AND m.request_id=?""", (self.user.id, self.session_id, self._input_token)).fetchone()
+                    if row:
+                        db.execute("UPDATE memory_state SET revision=revision+1,lease_token='',lease_until=0 WHERE user_id=?", (self.user.id,))
+                        db.execute("DELETE FROM conversation_messages WHERE id=?", (row[0],))
+                self._input_token, self._captured_text = None, None
+            except memory.MemoryProblem as error:
+                self.warning = str(error)
 
     def take_warning(self):
         with self.lock:
@@ -525,6 +587,8 @@ class MemorySession:
 
     def handle(self, question, language="fr", timeout=60):
         try:
+            if not household_command(question):
+                self.capture(question, "memory")
             result = self.perform(
                 question.strip(), language, time.monotonic() + timeout
             )

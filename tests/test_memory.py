@@ -8,13 +8,13 @@ from pathlib import Path
 from queue import Queue
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
-from zoneinfo import ZoneInfo
 
 import pytest
 from test_terminal_startup import EndOfInput, FakeSerial, fn, screen_text
 from web_client import csrf_client
 
 from services import admin_ui as admin
+from services import conversation_store
 from services import memory_session as sessions
 from services import minitel_chatgpt as chat
 from services import persistent_memory as memory
@@ -306,14 +306,14 @@ class MemoryTests(unittest.TestCase):
             )
         self.alice.close()
         logs = list(self.store.folder(self.alice.key).glob("logs/*.jsonl"))
-        rows = [json.loads(line) for line in logs[0].read_text().splitlines()]
-        self.assertIn(text, rows[1]["text"])
-        self.assertNotIn("dangerous", logs[0].read_text())
-        self.assertNotIn("private-example-key", logs[0].read_text())
-        stamp = datetime.fromisoformat(rows[1]["at"])
+        self.assertEqual(logs, [])
+        session, rows = conversation_store.read_session(self.store, self.alice.user.id, self.alice.session_id)
+        self.assertIn(text, rows[0]["text"])
+        self.assertNotIn("dangerous", json.dumps(rows))
+        self.assertNotIn("private-example-key", json.dumps(rows))
+        stamp = datetime.fromisoformat(rows[0]["at"])
         self.assertIsNotNone(stamp.utcoffset())
-        self.assertEqual(stamp.utcoffset(), stamp.astimezone(ZoneInfo("Europe/Paris")).utcoffset())
-        self.assertEqual(rows[-1]["role"], "event")
+        self.assertEqual(session["status"], "closed")
         self.assertEqual(self.store.read(self.alice.key)["items"], [])
 
     def test_storage_concurrent_adds_and_invalid_root(self):

@@ -133,8 +133,9 @@ sources/identifiants et écrit le résultat dans une transaction.
   déclenchent le travail. Un reste de file attend le prochain déclenchement.
 - Après échec, les énoncés restent en file et une nouvelle tentative est différée
   d’au moins 60 secondes. Une tentative interrompue peut reprendre après le bail.
-- La file est limitée à 48 énoncés par profil, 2000 caractères par énoncé. Une file
-  pleine n’accumule plus de nouveaux énoncés; son état est visible dans l’admin.
+- La file de traitement est limitée à 48 énoncés par profil, 2000 caractères par
+  énoncé. Les messages SQL admissibles supplémentaires restent en attente puis
+  remplissent les places libérées; ils suivent aussi la rétention des sessions.
 - Un lot validé est retiré de la file. Les souvenirs retenus conservent seulement
   leurs citations justificatives, dates et références de session/énoncé.
 
@@ -215,14 +216,17 @@ services. Aucun souvenir n’est placé dans Git ou dans les cookies.
 
 | Élément | Contenu |
 | --- | --- |
-| `users.sqlite3` | Identités/droits existants, souvenirs et métadonnées mémoire |
+| `users.sqlite3` | Identités/droits, souvenirs, métadonnées et sessions ordinaires |
 | `memory_items` | Texte, propriétaire, type, origine, citations, état, vecteur, empreinte de publication |
 | `memory_state` | Révision/langue, apprentissage, barrière explicite, bail et état |
-| `memory_events` | Énoncés admissibles en attente, retirés après traitement |
-| `memory_schema` | Version du sous-schéma mémoire, actuellement 2 |
+| `memory_events` | File bornée de traitement; les messages SQL gardent le reste en attente |
+| `memory_schema` | Version du sous-schéma mémoire, actuellement 3 |
 | `users.before-profile-sharing.sqlite3` | Sauvegarde SQL privée avant migration mémoire 1 → 2 |
-| `users/<clé-stable>/logs/*.jsonl` | Archives de conversations visibles |
-| `shared/logs/*.jsonl` | Archives du profil MinitelGPT uniquement |
+| `conversation_sessions` / `conversation_messages` | Historique ordinaire par utilisateur, références, état d’apprentissage |
+| `conversation_imports` / `conversation_maintenance` | Reprise des imports et rétention |
+| `users.before-sessions.sqlite3` | Sauvegarde SQL privée avant migration mémoire 2 → 3 |
+| `users/<clé-stable>/logs/*.jsonl` | Anciens historiques conservés et nouvelles archives Gmail |
+| `shared/logs/*.jsonl` | Anciennes archives du profil MinitelGPT, conservées |
 | `<profil>/memory.before-sqlite.json` | Copie intacte de l’ancien fichier importé |
 | `<profil>/memory.json` | Marqueur de migration, pas le fichier à éditer |
 
@@ -247,13 +251,18 @@ sélectionnés quittent le Pi pour les appels Mistral d’extraction, d’embedd
 réponse. Les journaux techniques de ces opérations ne contiennent pas les textes,
 clés, vecteurs ni réponses brutes des fournisseurs.
 
-Les archives visibles restent en JSONL, séparées et jamais relues automatiquement
-pour créer des souvenirs. Elles peuvent contenir les mails effectivement affichés.
-Les tours scolaires ne sont pas archivés par les parcours terminal/test web actuels;
-d’anciennes archives peuvent encore en contenir. Aucun nettoyage rétroactif n’est
-fait. Les secrets configurés/détectés sont masqués, sans garantie de reconnaître
-un secret arbitraire non déclaré. Les données privées de modes séparés ne sont
-pas exposées par la page mémoire générale.
+Les [sessions ordinaires](SESSIONS.md) sont archivées en SQL par profil. Leurs
+énoncés admissibles alimentent le même apprentissage périodique et à la fermeture,
+avec barrières et sources; les réponses de l’assistant ne sont pas des preuves.
+Rétention : 365 jours après fermeture, configurable et nettoyée par travail borné.
+Les anciens JSONL sont importés progressivement comme historique non apprenant;
+leurs originaux restent conservés. Gmail garde ses JSONL séparés. Les parcours
+PRONOTE, Rose, journal intime et saisie des mots de passe restent exclus du SQL
+ordinaire. Les secrets configurés/détectés sont masqués, sans garantie de reconnaître
+un secret arbitraire non déclaré. L’import filtre les anciens marqueurs privés,
+sans prétendre classifier parfaitement d’anciens contenus mal étiquetés.
+Les données privées de modes séparés ne sont pas exposées par la page mémoire générale.
+La consultation des sessions a sa propre page Maintenance et le même déverrouillage.
 
 ## Administration et export
 

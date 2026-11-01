@@ -3,6 +3,7 @@
 BODY = '''
 <p><a href="/?section=maintenance#memory">Retour à Maintenance</a></p>
 <p><a href=/users>Gérer les profils / supprimer un utilisateur et ses mémoires</a></p>
+<p><a href=/maintenance/sessions>Consulter les sessions de conversation</a> (même déverrouillage).</p>
 <p>Souvenirs personnels par profil et faits du foyer partagés depuis MinitelGPT. Les noms ne sont pas une authentification.
 Les conversations et sauvegardes héritées restent séparées. Consultation et édition manuelle sans appel IA;
 « Ajouter une mémoire (IA) » ouvre le même parcours que RETIENS.</p>

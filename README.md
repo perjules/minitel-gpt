@@ -228,6 +228,10 @@ Préférences, notes,
 listes et tâches se gèrent en langage naturel. Les profils nommés bénéficient
 aussi d’un apprentissage périodique et d’un rappel sémantique Mistral; les commandes
 RETIENS/OUBLIE restent prioritaires. SQLite conserve les souvenirs et leurs vecteurs.
+Les [sessions ordinaires](docs/SESSIONS.md) sont aussi archivées en SQL par profil,
+avec rétention de 365 jours après fermeture, consultation/export admin et reprise
+de l’apprentissage à la fermeture. Gmail garde ses JSONL séparés; les modes privés
+restent exclus. Les anciens historiques sont importés sans réapprentissage.
 Maintenance propose consultation, ajout, correction, suppression et exports après
 confirmation du mot de passe admin. Les faits partagés restent en lecture seule
 pour les autres profils. Sur le profil MinitelGPT, **ACTIVER MEMOIRE** demande le

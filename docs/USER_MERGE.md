@@ -84,6 +84,16 @@ is retained in the allocator's history and cannot be reused by later creations.
   are invalidated. Existing sessions must reopen. Delayed source or destination
   work cannot overwrite the merge or recreate the deleted identity.
 
+## SQL sessions
+
+Ordinary SQL sessions and messages transfer to the destination, retaining IDs and
+source links. Old live source/destination sessions become interrupted; both old
+profile revisions lose write access. Eligible pending statements cross the merge
+barrier; superseded statements stay superseded. Import checkpoints follow copied
+JSONL filenames, preventing duplicate import of already archived history. Deleting
+the source therefore cannot cascade away transferred transcripts. Session sharing
+is never implied by fact sharing. See [SESSIONS.md](SESSIONS.md).
+
 ## Files and private modes
 
 The entire source profile directory moves to:

@@ -65,7 +65,7 @@ def snapshot(store, db, identifier):
     tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if "memory_schema" in tables:
         version = db.execute("SELECT version FROM memory_schema").fetchone()
-        if version is None or version[0] not in {1, sql.SQL_MEMORY_SCHEMA}:
+        if version is None or version[0] not in {1, 2, sql.SQL_MEMORY_SCHEMA}:
             raise MergeProblem("Version de mémoire inconnue; fusion refusée.")
     state = (db.execute("SELECT * FROM memory_state WHERE user_id=?", (identifier,)).fetchone()
              if "memory_state" in tables else None)
@@ -75,6 +75,8 @@ def snapshot(store, db, identifier):
               if "memory_events" in tables else [])
     welcome = db.execute("SELECT * FROM user_onboarding WHERE user_id=?", (identifier,)).fetchone()
     return {"user": dict(user), "memory": data, "pending": events,
+            "sessions": (db.execute("SELECT count(*) FROM conversation_sessions WHERE user_id=?", (identifier,)).fetchone()[0]
+                         if "conversation_sessions" in tables else 0),
             "welcome": dict(welcome) if welcome else None,
             "aliases": [r[0] for r in db.execute("SELECT alias FROM user_aliases WHERE user_id=? ORDER BY alias", (identifier,))],
             "journal_archived": (folder / "journal.md.enc").exists(),
@@ -178,6 +180,13 @@ def merge_rows(db, source, target, data, mapping):
         db.execute("""UPDATE memory_items SET embedding=?,embedding_model=?,embedding_hash=?
  WHERE user_id=? AND id=?""", (row["embedding"], row["embedding_model"], row["embedding_hash"], target_id, mapping[row["id"]]))
     barrier = db.execute("SELECT barrier FROM memory_state WHERE user_id=?", (target_id,)).fetchone()[0] + 1
+    db.execute("""UPDATE conversation_messages SET learning='superseded' WHERE learning='pending'
+ AND session_id IN (SELECT c.id FROM conversation_sessions c JOIN memory_state s ON s.user_id=c.user_id
+ WHERE c.user_id IN (?,?) AND conversation_messages.barrier!=s.barrier)""", (source_id, target_id))
+    db.execute("""UPDATE conversation_messages SET barrier=? WHERE learning='pending'
+ AND session_id IN (SELECT id FROM conversation_sessions WHERE user_id IN (?,?))""", (barrier, source_id, target_id))
+    db.execute("""DELETE FROM memory_events WHERE user_id IN (?,?)
+ AND message_id IN (SELECT id FROM conversation_messages WHERE learning!='pending')""", (source_id, target_id))
     db.execute("UPDATE memory_events SET user_id=?,barrier=? WHERE user_id IN (?,?)", (target_id, barrier, source_id, target_id))
     db.execute("""UPDATE memory_state SET revision=?,language=?,barrier=?,ready=?,
  lease_until=0,lease_token='',retry_after=0,last_status='merged' WHERE user_id=?""",
@@ -187,6 +196,17 @@ def merge_rows(db, source, target, data, mapping):
     db.execute("""UPDATE user_onboarding SET revision=revision+1,barrier=?,history='[]',asked=''
  WHERE user_id=?""", (barrier, target_id))
     db.execute("UPDATE users SET revision=revision+1 WHERE id=?", (target_id,))
+    # Transfer ownership before deleting the source (FK cascades), retire old
+    # live sessions and keep original IDs so memory citations remain meaningful.
+    db.execute("""UPDATE conversation_sessions SET user_id=?,profile_revision=(SELECT revision FROM users WHERE id=?),
+ closed_at=CASE WHEN status='open' THEN last_activity ELSE closed_at END,
+ close_reason=CASE WHEN status='open' THEN 'profile_merge' ELSE close_reason END,
+ status=CASE WHEN status='open' THEN 'interrupted' ELSE status END WHERE user_id IN (?,?)""",
+               (target_id, target_id, source_id, target_id))
+    for entry in db.execute("SELECT * FROM conversation_imports WHERE user_id=?", (source_id,)).fetchall():
+        db.execute("""INSERT INTO conversation_imports(user_id,source,session_id,offset,status,size,mtime,errors,skip_private)
+ VALUES(?,?,?,?,?,?,?,?,?)""", (target_id, f"merged-{source_id}-" + entry["source"], entry["session_id"],
+                             entry["offset"], entry["status"], entry["size"], entry["mtime"], entry["errors"], entry["skip_private"]))
     # Old duplicate profiles could own this alias; never move the reserved
     # default selector onto another named profile during a repair.
     db.execute("DELETE FROM user_aliases WHERE user_id=? AND alias='minitelgpt'", (source_id,))

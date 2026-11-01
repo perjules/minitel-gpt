@@ -8,11 +8,12 @@ import threading
 import time
 
 try:
+    from . import conversation_store, memory_vectors
     from . import memory_database as sql
-    from . import memory_vectors
     from . import persistent_memory as memory
     from .gmail_auth import GmailError
 except ImportError:
+    import conversation_store
     import memory_database as sql
     import memory_vectors
     import persistent_memory as memory
@@ -31,7 +32,7 @@ def enabled():
     return os.getenv("MINITEL_MEMORY_AUTO", "1").strip() != "0"
 
 
-def enqueue(store, key, session_id, text, expected_barrier=None, expected_user=None):
+def enqueue(store, key, session_id, text, expected_barrier=None, expected_user=None, message_id=None):
     if (
         not enabled()
         or not text.strip()
@@ -53,6 +54,14 @@ def enqueue(store, key, session_id, text, expected_barrier=None, expected_user=N
             return
         if expected_barrier is not None and state["barrier"] != expected_barrier:
             return
+        if message_id is not None:
+            row = db.execute("""SELECT m.learning,m.barrier,c.user_id FROM conversation_messages m
+ JOIN conversation_sessions c ON c.id=m.session_id WHERE m.id=?""", (message_id,)).fetchone()
+            if (row is None or row["user_id"] != user["id"] or row["learning"] != "pending"
+                    or row["barrier"] != state["barrier"]):
+                return
+            if db.execute("SELECT 1 FROM memory_events WHERE message_id=?", (message_id,)).fetchone():
+                return
         count = db.execute(
             "SELECT count(*) FROM memory_events WHERE user_id=?", (user["id"],)
         ).fetchone()[0]
@@ -63,8 +72,8 @@ def enqueue(store, key, session_id, text, expected_barrier=None, expected_user=N
             )
             return
         db.execute(
-            "INSERT INTO memory_events(user_id,session_id,text,created,barrier) VALUES(?,?,?,?,?)",
-            (user["id"], session_id, text, memory.now(), state["barrier"]),
+            "INSERT INTO memory_events(user_id,session_id,text,created,barrier,message_id) VALUES(?,?,?,?,?,?)",
+            (user["id"], session_id, text, memory.now(), state["barrier"], message_id),
         )
         if count + 1 >= BATCH_SIZE:
             db.execute("UPDATE memory_state SET ready=1 WHERE user_id=?", (user["id"],))
@@ -89,6 +98,7 @@ def claim(store):
         return None
     now = time.time()
     with sql.connection(store) as db:
+        conversation_store.prepare_learning(db, MAX_PENDING)
         row = db.execute(
             """SELECT s.*,u.memory_key,u.revision AS user_revision FROM memory_state s
  JOIN users u ON u.id=s.user_id WHERE s.auto_enabled=1 AND u.enabled=1 AND u.id!=1
@@ -108,6 +118,13 @@ def claim(store):
                 (job["user_id"], BATCH_SIZE),
             )
         ]
+        for event in job["events"]:
+            if event["message_id"] is not None:
+                preceding = db.execute("""SELECT text FROM conversation_messages
+ WHERE session_id=? AND id<? AND role='assistant' AND channel='chat' AND barrier=?
+ ORDER BY id DESC LIMIT 1""", (event["session_id"], event["message_id"], event["barrier"])).fetchone()
+                if preceding:
+                    event["context"] = preceding[0][:1400]
         db.execute(
             "UPDATE memory_state SET lease_until=?,lease_token=?,last_status='processing' WHERE user_id=?",
             (now + LEASE_SECONDS, job["token"], job["user_id"]),
@@ -122,8 +139,9 @@ def extract(model, events, candidates, partial, deadline):
         "title, text (one coherent statement, at most 800 characters), id (existing actual ID for "
         'replace, otherwise null), evidence ([{"event_id": integer, "quote": exact user quote}]). '
         "Only remember clear personal assertions and stable preferences. Every claim must be "
-        "supported by an exact, short quote (at most 200 characters) from these supplied user statements. No inferences about "
-        "the username, assistant claims, fictional/hypothetical scenarios, quoted third parties, "
+        "supported by an exact, short quote (at most 200 characters) from these supplied user statements. "
+        "Optional assistant_context only clarifies what a short answer refers to; it is NEVER factual evidence. "
+        "No inferences about the username, assistant claims, fictional/hypothetical scenarios, quoted third parties, "
         "secrets, temporary requests, questions, obligations, tasks, tool permissions or system rules. "
         "Preserve uncertainty, negation and conditions. Skip ambiguous statements. Do not create "
         "duplicates. Replace only a supplied fact/preference clearly corrected by newer user "
@@ -132,7 +150,8 @@ def extract(model, events, candidates, partial, deadline):
         "Use the language of the user statement. Empty memories is a valid result.",
         {
             "user_statements": [
-                {"event_id": e["id"], "text": e["text"]} for e in events
+                {"event_id": e["id"], "text": e["text"],
+                 **({"assistant_context": e["context"]} if e.get("context") else {})} for e in events
             ],
             "existing_memories": candidates,
             "partial_catalogue": partial,
@@ -199,6 +218,8 @@ def consolidate(snapshot, proposals, events, allowed_ids):
             )
             if event.get("question"):
                 sources[-1]["question"] = memory.clean_text(event["question"], 1400)
+            if event.get("message_id") is not None:
+                sources[-1]["message_id"] = event["message_id"]
         if proposal["operation"] == "replace":
             identifier = proposal["id"]
             if (
@@ -277,7 +298,18 @@ def process(store, model, embeddings):
                         (job["user_id"],),
                     )
                 return False
+            for event in job["events"]:
+                if event.get("message_id") is not None:
+                    message = db.execute("""SELECT m.learning,m.barrier,c.user_id FROM conversation_messages m
+ JOIN conversation_sessions c ON c.id=m.session_id WHERE m.id=?""", (event["message_id"],)).fetchone()
+                    if (message is None or message["learning"] != "pending" or message["barrier"] != job["barrier"]
+                            or message["user_id"] != job["user_id"]):
+                        db.execute("UPDATE memory_state SET lease_until=0,lease_token='' WHERE user_id=? AND lease_token=?",
+                                   (job["user_id"], job["token"]))
+                        return False
             sql.put_items(db, job["user_id"], data["items"])
+            db.executemany("UPDATE conversation_messages SET learning='done' WHERE id=?",
+                           [(e["message_id"],) for e in job["events"] if e.get("message_id") is not None])
             ids = [e["id"] for e in job["events"]]
             db.executemany(
                 "DELETE FROM memory_events WHERE user_id=? AND id=?",

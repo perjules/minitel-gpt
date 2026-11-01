@@ -276,6 +276,7 @@ class Session:
         if private_answer:
             # Do not send the declined personal detail to the dialogue model.
             question = "PASSER" if language != "en" else "SKIP"
+        message_id = self.selected.capture(question, "onboarding") if question and not private_answer else None
         snapshot = self.selected.store.read(self.selected.key, guard=self.selected.active)
         event_id = state["turns"] + 1
         previous_question = next(
@@ -292,6 +293,7 @@ class Session:
                     "question": previous_question,
                     "session_id": self.selected.session_id,
                     "created": memory.now(),
+                    **({"message_id": message_id} if message_id is not None else {}),
                 }
             ]
         )

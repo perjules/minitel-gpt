@@ -320,8 +320,8 @@ class ContextTests(unittest.TestCase):
         self.assertIn("indéfini", self.selected.last_answer)
         self.assertNotIn("K7", self.selected.last_answer)
         self.assertNotIn("Alcatel", str(self.selected.recent))
-        path = next((Path(self.temp.name) / self.selected.key / "logs").glob("*.jsonl"))
-        records = [json.loads(row) for row in path.read_text().splitlines()]
+        from services import conversation_store
+        _, records = conversation_store.read_session(self.selected.store, self.selected.user.id, self.selected.session_id)
         self.assertEqual(records[-1]["channel"], "theatre")
         self.assertIn("K7", records[-1]["text"])
         self.selected.model.plan.return_value = {

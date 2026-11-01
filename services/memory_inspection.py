@@ -33,7 +33,9 @@ def profile(store, user):
             if row["status"] != "done"
         )
         pending = db.execute(
-            "SELECT count(*) FROM memory_events WHERE user_id=?", (user["id"],)
+            """SELECT (SELECT count(*) FROM memory_events WHERE user_id=? AND message_id IS NULL)+
+ (SELECT count(*) FROM conversation_messages m JOIN conversation_sessions c ON c.id=m.session_id
+ WHERE c.user_id=? AND m.learning='pending' AND m.barrier=?)""", (user["id"], user["id"], state["barrier"])
         ).fetchone()[0]
         onboarding = db.execute(
             "SELECT version,status,turns,progress FROM user_onboarding WHERE user_id=?",

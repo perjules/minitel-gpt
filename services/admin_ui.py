@@ -42,8 +42,10 @@ try:
     from . import (
         admin_memory_pages,
         admin_service_pages,
+        admin_session_pages,
         calculator,
         config_store,
+        conversation_store,
         deployment,
         gmail_auth,
         gmail_client,
@@ -74,8 +76,10 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     import admin_memory_pages
     import admin_service_pages
+    import admin_session_pages
     import calculator
     import config_store
+    import conversation_store
     import deployment
     import gmail_auth
     import gmail_client
@@ -272,7 +276,7 @@ def no_cache(response):
     if not request.path.startswith("/assets/"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
-    if request.path.startswith(("/services/gmail", "/maintenance/memory")):
+    if request.path.startswith(("/services/gmail", "/maintenance/memory", "/maintenance/sessions")):
         response.headers["Referrer-Policy"] = "no-referrer"
     return response
 
@@ -665,6 +669,9 @@ def llm_answer(system_prompt, user_message, knowledge="", selected=None):
                                         **({"session_context": session_context} if session_context else {}))
         if selected is not None:
             selected.private_turn = bool(result.get("private"))
+            selected.answer_references = result.get("references", ())
+            if selected.private_turn and isinstance(getattr(selected, "user", None), user_services.user_registry.User):
+                selected.exclude_turn()
         return (mistral_answers.notice(result["status"], "fr")
                 or pronote_answers.render(result, "fr", full_urls=True))
     messages = [{"role": "system", "content": system_prompt}] + history
@@ -1082,10 +1089,11 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
   <div class=block>
     <h2 id=memory>Mémoire des utilisateurs</h2>
     <p><a href="/maintenance/memory">État, consultation et téléchargement des souvenirs</a></p>
+    <p><a href="/maintenance/sessions">Sessions de conversation par utilisateur</a></p>
   </div>
   <div class=block>
     <h2 id=storage>Stockage</h2>
-    <p class=sub>Mesures en Mio. Les archives de conversation et anciens journaux restent conservés.</p>
+    <p class=sub>Mesures en Mio. Les sessions SQL fermées suivent leur rétention; les archives JSONL originales restent conservées.</p>
     <pre id=storage-status>Ouvrir Maintenance pour charger les mesures détaillées.</pre>
     <noscript><a href="/storage-status">Consulter les mesures détaillées du stockage</a></noscript>
 
@@ -1584,7 +1592,7 @@ def test_preset_route():
         with selected.turn_lock:
             if j.get("reset") or msg.upper() == "SOMMAIRE":
                 selected.welcome.pause()
-                selected.close()
+                selected.close(reason="sommaire")
                 discard_memory(session.get("memory_session"))
                 return jsonify(ok=True, answer="Session effacée; souvenirs conservés. REPRENDRE ACCUEIL permet de poursuivre un accueil en pause.")
             control = memory_session.household_command(msg)
@@ -1603,6 +1611,7 @@ def test_preset_route():
                 response.headers["Cache-Control"] = "no-store"
                 return response
             selected.private_turn = False
+            selected.answer_references = ()
             selected.begin_turn()
             try:
                 private_question = pronote_answers.school_question(
@@ -1630,16 +1639,22 @@ def test_preset_route():
                     result = {"display": "Choisissez un profil nommé; l’accueil doit être activé.",
                               "turn": None, "onboarding": True}
             if result is None and calc.explicit(msg):
+                if not private_question:
+                    selected.capture(msg, "theatre")
                 result = calc.handle(msg, language, generate=lambda expr, lang:
                                      calculator.generate_scene(expr, lang, mistral_key(), mistral_model()))
             if result is None:
                 result = selected.welcome.respond(msg, system, language)
             if result is None and not selected.pending and calculator.candidate(msg):
+                if not private_question:
+                    selected.capture(msg, "theatre")
                 result = calc.handle(msg, language, generate=lambda expr, lang:
                                      calculator.generate_scene(expr, lang, mistral_key(), mistral_model()))
             if result is None:
                 result = selected.handle(msg, language) if selected.interested(msg) else {"passthrough": True}
             if result.get("passthrough"):
+                if not private_question:
+                    selected.capture(msg)
                 remembered = "" if private_question else selected.context(msg)
                 answer = llm_answer(system + "\n\n" + remembered, msg, knowledge=kb + "\n\n" + remembered, selected=selected)
             else:
@@ -1654,7 +1669,7 @@ def test_preset_route():
                 channel = "onboarding" if result.get("onboarding") else "theatre" if result.get("calculator") else "chat" if result.get("passthrough") else "memory"
                 if msg:
                     selected.record("user", msg, channel)
-                selected.record("assistant", answer, channel, factual=result.get("factual"))
+                selected.record("assistant", answer, channel, factual=result.get("factual"), references=selected.answer_references)
         # The browser preview retains exact URLs, including Unicode paths.
         conversations = (llm_provider() == "mistral" and
                          mistral_answers.settings({**os.environ, **read_env()})[0] == "conversations")
@@ -2496,7 +2511,7 @@ MEMORY_SESSIONS = OrderedDict()
 MEMORY_SESSIONS_LOCK = threading.RLock()
 
 
-def discard_memory(identifier):
+def discard_memory(identifier, reason="closed"):
     with JOURNAL_SESSIONS_LOCK:
         for journal_id, private in list(JOURNAL_SESSIONS.items()):
             if getattr(private, "memory_id", None) == identifier:
@@ -2504,7 +2519,7 @@ def discard_memory(identifier):
     with MEMORY_SESSIONS_LOCK:
         item = MEMORY_SESSIONS.pop(identifier, None)
         if item:
-            item["memory"].close()
+            item["memory"].close(reason=reason)
 
 
 def memory_entry(username=None, reset=False, *, user_id=None, profile_revision=None):
@@ -2516,7 +2531,7 @@ def memory_entry(username=None, reset=False, *, user_id=None, profile_revision=N
         now = time.monotonic()
         for identifier, item in list(MEMORY_SESSIONS.items()):
             if now - item["used"] > 1200:
-                discard_memory(identifier)
+                discard_memory(identifier, reason="timeout")
         identifier = session.get("memory_session")
         item = MEMORY_SESSIONS.get(identifier)
         if item:
@@ -2552,7 +2567,7 @@ def memory_entry(username=None, reset=False, *, user_id=None, profile_revision=N
                     username or "", root=read_env().get("MINITEL_MEMORY_DIR"),
                     model=memory_session.MemoryModel(
                         settings=lambda: (mistral_key(), mistral_model())),
-                    extra_secrets=private_values, **({"user_id": user_id} if user_id is not None else {})),
+                    extra_secrets=private_values, surface="browser", **({"user_id": user_id} if user_id is not None else {})),
                 "used": now,
             }
             item["memory"].calculator = calculator.Session()
@@ -3004,6 +3019,102 @@ def memory_admin_export(user_id):
     response.headers["Content-Disposition"] = f'attachment; filename="3615-memory-{name}.json"'
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+def session_admin_store():
+    if not memory_unlocked():
+        abort(403, "Déverrouillez la mémoire dans Maintenance pour consulter les sessions.")
+    return inspection_store()
+
+
+def session_admin_user(store, user_id):
+    for user in user_registry.Registry(store.root).users():
+        if user["id"] == user_id:
+            return user_registry.User(user["id"], user["display_name"], user["memory_key"], user["revision"])
+    abort(404, "Profil absent.")
+
+
+@app.route("/maintenance/sessions", defaults={"user_id": None, "session_id": None})
+@app.route("/maintenance/sessions/<int:user_id>", defaults={"session_id": None})
+@app.route("/maintenance/sessions/<int:user_id>/<session_id>")
+@require_login
+def session_admin(user_id, session_id):
+    store = session_admin_store()
+    conversation_store.maintenance(store)
+    profiles = user_registry.Registry(store.root).users()
+    user = session_admin_user(store, user_id) if user_id is not None else None
+    selected, messages, sessions, imports = None, [], [], []
+    message = None
+    offset = request.args.get("offset", 0, type=int)
+    if user:
+        try:
+            if next((p["enabled"] for p in profiles if p["id"] == user.id), False):
+                try:
+                    conversation_store.import_history(store, user)
+                except memory_session.memory.MemoryProblem as error:
+                    message = str(error)
+            if session_id:
+                selected, messages = conversation_store.read_session(store, user_id, session_id,
+                    after=request.args.get("after", 0, type=int))
+            else:
+                sessions = conversation_store.list_sessions(store, user_id, offset=offset)
+                with memory_session.memory_database.connection(store) as db:
+                    imports = [dict(r) for r in db.execute("SELECT source,status,errors FROM conversation_imports WHERE user_id=?", (user_id,))]
+        except KeyError:
+            abort(404)
+    return render_template_string(admin_service_pages.HEAD + admin_session_pages.BODY,
+        title="Sessions de conversation", profiles=profiles, user=user, selected=selected, message=message,
+        sessions=sessions, messages=messages, imports=imports, offset=max(0, offset),
+        days=os.getenv("MINITEL_SESSION_RETENTION_DAYS", "365"))
+
+
+@app.route("/maintenance/sessions/<int:user_id>/<session_id>/export")
+@require_login
+def session_admin_export(user_id, session_id):
+    store = session_admin_store()
+    user = session_admin_user(store, user_id)
+    try:
+        selected, first = conversation_store.read_session(store, user_id, session_id)
+    except KeyError:
+        abort(404)
+    metadata = {k: selected[k] for k in ("id", "user_id", "surface", "opened_at", "closed_at", "status", "close_reason")}
+
+    def chunks():
+        yield json.dumps({"format": "3615-session-export", "version": 1, "profile": user.display_name,
+                          "session": metadata}, ensure_ascii=False)[:-1] + ', "messages":['
+        page, separator, complete = first, "", True
+        while page:
+            for message in page:
+                public = {k: message[k] for k in ("id", "at", "role", "channel", "text", "references")}
+                yield separator + json.dumps(public, ensure_ascii=False)
+                separator = ","
+            try:
+                _, page = conversation_store.read_session(store, user_id, session_id, after=page[-1]["id"])
+            except (KeyError, memory_session.memory.MemoryProblem):
+                complete = False
+                break
+        yield '], "complete":' + json.dumps(complete) + '}\n'
+
+    response = app.response_class(chunks(), mimetype="application/json")
+    response.headers["Content-Disposition"] = 'attachment; filename="3615-session.json"'
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@app.route("/maintenance/sessions/<int:user_id>/<session_id>/delete", methods=["POST"])
+@require_login
+def session_admin_delete(user_id, session_id):
+    store = session_admin_store()
+    session_admin_user(store, user_id)
+    if request.form.get("confirm") != session_id:
+        abort(400, "Recopiez l’identifiant de la session pour confirmer.")
+    try:
+        conversation_store.delete_session(store, user_id, session_id)
+    except KeyError:
+        abort(404)
+    except memory_session.memory.MemoryProblem as error:
+        abort(409, str(error))
+    return redirect(url_for("session_admin", user_id=user_id))
 
 
 @app.errorhandler(memory_session.memory.MemoryProblem)

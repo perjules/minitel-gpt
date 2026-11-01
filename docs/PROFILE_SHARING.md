@@ -104,7 +104,7 @@ Python enforces visibility and write ownership, not perfect language understandi
 
 The offline merge tool retains publication on unchanged destination facts. Imported
 source facts become private, because transferring ownership requires a fresh review.
-Its read-only preview accepts both memory schema versions 1 and 2 without migrating.
+Its read-only preview accepts memory schema versions 1, 2 and 3 without migrating.
 
 ## SQLite migration and recovery
 
@@ -112,7 +112,8 @@ On first ordinary memory access, memory schema **1 → 2** adds nullable
 `memory_items.shared_hash`. Existing records start private. IDs, owners, content,
 source quotes, embeddings, pending work and the independent identity/access schema
 version 2 are preserved. JSON compatibility remains unchanged. Fresh databases
-start at memory schema 2. No re-embedding or manual migration is necessary.
+now start at memory schema 3; see [SESSIONS.md](SESSIONS.md) for the subsequent
+2 → 3 archive migration and its separate backup. No re-embedding or manual migration is necessary.
 
 Before altering an existing schema-1 database, the app makes a private, full SQLite
 backup at `<MINITEL_MEMORY_DIR>/users.before-profile-sharing.sqlite3`. Migration is

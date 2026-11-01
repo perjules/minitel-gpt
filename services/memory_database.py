@@ -14,12 +14,16 @@ except ImportError:
     import persistent_memory as memory
     from gmail_auth import GmailError
 
-SQL_MEMORY_SCHEMA = 2
+SQL_MEMORY_SCHEMA = 3
 
 
 def backup_before_sharing(store):
     """Preserve the pre-v2 database before the additive visibility migration."""
-    destination = store.root / "users.before-profile-sharing.sqlite3"
+    backup_database(store, "users.before-profile-sharing.sqlite3")
+
+
+def backup_database(store, filename):
+    destination = store.root / filename
     if destination.is_symlink() or (destination.exists() and not destination.is_file()):
         raise memory.MemoryProblem("Sauvegarde SQL invalide; migration du partage refusée.")
     if destination.exists():
@@ -58,6 +62,7 @@ def connection(store):
                 "CREATE TABLE IF NOT EXISTS memory_schema(version INTEGER NOT NULL)"
             )
             version = db.execute("SELECT version FROM memory_schema").fetchone()
+            fresh = version is None
             if version is None:
                 statements = (
                     """CREATE TABLE memory_state(user_id INTEGER PRIMARY KEY REFERENCES users(id),
@@ -80,12 +85,25 @@ def connection(store):
                     db.execute(statement)
             elif version[0] == 1:
                 backup_before_sharing(store)
-                db.execute("ALTER TABLE memory_items ADD COLUMN shared_hash TEXT")
+                if "shared_hash" not in {r[1] for r in db.execute("PRAGMA table_info(memory_items)")}:
+                    db.execute("ALTER TABLE memory_items ADD COLUMN shared_hash TEXT")
                 db.execute("UPDATE memory_schema SET version=2")
-            elif version[0] != SQL_MEMORY_SCHEMA:
+            elif version[0] not in {2, SQL_MEMORY_SCHEMA}:
                 raise memory.MemoryProblem(
                     "Version de mémoire SQL non prise en charge."
                 )
+            if db.execute("SELECT version FROM memory_schema").fetchone()[0] == 2:
+                if not fresh:
+                    backup_database(store, "users.before-sessions.sqlite3")
+                try:
+                    from . import conversation_store
+                except ImportError:
+                    import conversation_store
+                conversation_store.schema(db)
+                if "message_id" not in {r[1] for r in db.execute("PRAGMA table_info(memory_events)")}:
+                    db.execute("ALTER TABLE memory_events ADD COLUMN message_id INTEGER REFERENCES conversation_messages(id) ON DELETE CASCADE")
+                db.execute("CREATE UNIQUE INDEX IF NOT EXISTS memory_event_message ON memory_events(message_id) WHERE message_id IS NOT NULL")
+                db.execute("UPDATE memory_schema SET version=3")
             yield db
     except (GmailError, sqlite3.Error, OSError):
         raise memory.MemoryProblem(

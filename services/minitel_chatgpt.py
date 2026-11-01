@@ -579,6 +579,8 @@ def call_answer(system_prompt, history, language, options, knowledge,
         return {**mail.handle(question, review_ticket, timeout), "gmail": True}
     blocked = calculator_blocked(mail, memory)
     if calc is not None and calc.explicit(question):
+        if isinstance(getattr(memory, "user", None), user_services.user_registry.User):
+            memory.capture(question, "theatre")
         return calc.handle(question, language, generate=lambda expr, lang:
                            calculator.generate_scene(expr, lang, MISTRAL_KEY, MISTRAL_MODEL))
     if (isinstance(welcome, memory_session.onboarding.Session)
@@ -615,10 +617,15 @@ def call_answer(system_prompt, history, language, options, knowledge,
         if not response.get("passthrough"):
             return {**response, "gmail": True}
     if calc is not None and not blocked:
+        if (not school_request and (calculator.candidate(question) or calc.mode)
+                and isinstance(getattr(memory, "user", None), user_services.user_registry.User)):
+            memory.capture(question, "theatre")
         result = calc.handle(question, language, generate=lambda expr, lang:
                              calculator.generate_scene(expr, lang, MISTRAL_KEY, MISTRAL_MODEL))
         if result is not None:
             return result
+    if not school_request and isinstance(getattr(memory, "user", None), user_services.user_registry.User):
+        memory.capture(question)
     remembered = memory.context(question) if memory is not None and not school_request else ""
     if remembered:
         knowledge = knowledge + "\n\n" + remembered
@@ -634,6 +641,8 @@ def call_answer(system_prompt, history, language, options, knowledge,
                                         **({"session_context": session_context} if session_context else {}))
         if memory is not None:
             memory.active()
+        if result.get("private") and isinstance(getattr(memory, "user", None), user_services.user_registry.User):
+            memory.exclude_turn()
         notice = mistral_answers.notice(result["status"], language)
         if notice:
             # Operational notices are not successful factual turns. Do not
@@ -1343,7 +1352,11 @@ def run(term=None):
     finally:
         # Invalidate review tickets and close memory guards even on a UART error.
         for cleanup in t._session_resources:
-            cleanup()
+            owner = getattr(cleanup, "__self__", None)
+            if isinstance(getattr(owner, "user", None), user_services.user_registry.User):
+                cleanup(reason="disconnect")
+            else:
+                cleanup()
         if term is None:
             t.close()
 
@@ -1473,6 +1486,7 @@ def run_session(t):
                 break
 
             if (question or "").strip().upper() == "LOGOUT":
+                action = 'logout'
                 username = language = None
                 break
 
@@ -1764,7 +1778,7 @@ def run_session(t):
             if response and response.get("calculator"):
                 memory.record("assistant", answer, channel, factual=response.get("factual"))
             elif not (response and (response.get("turn") or {}).get("private")):
-                memory.record("assistant", answer, channel)
+                memory.record("assistant", answer, channel, references=(response.get("turn") or {}).get("references", ()) if response else ())
             mail_document = channel == "gmail" and mail is not None and bool(
                 mail.items or mail.selected or mail.draft or mail.composition or mail.recipient_choices)
             if mail_document:
@@ -1811,7 +1825,10 @@ def run_session(t):
         if memory is not None:
             if isinstance(getattr(memory, "welcome", None), memory_session.onboarding.Session):
                 memory.welcome.pause()
-            memory.close()
+            if isinstance(getattr(memory, "user", None), user_services.user_registry.User):
+                memory.close(reason=action if action in {'sommaire', 'timeout', 'logout', 'guide'} else 'closed')
+            else:
+                memory.close()
 
 if __name__ == "__main__":
     terminal_link.serve(Term, run)

@@ -61,7 +61,7 @@ def test_migration_backups_preserve_records_vectors_identity_and_legacy_preview(
         assert db.execute('SELECT version FROM memory_schema').fetchone()[0] == 1
         assert db.execute('SELECT embedding FROM memory_items WHERE user_id=?', (alice.user.id,)).fetchone()[0] == b'VECTOR'
     with sql.connection(alice.store) as db:
-        assert db.execute('SELECT version FROM memory_schema').fetchone()[0] == 2
+        assert db.execute('SELECT version FROM memory_schema').fetchone()[0] == sql.SQL_MEMORY_SCHEMA
         assert db.execute('PRAGMA user_version').fetchone()[0] == 2
         assert db.execute('SELECT embedding FROM memory_items WHERE user_id=?', (alice.user.id,)).fetchone()[0] == b'VECTOR'
     before = backup.read_bytes()
@@ -362,6 +362,7 @@ def test_exports_only_include_publication_state_not_hash_and_journal_stays_separ
     item, _ = change(alice, text='User is 10 years old.', share=True)
     folder = alice.store.root / alice.key
     (folder / 'journal.md.enc').write_bytes(b'PRIVATE JOURNAL')
+    (folder / 'logs').mkdir(exist_ok=True)
     (folder / 'logs' / 'private.jsonl').write_text('PRIVATE ARCHIVE')
     client, headers, _ = console
     unlock(client, headers)
