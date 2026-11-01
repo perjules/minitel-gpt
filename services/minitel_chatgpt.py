@@ -645,6 +645,7 @@ def call_answer(system_prompt, history, language, options, knowledge,
             **({"private": True} if result.get("private") else {}),
         }}
     # Explicit rollback and other providers retain their existing adapters.
+    system_prompt += "\n\n" + mistral_answers.RECALL_PRESENTATION
     plain_history = [{"role": turn["role"], "content": turn["content"]} for turn in pronote_answers.public_history(history)]
     answer = call_llm(system_prompt, plain_history)
     return {"display": answer, "turn": {"role": "assistant", "content": answer}}

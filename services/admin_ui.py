@@ -630,6 +630,7 @@ def llm_answer(system_prompt, user_message, knowledge="", selected=None):
             noms = ", ".join(s.get("name") or s.get("url", "") for s in sources[:3])
             answer += f"\n\nSources : {noms}"
         return answer or "Aucun resultat trouve."
+    system_prompt += "\n\n" + mistral_answers.RECALL_PRESENTATION
     if provider == "claude":
         key = anthropic_key()
         if not is_real_key(key):

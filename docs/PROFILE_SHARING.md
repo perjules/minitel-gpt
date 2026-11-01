@@ -53,6 +53,15 @@ even while Charlie is speaking. Alice's `Bob works at X` is an assertion by Alic
 about Bob, not an assertion that Alice works there. Beliefs remain attributed
 claims, not independently verified truths. Ambiguities/conflicts require clarification.
 
+Ordinary answers express these facts naturally without announcing shared-memory
+or profile-storage labels. Social recall is usually direct; a deliberate lookup
+of a birthday/job may receive one brief mainframe-file allusion. This voice comes
+from the ordinary-answer harness, not the stored records or recipient resolver.
+Ownership remains enforced, opinions stay attributed to the right person, and
+old/uncertain information is not promoted to current verified truth. Technical
+source explanations remain available when explicitly requested. Native inventories,
+exports, private school answers and mail content are not rewritten for this style.
+
 Ordinary model requests also receive runtime identity/capability instructions
 independently of recalled reference material, including when recall is empty. In
 the default session the speaker is an anonymous visitor; the MinitelGPT label does

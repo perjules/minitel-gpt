@@ -172,6 +172,21 @@ Les demandes d’embedding sont bornées à quatre secondes. Les textes vectoris
 sont limités aux premiers 6000 caractères; les notes plus longues restent complètes
 en base et dans le rappel explicite.
 
+Dans une réponse ordinaire, les libellés internes de stockage/partage ne sont pas
+des introductions à réciter. Le Minitel parle naturellement des intérêts et des
+relations connues, sans « d’après la mémoire collective ». Une recherche précise
+de métier, lieu de travail ou anniversaire peut recevoir une courte allusion aux
+fiches du MF-83, sans scène de chargement, délai ni nouvelle consultation inventée.
+Les opinions restent attribuées à la personne (« Alice pense que… »), les données
+anciennes ou incertaines restent nuancées, et le propriétaire d’un souvenir ne
+devient pas le visiteur courant. Les sources/mécanismes réels restent explicables
+sur demande. Cette règle de présentation est dans le harnais des réponses ordinaires,
+partagé par le Minitel et le navigateur, y compris les adaptateurs de repli.
+Elle ne modifie ni les textes enregistrés, ni MEMOIRE, ni l’administration, ni la
+sélection/rédaction de mails, ni les réponses privées PRONOTE. Les prompts locaux
+édités par le propriétaire restent intacts. Aucun classement social/factuel en
+base, appel IA de réécriture ou migration n’est ajouté.
+
 La sélection combine jusqu’à trois préférences, six résultats sémantiques et trois
 résultats lexicaux, dédoublonnés dans le budget de contexte existant. Le seuil
 cosinus initial est 0,55 : il reste à calibrer sur des conversations réelles.
@@ -392,6 +407,13 @@ les refus/annulations, l’isolation entre sessions, les écritures publiées, l
 verrouillage pendant une réponse retardée et la console navigateur. Sync uv
 verrouillé/all-extras, Ruff, exports requirements, syntaxe shell et espaces
 vérifiés. Aucun déploiement ni test matériel n’a été effectué.
+
+Voix du rappel : **1125 tests et 400 sous-tests réussis**, dont neuf cas vérifiant
+les requêtes ordinaires Mistral/Claude et terminal/navigateur, le repli public de
+PRONOTE, l’absence de cette consigne dans les outils privés et le maintien du texte
+original dans MEMOIRE. Les réponses fournisseur sont simulées : le choix réel des
+phrases et leur naturel restent à vérifier au Minitel, sans sonde API payante dans
+la suite automatisée.
 
 Sur le Pi : sauvegarder avant migration; mettre à jour; vérifier les souvenirs
 existants dans Maintenance; tester deux profils et le défaut; reformuler un rappel;
