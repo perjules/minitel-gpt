@@ -51,7 +51,11 @@ def test_shared_requests_never_read_or_change_another_profile(
         legacy = store.read("shared")
         with patch.object(store, "read", wraps=store.read) as read:
             assert selected.interested(question)
-            assert "n'est plus disponible" in selected.handle(question)["display"]
+            message = selected.handle(question)["display"]
+            if username == "":
+                assert "lecture seule" in message and "ACTIVER MEMOIRE" in message
+            else:
+                assert "n'est plus disponible" in message
             read.assert_not_called()
         model.plan.assert_not_called()
         assert store.read(selected.key) == before

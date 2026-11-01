@@ -193,3 +193,11 @@ explicite dans l’éditeur admin. Les faits publiés sont attribués à leur pr
 et lisibles par tous, y compris le profil sans nom. Préférences, notes, listes,
 tâches et citations sources ne sont pas publiées par cette fonction.
 Usage et migration : [PROFILE_SHARING.md](PROFILE_SHARING.md).
+
+La console Conversation propose aussi **ACTIVER MEMOIRE** sur le profil sans nom.
+Un champ de mot de passe admin séparé et masqué autorise les écritures explicites
+du foyer pour cette session. Le secret ne passe jamais par `/test-preset`, le modèle
+ou le journal de conversation. DESACTIVER MEMOIRE, SOMMAIRE, un changement de profil
+ou une session expirée referment cet accès. Les faits/préférences ajoutés deviennent
+lisibles par tous; l’apprentissage automatique reste désactivé. Le déverrouillage
+de Maintenance reste indépendant. Voir [MEMORY.md](MEMORY.md).

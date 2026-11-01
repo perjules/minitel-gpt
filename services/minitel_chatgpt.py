@@ -568,6 +568,8 @@ def call_answer(system_prompt, history, language, options, knowledge,
         return (welcome.respond(None, system_prompt, language, timeout, start=True)
                 or {"display": "", "turn": None, "onboarding": True})
     question = history[-1]["content"]
+    if memory is not None and memory_session.household_command(question):
+        return memory.handle(question, language, timeout)
     if memory is not None and hasattr(memory, "begin_turn"):
         memory.begin_turn()
     if mail is not None and gmail_mail.enabled() and (gmail_mail.shortcut(question) or gmail_mail.literal_command(question)
@@ -1124,13 +1126,73 @@ def show_guide(t: Term, language="fr"):
     else:
         t.center(UI[language]["ip_unavailable"])
     t.w(bytes([CR, LF, CR, LF]))
-    t.center(f"{UI[language]['password']} : {os.getenv('ADMIN_PASSWORD', 'mistral')}")
+    t.center("Use your administration password" if language == "en" else
+             "Utilisez votre mot de passe admin")
     t.w(bytes([CR, LF, CR, LF]))
     t.center("UPDATE / MAJ: mainframe maintenance" if language == "en" else
              "UPDATE / MAJ: maintenance du mainframe")
     t.line()
     t.w(FG_CYAN); t.center(UI[language]["guide_return"])
     t.read_key(120)
+
+
+def read_memory_password(t):
+    """No echo/record/model hooks. Drain oversized input through ENVOI."""
+    buffer, overflow = [], False
+    deadline = time.monotonic() + IDLE_TIMEOUT
+    while time.monotonic() < deadline:
+        kind, code = t.read_key(max(0, deadline - time.monotonic()))
+        if kind == "timeout":
+            return None, "timeout"
+        if kind == "fn" and code in (K_SOMMAIRE, K_RETOUR, K_ANNUL, K_GUIDE):
+            return None, "sommaire" if code == K_SOMMAIRE else "done"
+        if (kind == "fn" and code == K_ENVOI) or kind == "char" and code in (CR, LF):
+            return (None, "overflow") if overflow else ("".join(buffer), "submit")
+        if kind == "fn" and code == K_CORR or kind == "char" and code in (BS, 0x7F):
+            if buffer:
+                buffer.pop()
+        elif kind == "char" and 0x20 <= code <= 0x7E:
+            if len(buffer) < 2000 and not overflow:
+                buffer.append(chr(code))
+            else:
+                buffer.clear()
+                overflow = True
+    return None, "timeout"
+
+
+def terminal_memory_unlock(t, selected):
+    """Admin password is entered only after confirmed hardware echo suppression."""
+    try:
+        ticket = selected.begin_household_unlock()
+    except memory_session.memory.MemoryProblem as error:
+        return "done", str(error)
+    expected = os.getenv("ADMIN_PASSWORD", "")
+    if not expected.strip():
+        selected.lock_household()
+        return "done", "Configurez ADMIN_PASSWORD dans l'administration avant d'activer la mémoire."
+    attempt = None
+    try:
+        with rose_terminal.hidden_echo(t):
+            try:
+                t.clear()
+                t.line("MEMOIRE DU FOYER — ACCES ADMIN")
+                t.line("Mot de passe admin (saisie masquee) :")
+                t.line("RETOUR : annuler / ENVOI : valider")
+                attempt, action = read_memory_password(t)
+                accepted = action == "submit" and selected.unlock_household(attempt, expected, ticket)
+            finally:
+                attempt = None
+                t.s.reset_input_buffer()
+                t.clear()
+    except rose_terminal.EchoUnavailable:
+        selected.lock_household()
+        return "done", "Masquage du clavier indisponible; mémoire verrouillée."
+    if not accepted:
+        selected.lock_household()
+        return (action if action in {"sommaire", "timeout"} else "done"), "Mémoire verrouillée. Accès annulé ou refusé."
+    return "done", ("Mémoire du foyer activée pour cette session.\n"
+                    "RETIENS / SOUVIENS-TOI / OUBLIE. Faits et préférences lisibles par tous.\n"
+                    "DESACTIVER MEMOIRE ou SOMMAIRE pour verrouiller. Apprentissage automatique désactivé.")
 
 
 def read_question(t: Term, allow_empty=False, calculator_mode=False, navigation_mode=False):
@@ -1419,6 +1481,23 @@ def run_session(t):
                 t.line('Profil modifié. Reconnectez-vous.')
                 username = language = None
                 break
+
+            memory_control = memory_session.household_command(question)
+            if memory_control:
+                if memory_control == "lock":
+                    memory.lock_household()
+                    action, message = "done", "Mémoire du foyer verrouillée."
+                elif pending is not None and pending[0].is_alive():
+                    action, message = "done", "Requête précédente en cours. Réessayez bientôt."
+                else:
+                    action, message = terminal_memory_unlock(t, memory)
+                if action in ("sommaire", "timeout"):
+                    break
+                action = show_response(t, safe_display(message), language)
+                if action != "done":
+                    break
+                t.line(UI[language]["follow_up"])
+                continue
 
             # Intercept before any ordinary model, history, transcript or tool.
             if journal.entry(question):

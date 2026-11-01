@@ -1514,6 +1514,38 @@ def gen_prompt_route():
     except Exception as e:  # noqa: BLE001 - Keep provider failures in the JSON error response.
         return jsonify(ok=False, error=str(e))
 
+@app.route("/memory-unlock", methods=["POST"])
+@require_login
+def memory_unlock():
+    """Separate secret field; never resolve/create a profile from a password request."""
+    data = request.get_json(silent=True) or {}
+    if data.get("action") not in {"unlock", "lock"} or not isinstance(data.get("ticket"), str):
+        return jsonify(ok=False, answer="Demande de déverrouillage invalide."), 400
+    with MEMORY_SESSIONS_LOCK:
+        identifier = session.get("memory_session")
+        item = MEMORY_SESSIONS.get(identifier)
+        if item is None or time.monotonic() - item["used"] > 1200:
+            discard_memory(identifier)
+            return jsonify(ok=False, answer="Session expirée. Recommencez ACTIVER MEMOIRE."), 409
+        selected = item["memory"]
+        item["used"] = time.monotonic()
+    try:
+        if data["action"] == "lock":
+            selected.lock_household(data["ticket"])
+            accepted = False
+            answer = "Mémoire du foyer verrouillée."
+        else:
+            accepted = selected.unlock_household(data.get("password"), ADMIN_PASSWORD, data["ticket"])
+            answer = ("Mémoire du foyer activée pour cette session. RETIENS / SOUVIENS-TOI / OUBLIE. "
+                      "Faits et préférences lisibles par tous. DESACTIVER MEMOIRE ou SOMMAIRE pour verrouiller."
+                      if accepted else "Accès refusé. Recommencez ACTIVER MEMOIRE.")
+        response = jsonify(ok=accepted or data["action"] == "lock", unlocked=accepted, answer=answer)
+    except memory_session.memory.MemoryProblem:
+        response = jsonify(ok=False, answer="Profil modifié ou session fermée. Recommencez ACTIVER MEMOIRE.")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.route("/test-preset", methods=["POST"])
 @require_login
 def test_preset_route():
@@ -1544,6 +1576,21 @@ def test_preset_route():
                 selected.close()
                 discard_memory(session.get("memory_session"))
                 return jsonify(ok=True, answer="Session effacée; souvenirs conservés. REPRENDRE ACCUEIL permet de poursuivre un accueil en pause.")
+            control = memory_session.household_command(msg)
+            if control:
+                if control == "lock":
+                    selected.lock_household()
+                    return jsonify(ok=True, answer="Mémoire du foyer verrouillée.")
+                if selected.user.id != 1:
+                    return jsonify(ok=True, answer="ACTIVER MEMOIRE est réservé au profil MinitelGPT sans nom.")
+                if not ADMIN_PASSWORD.strip():
+                    selected.lock_household()
+                    return jsonify(ok=False, error="Configurez ADMIN_PASSWORD avant d'activer la mémoire.")
+                ticket = selected.begin_household_unlock()
+                response = jsonify(ok=True, memory_unlock=ticket,
+                                   answer="Mot de passe admin dans le champ masqué. Les faits du foyer seront lisibles par tous.")
+                response.headers["Cache-Control"] = "no-store"
+                return response
             selected.private_turn = False
             selected.begin_turn()
             try:

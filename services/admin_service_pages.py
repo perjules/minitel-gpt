@@ -57,22 +57,60 @@ PLACEHOLDER = '''<section><h2>En construction</h2><p>Administration inactive. Au
 
 TEST_NAV = '''<nav><a href="/test?mode=conversation">Conversation</a> · <a href="/test?mode=gmail">Gmail</a> · <a href="/journal">Journal intime</a></nav>'''
 CHAT_TEST = r'''<p>Test de l’IA configurée. Les requêtes sont réelles et la conversation est journalisée dans la mémoire choisie.</p>
-<label>Utilisateur (vide = MinitelGPT)<input id=memoryUser maxlength=60 value="{{username}}" onchange="++testSequence;document.getElementById('testOut').textContent='';document.getElementById('testSpin').style.display='none'"></label>
+<label>Utilisateur (vide = MinitelGPT)<input id=memoryUser maxlength=60 value="{{username}}" onchange="closeMemoryUnlock(true);++testSequence;document.getElementById('testOut').textContent='';document.getElementById('testSpin').style.display='none'"></label>
 <textarea id=testMsg rows=4 placeholder="Votre question"></textarea>
 <button type=button onclick="testPreset(false)">Envoyer</button><button type=button onclick="testPreset(false,true)">Faire connaissance / reprendre l’accueil</button><button type=button onclick="testPreset(true)">SOMMAIRE / nouvelle session</button>
 <span id=testSpin style="display:none">Consultation…</span><pre id=testOut role=status></pre>
+<form id=memoryUnlock hidden onsubmit="event.preventDefault();submitMemoryPassword()">
+<label>Mot de passe admin (saisie masquée)<input id=memoryPassword type=password autocomplete=off maxlength=2000></label>
+<button>Activer la mémoire du foyer</button><button type=button onclick="++testSequence;closeMemoryUnlock(true)">Annuler</button></form>
 <script>
 const CSRF_TOKEN={{csrf_token()|tojson}}, PRESET={{preset|tojson}}, DRAFT_SYSTEM={{draft|tojson}};
 let testSequence=0;
+let memoryTicket='', memoryPending=false;
+function closeMemoryUnlock(lock=false){
+ const ticket=memoryTicket;
+ document.getElementById('memoryUnlock').hidden=true;
+ document.getElementById('memoryPassword').value='';memoryPending=false;
+ if(lock){
+  if(ticket)fetch('/memory-unlock',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},
+    body:JSON.stringify({action:'lock',ticket:ticket})}).then(response=>response.json()).then(data=>{
+     if(memoryTicket!==ticket)return;
+     if(data.ok)memoryTicket='';
+     else document.getElementById('testOut').textContent=data.answer||'Verrouillage non confirmé. Recommencez SOMMAIRE.';
+    }).catch(()=>{if(memoryTicket===ticket)document.getElementById('testOut').textContent='Verrouillage non confirmé. Recommencez DESACTIVER MEMOIRE ou SOMMAIRE.';});
+ }
+}
+async function submitMemoryPassword(){
+ if(!memoryPending||!memoryTicket)return;
+ const sequence=++testSequence, ticket=memoryTicket, out=document.getElementById('testOut');
+ let password=document.getElementById('memoryPassword').value;
+ document.getElementById('memoryPassword').value='';out.textContent='Vérification locale…';
+ try{
+  const pending=fetch('/memory-unlock',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},
+   body:JSON.stringify({action:'unlock',ticket:ticket,password:password})});password='';
+  const data=await (await pending).json();if(sequence!==testSequence)return;
+  closeMemoryUnlock(!data.unlocked);
+  out.textContent=data.answer||'Accès refusé.';
+ }catch(error){
+  if(sequence===testSequence){closeMemoryUnlock(true);out.textContent='Déverrouillage non confirmé. Recommencez ACTIVER MEMOIRE.';}
+ }finally{password='';}
+}
 async function testPreset(reset=false,welcome=false){
  const msg=document.getElementById('testMsg').value.trim();
  if(!msg&&!reset&&!welcome)return;
+ if(reset||memoryPending)closeMemoryUnlock(true);
  const sequence=++testSequence, spin=document.getElementById('testSpin'), out=document.getElementById('testOut');
  spin.style.display='block';out.textContent='Consultation…';
  try{
   const response=await fetch('/test-preset',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},
    body:JSON.stringify({preset_key:PRESET,system:DRAFT_SYSTEM,message:msg,memory_user:document.getElementById('memoryUser').value,reset:reset,welcome_start:welcome})});
   const data=await response.json();if(sequence!==testSequence)return;
+  if(data.ok&&data.memory_unlock){
+   memoryTicket=data.memory_unlock;memoryPending=true;
+   document.getElementById('memoryUnlock').hidden=false;
+   document.getElementById('memoryPassword').focus();document.getElementById('testMsg').value='';
+  }
   if(data.ok&&data.journal_url){document.getElementById('testMsg').value='';location.assign(data.journal_url);return;}
   if(data.ok&&data.scene){
    out.textContent='';const started=performance.now();

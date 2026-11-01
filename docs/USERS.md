@@ -36,7 +36,10 @@ MinitelGPT profile keeps its legacy `shared/` directory. Administrators may now
 publish its facts/preferences as household context with the explicit Share
 checkbox in Maintenance; old default records are not silently published. Every
 profile can read these published facts, including through MEMOIRE GLOBALE, but
-terminal commands cannot modify them. Named-profile learning remains personal.
+terminal commands normally cannot modify them. ACTIVER MEMOIRE on the default
+profile requests ADMIN_PASSWORD in a hidden field and allows explicit household
+writes in that session only. DESACTIVER MEMOIRE or session end relocks it; automatic
+default learning stays off. Named-profile learning remains personal.
 No mailbox access or other permissions are inherited with household knowledge.
 See [MEMORY.md](MEMORY.md). Selecting a profile is still not authentication.
 

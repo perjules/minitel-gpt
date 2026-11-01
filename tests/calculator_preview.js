@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const script = JSON.parse(fs.readFileSync(0, 'utf8')).script;
 const elements = Object.fromEntries(
-  ['testMsg', 'presetSel', 'fsystem', 'memoryUser', 'testSpin', 'testOut']
+  ['testMsg', 'presetSel', 'fsystem', 'memoryUser', 'testSpin', 'testOut', 'memoryUnlock', 'memoryPassword']
     .map(id => [id, {value: id === 'testMsg' ? '17/0' : 'test', style: {}, textContent: ''}])
 );
 global.document = {getElementById: id => elements[id]};

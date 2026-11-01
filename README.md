@@ -229,7 +229,10 @@ listes et tâches se gèrent en langage naturel. Les profils nommés bénéficie
 aussi d’un apprentissage périodique et d’un rappel sémantique Mistral; les commandes
 RETIENS/OUBLIE restent prioritaires. SQLite conserve les souvenirs et leurs vecteurs.
 Maintenance propose consultation, ajout, correction, suppression et exports après
-confirmation du mot de passe admin. Les faits partagés restent en lecture seule au terminal.
+confirmation du mot de passe admin. Les faits partagés restent en lecture seule
+pour les autres profils. Sur le profil MinitelGPT, **ACTIVER MEMOIRE** demande le
+mot de passe admin en saisie masquée et autorise les ajouts/corrections explicites
+du foyer pour cette session; **DESACTIVER MEMOIRE** ou SOMMAIRE referme l’accès.
 Un [premier accueil conversationnel](docs/ONBOARDING.md) présente le Minitel aux
 nouveaux profils nommés et apprend quelques repères personnels, avec des questions
 adaptées et facultatives. PASSER, PLUS TARD et FIN ACCUEIL permettent de le guider. Sur le Minitel, SOMMAIRE revient à

@@ -1,5 +1,9 @@
 # Memory observations, 1 November 2026
 
+Subsequent change: the default profile is now read-only **until** the session is
+authorized through password-gated [ACTIVER MEMOIRE](MEMORY.md). The investigation
+below describes the prior behavior. Ordinary answers still cannot confirm writes.
+
 Investigation of runtime attribution, false save claims on the default profile,
 and an apparent MEMOIRE navigation block after the first profile-sharing release.
 No actual user data or live provider was used during investigation.

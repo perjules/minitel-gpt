@@ -23,7 +23,7 @@ and CSRF protection cover publication as well as ordinary editing.
   changing visibility.
 
 Share-all is a decision about the facts currently shown, **not** a policy for future
-learning. New automatic, welcome and terminal memories are private. Preferences,
+learning. New named-profile automatic, welcome and terminal memories are private. Preferences,
 notes, lists and tasks cannot be published through this feature. Facts about work,
 birthdays or family may be published after review; thoughts and preferences remain
 private in this phase. Classifying a sensitive statement as a fact does not make it
@@ -33,6 +33,9 @@ The shared audience is every enabled profile, including anonymous/default
 MinitelGPT. Names are selectors, not authentication; proper account access controls
 remain future work. Publication grants no Gmail/PRONOTE access or send permission.
 The separate MinitelGPT household-publication controls retain their existing behavior.
+The default session can also publish explicit household facts/preferences after
+the password-gated [ACTIVER MEMOIRE](MEMORY.md)
+command. This does not publish or edit another person's profile records.
 
 `MEMOIRE` / `MEMORY` still lists the selected user's own memories and marks their
 published facts `[partagé]`. `MEMOIRE GLOBALE` remains the household inventory.

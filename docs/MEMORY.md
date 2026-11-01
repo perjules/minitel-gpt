@@ -4,8 +4,9 @@ Chaque profil nommé possède ses souvenirs personnels. Les faits du foyer sont
 partagés explicitement par l’administrateur depuis le profil réservé MinitelGPT.
 L’administrateur peut également publier des faits précis d’un profil nommé,
 attribués à leur propriétaire : voir [PROFILE_SHARING.md](PROFILE_SHARING.md).
-Un nom vide sélectionne ce profil, dont l’apprentissage **automatique** et les
-modifications au terminal sont désactivés. Les noms et alias sélectionnent une identité;
+Un nom vide sélectionne ce profil, dont l’apprentissage **automatique** reste
+désactivé. Les modifications au terminal demandent le déverrouillage administratif
+**ACTIVER MEMOIRE** décrit ci-dessous. Les noms et alias sélectionnent une identité;
 ils ne constituent pas encore une authentification. Voir [USERS.md](USERS.md).
 
 ## Utilisation
@@ -41,8 +42,9 @@ Les commandes explicites personnelles restent prioritaires pour les profils nomm
 
 SOUVIENS-TOI, MÉMORISE et ENREGISTRE sont aussi des demandes mémoire explicites;
 elles contournent le premier accueil. Sur le profil MinitelGPT sans nom, ces
-demandes répondent **lecture seule** : la publication du foyer se gère dans
-Maintenance, jamais par une promesse de sauvegarde du modèle de conversation.
+demandes répondent **lecture seule** tant que la session n’a pas été déverrouillée
+par **ACTIVER MEMOIRE**. Maintenance reste disponible. Une promesse de sauvegarde
+du modèle de conversation ne constitue jamais une confirmation d’écriture.
 La lecture mémoire sur le terminal utilise le lecteur de documents : **SUITE /
 RETOUR** et **Commande + ENVOI / SOMMAIRE** restent visibles, même sur une seule
 page. Une correction ou une nouvelle question peut être saisie dès la première
@@ -68,6 +70,43 @@ utilisez **Services → Utilisateurs et accès → Supprimer le profil et toutes
 mémoires**, puis retapez son nom pour confirmer. Cela retire aussi les vecteurs,
 l’accueil et les accès de ce profil. Les comptes externes, autres utilisateurs et
 sauvegardes globales sont conservés. Voir [USERS.md](USERS.md#delete-a-test-profile).
+
+## ACTIVER MEMOIRE : écrire dans la mémoire du foyer
+
+Sur le profil **MinitelGPT** (nom vide), saisir **ACTIVER MEMOIRE**, puis le mot de
+passe de la console admin dans la saisie masquée dédiée. Il faut un
+`ADMIN_PASSWORD` configuré; aucun mot de passe par défaut n’est accepté. Ne pas
+ajouter le mot de passe à la commande ni le saisir dans une question ordinaire.
+Le protocole d’écho matériel doit confirmer le masquage avant la demande.
+RETOUR, ANNULATION ou SOMMAIRE permettent d’annuler; une erreur ou un délai
+dépassé laisse la mémoire verrouillée.
+
+La session autorisée accepte ensuite **RETIENS**, **SOUVIENS-TOI**, **MÉMORISE**,
+les corrections et **OUBLIE** pour les faits/préférences du foyer. Par exemple :
+« RETIENS que le frère d’Alice est Bob ». Utiliser des personnes nommées; le profil
+MinitelGPT ne désigne pas une personne. Les nouveaux textes et corrections sont
+publiés avec l’origine `household`, lisibles par tous, et inspectables dans
+Maintenance. Notes, listes et tâches ne sont pas publiées par ce parcours.
+MEMOIRE GLOBALE permet de vérifier le résultat. Les souvenirs des profils nommés
+ne sont pas des cibles d’écriture et leurs partages ne sont pas modifiés.
+
+**DESACTIVER MEMOIRE** (ou **VERROUILLER MEMOIRE**) referme immédiatement l’accès.
+SOMMAIRE, LOGOUT, la fin de session, la déconnexion et l’inactivité habituelle du
+terminal (cinq minutes) le referment aussi. Le droit ne concerne que cette session,
+pas les autres terminaux/visiteurs. Aucun droit ni mot de passe n’est conservé en
+base. Un résultat retardé ou un choix ancien ne peut pas écrire après verrouillage,
+même si une autre authentification intervient entre-temps. L’apprentissage
+automatique du profil par défaut reste **désactivé**, même après déverrouillage.
+
+La console de test Conversation reconnaît la même commande et ouvre un champ
+`password` séparé. Le secret passe par une route locale protégée par login/CSRF,
+jamais par la question, le modèle, le cookie ou les journaux de conversation. Un
+changement de profil, SOMMAIRE ou Annuler révoque la demande/le droit; une session
+de test expirée (vingt minutes d’inactivité, limite existante) ne peut pas être
+réactivée par un ancien formulaire. La page mémoire Maintenance garde son propre
+déverrouillage de cinq minutes. GUIDE indique l’adresse de l’admin mais n’affiche
+plus son mot de passe. Aucun changement de schéma SQL, chiffrement ou compte
+utilisateur n’est ajouté par cette commande.
 
 ## Premier accueil
 
@@ -242,7 +281,9 @@ Exemples : « Le Minitel est installé à … », « Le frère d’Alice est Bob
 nommées; une adresse d’installation n’est pas automatiquement celle du visiteur.
 Tous les profils, y compris le défaut, peuvent rappeler les faits publiés. Les
 profils nommés gardent leurs propres commandes/énoncés et ne peuvent ni modifier
-le foyer ni consulter les souvenirs privés des autres. MEMOIRE GLOBALE expose
+le foyer ni consulter les souvenirs privés des autres. Seule une session du profil
+par défaut autorisée par ACTIVER MEMOIRE peut modifier le foyer au terminal.
+MEMOIRE GLOBALE expose
 uniquement les faits publiés; MEMOIRE reste l’inventaire personnel. Les ambiguïtés
 ou contradictions demandent clarification, sans fusion automatique des espaces.
 
@@ -329,6 +370,13 @@ migration/reprise/concurrence, intégrité, isolation, vecteurs périmés/corrom
 repli local, sources automatiques, baux/retry/limites, priorité explicite et accès
 admin/CSRF/expiration/export. Aucun appel Mistral/Google live, envoi de mail,
 déploiement Pi ou validation matérielle n’est inclus dans ces résultats.
+
+Validation du 1er novembre 2026 pour ACTIVER MEMOIRE : **1103 tests et 400
+sous-tests réussis**, dont 22 nouveaux cas couvrant l’autorisation, l’écho masqué,
+les refus/annulations, l’isolation entre sessions, les écritures publiées, le
+verrouillage pendant une réponse retardée et la console navigateur. Sync uv
+verrouillé/all-extras, Ruff, exports requirements, syntaxe shell et espaces
+vérifiés. Aucun déploiement ni test matériel n’a été effectué.
 
 Sur le Pi : sauvegarder avant migration; mettre à jour; vérifier les souvenirs
 existants dans Maintenance; tester deux profils et le défaut; reformuler un rappel;
