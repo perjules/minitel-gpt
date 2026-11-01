@@ -414,6 +414,29 @@ shared runtime assets. Power requests are delayed transient systemd jobs and do
 not run concurrently with deployment. This adds no permanent monitoring service.
 
 
+### First switch to a new branch
+
+Older helpers queried missing local branches with `git show-ref --verify`, which
+returns 128 rather than the expected 1. The corrected preflight and checkout use
+`--quiet` so a missing branch is distinguished from a real Git failure. Existing
+branch ancestry, local data protection, readiness and rollback checks still apply.
+
+A fix on the target branch cannot repair the helper that must first switch to
+it. If the installed helper has this bug, create only the local branch reference
+from the remote target, then preview and confirm again in Maintenance:
+
+```bash
+cd /home/minitel/minitel-gpt
+git fetch origin +refs/heads/feature/terminal-ux:refs/remotes/origin/feature/terminal-ux
+git branch --no-track feature/terminal-ux refs/remotes/origin/feature/terminal-ux
+```
+
+These commands do not switch the checkout, change tracked files or restart any
+service. If Git reports that the local branch already exists, leave it intact.
+Use a fresh admin preview after fetching, since the confirmed commit may change.
+If deployment still fails, inspect `sudo journalctl -u minitel-deploy -n 100
+--no-pager`; a generic `CalledProcessError` does not identify the failed step.
+
 ## Multi-user compatibility
 
 See [USERS.md](USERS.md). Once the encrypted account bundle exists, code targets
