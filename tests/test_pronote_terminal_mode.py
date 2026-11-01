@@ -73,22 +73,28 @@ class TerminalModeTests(unittest.TestCase):
         keys += startup.fn(chat.K_RETOUR) + b"Hello" + startup.fn(chat.K_ENVOI)
         with patch.object(chat.pronote, "backend", return_value=backend), patch.object(chat, "start_pronote", side_effect=start):
             helper = startup.StartupTests()
-            screens, normal = helper.run_session(keys)
+            _screens, normal = helper.run_session(keys)
         self.assertEqual([c["arguments"]["child"] for c in calls], ["Alex", "Sam"])
         self.assertEqual(len(normal), 1)
         self.assertEqual(normal[0][1], [{"role": "user", "content": "Hello"}])
-        self.assertTrue(any("PRONOTE / Alex" in screen for screen in screens))
-        self.assertTrue(any("PRONOTE / Sam" in screen for screen in screens))
-        self.assertTrue(any("Retour a la conversation" in screen for screen in screens))
+        self.assertTrue(any("PRONOTE / Alex" in screen for screen in helper.result_screens))
+        self.assertTrue(any("PRONOTE / Sam" in screen for screen in helper.result_screens))
+        self.assertTrue(any("Retour a la conversation" in screen for screen in helper.result_screens))
 
-    def test_pagination_only_suite_pages_and_retour_exits_mode(self):
-        for function, expected in ((chat.K_RETOUR, "retour"), (chat.K_SOMMAIRE, "sommaire"), (chat.K_GUIDE, "guide")):
+    def test_mode_navigation_occurs_during_input_without_blocking_display(self):
+        for function, expected in ((chat.K_RETOUR, ("RETOUR", "envoi")),
+                                   (chat.K_SOMMAIRE, (None, "sommaire")),
+                                   (chat.K_GUIDE, (None, "guide"))):
             with self.subTest(function=function):
                 uart = startup.FakeSerial(startup.fn(function))
                 term = chat.Term(transport=uart)
-                self.assertEqual(chat.show_response(term, "\n".join(["x" * 39] * 40), allow_retour=True), expected)
-        uart = startup.FakeSerial(startup.fn(chat.K_SUITE) * 3)
-        self.assertEqual(chat.show_response(chat.Term(transport=uart), "\n".join(["x" * 39] * 40), allow_retour=True), "done")
+                self.assertEqual(chat.show_response(term, "\n".join(["x" * 39] * 40)), "done")
+                self.assertEqual(chat.read_question(term, calculator_mode=True), expected)
+        uart = startup.FakeSerial(startup.fn(chat.K_SUITE) * 3 + b"LIRE 1" + startup.fn(chat.K_ENVOI))
+        term = chat.Term(uart)
+        chat.show_response(term, "\n".join(["x" * 39] * 40))
+        self.assertEqual(chat.read_question(term), ("LIRE 1", "envoi"))
+        self.assertEqual(term.view.page, 2)
 
     def test_one_grade_per_page_with_forward_and_backward_function_keys(self):
         backend = Mock()
@@ -109,8 +115,9 @@ class TerminalModeTests(unittest.TestCase):
         for text in ("QUITTER", "Hello"):
             keys += text.encode() + startup.fn(chat.K_ENVOI)
         with patch.object(chat.pronote, "backend", return_value=backend), patch.object(chat, "start_pronote", side_effect=start) as request:
-            screens, normal = startup.StartupTests().run_session(keys)
-        pages = [s for s in screens if any(f"Note {i}/3" in s for i in range(1, 4))]
+            helper = startup.StartupTests()
+            _screens, normal = helper.run_session(keys)
+        pages = [s for s in helper.result_screens if any(f"Note {i}/3" in s for i in range(1, 4))]
         expected = ("ALPHA", "BETA", "ALPHA", "BETA", "GAMMA", "GAMMA")
         self.assertEqual(len(pages), len(expected))
         for page, subject in zip(pages, expected):

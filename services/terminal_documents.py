@@ -1,104 +1,17 @@
-"""Browse loaded documents and accept commands on every page, including the last."""
+"""Browse loaded feature results using the shared fixed-frame editor/view."""
 
-from . import rose_terminal
+from . import rose_terminal, terminal_display
 
 
-def read(
-    term, text, language="fr", *, reviewed=None, check=None, touch=None, echo=False
-):
-    """Return (command, action). Page navigation never invokes a service/model.
-
-    A private caller supplies its lock/expiry checks and requests explicit echo
-    while hardware echo is disabled. Draft approval occurs after all pages have
-    been displayed, independently of when the reader submits a command.
-    """
-    chat = rose_terminal.api()
-    lines = chat.wrap(chat.safe_display(text))
-    pages = [
-        lines[i : i + chat.CONTENT_ROWS]
-        for i in range(0, len(lines), chat.CONTENT_ROWS)
-    ] or [[""]]
-    page, seen = 0, set()
-    buffer = []
-    overflow = False
-    acknowledged = False
-
-    def active():
-        if check is not None:
-            check()
-
-    def draw(notice=""):
-        nonlocal acknowledged
-        active()
+def read(term, text, language="fr", *, reviewed=None, check=None, touch=None,
+         echo=False, title="3615 IA / DOCUMENT"):
+    view = terminal_display.View(term, text, language, title=title, reviewed=reviewed, check=check)
+    view.install()
+    try:
+        return view.read(echo=echo, touch=touch)
+    except rose_terminal.EchoUnavailable:
+        # Leave the feature cleanly rather than crashing or guessing whether
+        # hardware echo is still active. Secret journal input has its own guard.
         term.clear()
-        term.w(chat.FG_WHITE)
-        for line in pages[page]:
-            term.line(line)
-        term.line(f"Page {page + 1}/{len(pages)} | SUITE / RETOUR")
-        term.line(
-            notice
-            or (
-                "Commande + ENVOI / SOMMAIRE"
-                if language == "fr"
-                else "Command + ENVOI / SOMMAIRE"
-            )
-        )
-        term.w("> " + "".join(buffer))
-        active()
-        seen.add(page)
-        if reviewed is not None and not acknowledged and len(seen) == len(pages):
-            reviewed()
-            acknowledged = True
-
-    draw()
-    while True:
-        active()
-        kind, code = term.read_key(0.2 if check is not None else chat.IDLE_TIMEOUT)
-        active()
-        if kind == "timeout":
-            if check is not None:
-                continue
-            return None, "timeout"
-        if touch is not None:
-            touch()
-        submitted = (kind == "fn" and code == chat.K_ENVOI) or (
-            kind == "char" and code in (chat.CR, chat.LF)
-        )
-        if submitted:
-            if overflow:
-                buffer.clear()
-                overflow = False
-                draw("Saisie trop longue. Recommencez.")
-            elif buffer:
-                term.w(b"\r\n")
-                return "".join(buffer), "envoi"
-            continue
-        if kind == "fn":
-            if code == chat.K_SOMMAIRE:
-                return None, "sommaire"
-            if code == chat.K_GUIDE:
-                return None, "guide"
-            if code in (chat.K_SUITE, chat.K_RETOUR):
-                page = max(
-                    0, min(len(pages) - 1, page + (1 if code == chat.K_SUITE else -1))
-                )
-                draw()
-                continue
-            if code == chat.K_ANNUL:
-                buffer.clear()
-                overflow = False
-                draw()
-                continue
-        if (kind == "fn" and code == chat.K_CORR) or (
-            kind == "char" and code in (chat.BS, 0x7F)
-        ):
-            if buffer:
-                buffer.pop()
-                term.w(b"\x08 \x08")
-        elif kind == "char" and 0x20 <= code <= 0x7E:
-            if len(buffer) < 2000 and not overflow:
-                buffer.append(chr(code))
-                if echo:
-                    term.w(bytes([code]))
-            else:
-                overflow = True
+        term.line("Saisie indisponible. Reconnectez-vous.")
+        return None, "sommaire"

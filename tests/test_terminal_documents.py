@@ -8,8 +8,9 @@ from test_gmail import draft, make_session
 from test_rose_echo import RoutingSerial, submitted
 from test_terminal_startup import EndOfInput, FakeSerial, fn, screen_text
 
-from services import memory_session, terminal_documents
+from services import memory_session, terminal_display, terminal_documents
 from services import minitel_chatgpt as chat
+from services.console_terminal import Screen
 
 
 @pytest.fixture
@@ -39,7 +40,13 @@ def test_command_can_be_entered_on_first_page_without_approving_unseen_text(term
     reviewed.assert_not_called()
 
 
-def test_previous_from_last_page_preserves_typed_input_and_review_runs_once(terminal):
+def test_previous_from_last_page_preserves_typed_input_and_review_runs_once(terminal, monkeypatch):
+    visited = []
+    original = terminal_display.View.move
+    def move(view, step):
+        original(view, step)
+        visited.append(view.page)
+    monkeypatch.setattr(terminal_display.View, "move", move)
     keys = (
         fn(chat.K_RETOUR)
         + b"M: "
@@ -54,11 +61,12 @@ def test_previous_from_last_page_preserves_typed_input_and_review_runs_once(term
         "envoi",
     )
     reviewed.assert_called_once_with()
-    shown = screen_text(serial.output)
-    assert shown.count("Page 1/3") == 3
-    assert shown.count("Page 2/3") == 2
-    assert shown.count("Page 3/3") == 1
-    assert "> M: " in shown  # Redrawn on navigation without resubmitting input.
+    assert visited == [0, 1, 2, 1, 0]
+    screen = Screen()
+    screen.write(serial.output)
+    shown = "\n".join("".join(row) for row in screen.rows)
+    assert "Page 1/3" in shown
+    assert "> M: raccourcis" in shown
 
 
 def test_early_send_returns_to_pending_draft_then_all_pages_enable_send(terminal):

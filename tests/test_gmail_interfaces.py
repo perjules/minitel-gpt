@@ -11,7 +11,7 @@ from test_terminal_startup import fn
 
 from services import admin_ui as admin
 from services import gmail_mail as mail
-from services import memory_session
+from services import memory_session, terminal_documents
 from services import minitel_chatgpt as terminal
 
 
@@ -278,13 +278,14 @@ class TerminalMailTests(unittest.TestCase):
             self.assertIsNone(result["turn"])
             public.assert_not_called()
         text = terminal.safe_display(result["display"])
-        term = object.__new__(terminal.Term)
-        term.s = startup.FakeSerial(fn(terminal.K_SOMMAIRE))
-        self.assertEqual(terminal.show_response(term, text), "sommaire")
+        term = terminal.Term(startup.FakeSerial(fn(terminal.K_SOMMAIRE)))
+        self.assertEqual(terminal_documents.read(term, text)[1], "sommaire")
         self.assertFalse(session.review_valid(result["review_ticket"]))
         before = (client.method_calls[:], model.method_calls[:])
-        term.s = startup.FakeSerial(fn(terminal.K_SUITE) * (len(mail.pages(text)) - 1))
-        self.assertEqual(terminal.show_response(term, text), "done")
+        term.s = startup.FakeSerial(fn(terminal.K_SUITE) * (len(mail.pages(text)) - 1)
+                                    + b"ENVOYER" + fn(terminal.K_ENVOI))
+        self.assertEqual(terminal_documents.read(term, text, reviewed=lambda: session.acknowledge(result["review_ticket"])),
+                         ("ENVOYER", "envoi"))
         self.assertEqual(before, (client.method_calls, model.method_calls))
         session.acknowledge(result["review_ticket"])
         session.handle("ENVOYER", result["review_ticket"])
@@ -335,16 +336,15 @@ class TerminalMailTests(unittest.TestCase):
         ticket = result["review_ticket"]
         text = terminal.safe_display(result["display"])
         page_count = len(mail.pages(text))
-        term = object.__new__(terminal.Term)
         uart = startup.FakeSerial(fn(terminal.K_SOMMAIRE))
-        term.s = uart
-        self.assertEqual(terminal.show_response(term, text), "sommaire")
+        term = terminal.Term(uart)
+        self.assertEqual(terminal_documents.read(term, text)[1], "sommaire")
         self.assertFalse(session.review_valid(ticket))
         client.send.assert_not_called()
-        uart = startup.FakeSerial(fn(terminal.K_SUITE) * (page_count - 1))
+        uart = startup.FakeSerial(fn(terminal.K_SUITE) * (page_count - 1) + b"ENVOYER" + fn(terminal.K_ENVOI))
         term.s = uart
-        self.assertEqual(terminal.show_response(term, text), "done")
-        session.acknowledge(ticket)
+        self.assertEqual(terminal_documents.read(term, text, reviewed=lambda: session.acknowledge(ticket)),
+                         ("ENVOYER", "envoi"))
         self.assertIn(
             "Envoye par Minitel 722079V (138121)", startup.screen_text(uart.output)
         )

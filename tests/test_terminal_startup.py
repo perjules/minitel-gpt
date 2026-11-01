@@ -84,6 +84,14 @@ class FakeSerial:
         self.keys = deque(keys)
         self.output = bytearray()
         self.consumed = bytearray()
+        self.local_echo = True
+
+    def set_local_echo(self, enabled):
+        # Future keys remain queued; this fixture records UART output only.
+        self.local_echo = bool(enabled)
+
+    def reset_input_buffer(self):
+        pass
 
     def read(self, count):
         if not self.keys:
@@ -114,6 +122,8 @@ def screen_text(data):
         elif escape:
             skip = code - 0x38 if code in (0x39, 0x3A, 0x3B) else 0
             escape = False
+        elif code == 0x1F:
+            skip = 2
         elif code == chat.ESC:
             escape = True
         elif code in (chat.CR, chat.LF) or 0x20 <= code <= 0x7E:
@@ -149,6 +159,11 @@ def render_videotex(data):
                 index += 2
                 if mode == 0x43:
                     scrolling = operation == 0x69
+        elif code == 0x1F:
+            address = data[index:index + 2]
+            index += 2
+            if len(address) == 2 and 0x41 <= address[0] <= 0x58 and 0x41 <= address[1] <= 0x68:
+                row, column = address[0] - 0x41, address[1] - 0x41
         elif code == 0x0C:
             screen = [""] * 24
             row = column = 0
@@ -205,6 +220,25 @@ class StartupTests(unittest.TestCase):
                 output.put((None, error))
             return Mock(is_alive=lambda: False), output, chat.time.monotonic()
 
+        from services.console_terminal import Screen
+        rendered, offset, self.result_screens = Screen(), 0, []
+        install, move = chat.terminal_display.View.install, chat.terminal_display.View.move
+
+        def snapshot():
+            nonlocal offset
+            rendered.write(uart.output[offset:])
+            offset = len(uart.output)
+            self.result_screens.append("\n".join("".join(row) for row in rendered.rows))
+
+        def capture_install(view):
+            result = install(view)
+            snapshot()
+            return result
+
+        def capture_move(view, step):
+            move(view, step)
+            snapshot()
+
         real_read_key = chat.Term.read_key
 
         def read_key(term, timeout):
@@ -226,6 +260,8 @@ class StartupTests(unittest.TestCase):
             patch.object(chat.serial, "Serial", return_value=uart),
             patch.object(chat.time, "sleep"),
             patch.object(chat.Term, "read_key", read_key),
+            patch.object(chat.terminal_display.View, "install", capture_install),
+            patch.object(chat.terminal_display.View, "move", capture_move),
             patch.object(chat, "load_preset", return_value=preset or (
                 "Reponds en francais.", "*** 3615 IA ***",
                 "Quelle est votre requete ?", "ATTENTE...", None,
@@ -339,12 +375,13 @@ class StartupTests(unittest.TestCase):
             + b"ex" + fn(chat.K_CORR) + b"n" + fn(chat.K_ENVOI) + b"Hello" + fn(chat.K_ENVOI))
         self.assertIn("Reply in English", calls[0][0])
 
-    def test_english_pagination_still_requires_french_suite_key(self):
+    def test_english_pagination_keeps_french_function_keys_and_does_not_block(self):
         uart = FakeSerial(fn(chat.K_ENVOI) + fn(chat.K_SUITE))
         term = chat.Term(uart)
         with patch.object(chat.time, "sleep"):
             self.assertEqual(chat.show_response(term, "\n".join(["Answer"] * 19), "en"), 'done')
-        self.assertIn("SUITE for the next page", screen_text(uart.output))
+        self.assertIn("SUITE:suiv RETOUR:prec", screen_text(uart.output))
+        self.assertEqual(bytes(uart.keys), fn(chat.K_ENVOI) + fn(chat.K_SUITE))
 
     def test_start_screens_fit_without_truncation(self):
         rows = chat.UI["fr"]["boot"]

@@ -79,3 +79,18 @@ successful subtests, so its summary includes more outcomes than unittest's test
 count; collection should still contain those same 364 method IDs. Future added
 or parametrized tests can legitimately change that count. Tests must work in the
 machine's local timezone as well as UTC; token-expiry fixtures use UTC explicitly.
+
+## Isolated physical display probe (WP1)
+
+See [DISPLAY_PROBE.md](DISPLAY_PROBE.md) for the STUM references, safe Pi
+procedure, recovery and observations needed before any geometry change. Focused
+offline checks: `uv run --locked --all-extras pytest tests/test_display_probe.py`.
+The diagnostic is never run against hardware by the automated suite.
+
+## Fixed 40-column frame
+
+[TERMINAL_UX.md](TERMINAL_UX.md) records the WP1 hardware findings, frame layout,
+shared editor/view behavior and WP6 physical checklist. The console and offline
+fixtures interpret absolute cursor writes; tests of visible output must inspect
+rendered rows rather than count whole-page UART substrings. Focused tests live in
+`tests/test_terminal_display.py` and `tests/test_terminal_documents.py`.

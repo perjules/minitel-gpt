@@ -204,6 +204,14 @@ def test_hardware_echo_password_hidden_normal_input_once_and_routes_restored(
         + bytes([chat.SEP, chat.K_SOMMAIRE])
     )
     serial = RoutingSerial(keys)
+    from services.console_terminal import Screen
+    screen, frames = Screen(), []
+    write = serial.write
+    def capture(data):
+        screen.write(data)
+        frames.append("\n".join("".join(row) for row in screen.rows))
+        return write(data)
+    monkeypatch.setattr(serial, "write", capture)
     term = chat.Term(serial)
     routes = dict(serial.routes)
     # A real user waits for the result before typing the next command. The
@@ -216,9 +224,10 @@ def test_hardware_echo_password_hidden_normal_input_once_and_routes_restored(
     assert all(copies == 0 for _, copies in serial.echo)
     assert b"SYNTHETIC_PW_q7" not in serial.output
     assert serial.output.endswith(b"Journal verrouille.\r\n")
-    # The typed text is explicitly echoed once; it appears again in its preview.
-    assert serial.output.count(b"TEXTE : PRIVATE NOTE") == 1
-    assert serial.output.count(b"PRIVATE NOTE") == 2
+    # Incremental cursor writes form one visible input and a separate preview;
+    # raw UART substring counts no longer represent rendered text.
+    assert any("> TEXTE : PRIVATE NOTE" in frame for frame in frames)
+    assert any("PRIVATE NOTE" in frame and "> TEXTE : PRIVATE NOTE" not in frame for frame in frames)
     assert not (registry.root / user.memory_key / "logs").exists()
 
 
