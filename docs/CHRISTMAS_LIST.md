@@ -79,3 +79,23 @@ Sur Pi/Minitel : ouvrir NOEL, ajouter deux cadeaux avec A:, cocher puis supprime
 parcourir plusieurs pages avec SUITE/RETOUR, consulter depuis un autre profil,
 puis tester Q:, SOMMAIRE, LOGOUT et la persistance après redémarrage.
 Ces contrôles matériels et le libellé réel du modèle restent à valider.
+
+### Diagnostic des ajouts IA
+
+Le choix de `A:` constitue déjà une demande d'ajout : les noms seuls (`UNE LOUPE`)
+et les phrases courtes sont acceptés sans répéter « ajoute » ou « pour Noël ».
+Les instructions de ce service utilisent le contexte général, sans les règles
+de traitement du contenu d'un email. Une réponse vide est signalée comme
+« Aucun cadeau reconnu », distinctement d'une erreur API ou d'un JSON invalide.
+
+Après un essai, extraire les traces sur le Pi :
+
+```bash
+sudo journalctl --namespace=minitel-gpt -u minitel-chatgpt \
+  --since "5 minutes ago" --no-pager | grep -E 'llm_call|christmas_add'
+```
+
+`llm_call status=ok` confirme la réception d'une réponse, pas son acceptation
+par le service. `christmas_add` indique `status=ok items=N` ou un motif fixe :
+`no_items`, `invalid_json`, `invalid_schema`, `invalid_item`, `api_…`.
+Aucun texte saisi, cadeau, réponse brute ou secret dans ces traces de diagnostic.
