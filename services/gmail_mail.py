@@ -167,7 +167,7 @@ class MailModel:
         except mistral_settings.SettingsError as error:
             raise GmailError(str(error)) from None
 
-    def complete(self, instructions, data, deadline, structured=False, *, draft=False, character=False):
+    def complete(self, instructions, data, deadline, structured=False, *, draft=False, character=False, schema=None):
         profile = self.profile(draft)
         key, model = profile["key"], profile["model"]
         if not key:
@@ -178,6 +178,8 @@ class MailModel:
         effort = profile["reasoning_effort"]
         reasoning = draft and (effort in {"low", "medium", "high"} or (
             not effort and model in {"mistral-large-4", "mistral-large-4-0"}))
+        if schema is not None:
+            instructions += "\nYour output must follow this JSON schema: " + json.dumps(schema)
         started, usage, status = time.monotonic(), {}, "failed"
         try:
             response = requests.post(
@@ -212,6 +214,10 @@ class MailModel:
                     "temperature": 0.2,
                     **({"reasoning_effort": effort} if effort else {}),
                     **(
+                        {"response_format": {"type": "json_schema", "json_schema": {
+                            "name": "structured_response", "schema": schema, "strict": True,
+                        }}}
+                        if schema is not None else
                         {"response_format": {"type": "json_object"}}
                         if structured
                         else {}

@@ -84,6 +84,15 @@ Ces contrôles matériels et le libellé réel du modèle restent à valider.
 
 Le choix de `A:` constitue déjà une demande d'ajout : les noms seuls (`UNE LOUPE`)
 et les phrases courtes sont acceptés sans répéter « ajoute » ou « pour Noël ».
+Les ajouts utilisent désormais `response_format: json_schema` avec un schéma strict :
+objet contenant uniquement `items`, de 1 à 30 chaînes de 1 à 300 caractères.
+La contrainte `minItems: 1` exclut les réponses vides constatées avec le simple
+mode `json_object`, qui ne garantissait que du JSON syntaxiquement valide.
+La formulation vague d'un souhait est conservée plutôt qu'omise. Python vérifie
+toujours la réponse avant tout enregistrement; pas de repli silencieux vers du
+texte brut ni de nouvel essai automatique. Les autres appels du helper conservent
+leur format actuel. Référence : [Mistral — formats de réponse](https://docs.mistral.ai/api/endpoint/chat).
+
 Les instructions de ce service utilisent le contexte général, sans les règles
 de traitement du contenu d'un email. Une réponse vide est signalée comme
 « Aucun cadeau reconnu », distinctement d'une erreur API ou d'un JSON invalide.

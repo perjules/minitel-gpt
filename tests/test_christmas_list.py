@@ -126,7 +126,7 @@ def test_ai_structured_output_and_invalid_results(monkeypatch):
     complete = Mock(return_value='{"items": ["Lego Technic 42154", "Pull taille M"]}')
     monkeypatch.setattr(model.client, "complete", complete)
     assert model.additions("des Lego et un pull", 10) == ["Lego Technic 42154", "Pull taille M"]
-    assert complete.call_args.kwargs == {"structured": True}
+    assert complete.call_args.kwargs == {"schema": christmas.ADDITIONS_SCHEMA}
     for output in ('{}', '[]', '{"items": []}', '{"items": [4]}', '{"items": ["x"], "user": 3}', '{"items": ["a\\nb"]}'):
         complete.return_value = output
         with pytest.raises(persistent_memory.MemoryProblem, match="Aucun ajout"):
@@ -197,6 +197,7 @@ def test_browser_preview_routes_christmas_before_other_models(tmp_path, monkeypa
     "wish_text,items",
     [
         ("UNE LOUPE", ["Une loupe"]),
+        ("new television", ["New television"]),
         ("un vélo rouge taille M et des Lego", ["Un vélo rouge taille M", "Des Lego"]),
         ("une loupe, est-ce que tu as une loupe ?", ["Une loupe"]),
     ],
@@ -218,7 +219,17 @@ def test_addition_http_contract_and_persistence(household, monkeypatch, wish_tex
     assert "Liste enregistrée" in result["display"]
     assert [item["text"] for item in current.store.load(owner.user)["items"]] == items
     payload = post.call_args.kwargs["json"]
-    assert payload["response_format"] == {"type": "json_object"}
+    response_format = payload["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["strict"] is True
+    schema = response_format["json_schema"]["schema"]
+    assert schema["required"] == ["items"]
+    assert schema["additionalProperties"] is False
+    assert schema["properties"]["items"]["minItems"] == 1
+    assert schema["properties"]["items"]["maxItems"] == 30
+    assert schema["properties"]["items"]["items"] == {
+        "type": "string", "minLength": 1, "maxLength": 300,
+    }
     assert json.loads(payload["messages"][1]["content"]) == {"request": wish_text}
     instructions = payload["messages"][0]["content"]
     assert "already selected AJOUTER" in instructions
