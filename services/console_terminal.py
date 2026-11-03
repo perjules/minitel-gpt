@@ -21,6 +21,7 @@ class Screen:
         self.rows = [list(" " * self.geometry.columns) for _ in range(self.geometry.rows)]
         self.row = self.column = 0
         self.scrolling = False
+        self.cursor_visible = True
         self.escape = bytearray()
 
     def down(self):
@@ -57,6 +58,10 @@ class Screen:
                     elif command in (0x5C, 0x5D):
                         self.inverse = command == 0x5D
                     self.escape.clear()
+            elif code == 0x11:
+                self.cursor_visible = True
+            elif code == 0x14:
+                self.cursor_visible = False
             elif code == 0x1F:
                 self.address = bytearray()
             elif code == 0x1B:
@@ -150,6 +155,10 @@ class ConsoleSerial:
             if height > 24:
                 self.window.addnstr(24, 0, self.hint, width - 1)
             self.window.move(self.screen.row, self.screen.column)
+            try:
+                curses.curs_set(1 if self.screen.cursor_visible else 0)
+            except curses.error:
+                pass
         self.window.refresh()
 
     def write(self, data):

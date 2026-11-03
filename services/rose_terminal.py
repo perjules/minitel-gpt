@@ -24,13 +24,8 @@ def routing_status(term, receiver, command=None, timeout=1):
     term.w(command if command is not None else bytes([0x1B, 0x3A, 0x62, receiver]))
     prefix = bytes([0x1B, 0x3B, 0x63, receiver])
     reply = bytearray()
-    wire_until = getattr(term, "_tx_until", 0)
-    if not isinstance(wire_until, (int, float)):
-        wire_until = 0
-    # The reply budget starts after the queued screen and query can reach the
-    # terminal, not when write() hands them to the OS. Never use an unbounded
-    # serial flush: the reply still has a finite monotonic deadline.
-    deadline = max(time.monotonic(), wire_until) + timeout
+    # Share the same wire/driver backlog budget as the presence monitor.
+    deadline = term.reply_deadline(timeout, now=time.monotonic())
     while time.monotonic() < deadline:
         code = term.read_byte()
         if code is None:

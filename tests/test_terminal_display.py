@@ -257,3 +257,32 @@ def test_update_confirmation_waits_for_complete_loaded_preview(hardware, monkeyp
     monkeypatch.setattr(chat.mainframe_update, "clear_resume", Mock())
     assert chat.terminal_update(term, "fr")[0] == "done"
     assert calls == [None, {"ok": True, "behind": 1}]
+
+
+def test_waiting_message_is_centered_in_status_and_caret_returns_to_input(hardware):
+    term, uart = hardware(submitted("NEXT"))
+    chat.show_response(term, "Loaded content remains here")
+    term.view.buffer = list("previous command")
+    term.view.input()
+    content = uart.lines()[1:19]
+    before = len(uart.output)
+    term.waiting("CONSULTATION PRONOTE")
+    assert uart.lines()[1:19] == content
+    assert uart.lines()[20][:39] == "CONSULTATION PRONOTE".center(39)
+    assert uart.lines()[21].strip() == ">"
+    assert all(not row.strip() for row in uart.lines()[22:])
+    assert not uart.screen.cursor_visible
+    assert 21 <= uart.screen.row <= 23
+    assert b"\r\n" not in uart.output[before:]
+    assert chat.read_question(term) == ("NEXT", "envoi")
+    assert uart.screen.cursor_visible
+    assert 21 <= uart.screen.row <= 23
+
+
+def test_long_waiting_message_stays_on_one_status_row(hardware):
+    term, uart = hardware()
+    chat.show_response(term, "KEEP")
+    term.waiting("A very long waiting message\n" * 5)
+    assert uart.lines()[20][:39].endswith("...")
+    assert uart.lines()[1].startswith("KEEP")
+    assert uart.lines()[21].strip() == ">"

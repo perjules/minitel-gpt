@@ -438,10 +438,8 @@ class Term:
                 log.info("Terminal status unsupported; physical power detection disabled")
                 return
         if self._presence_deadline is None and now >= self._presence_due:
-            queued = self.io(getattr, self.s, "out_waiting", 0)
             self.w(b"\x1b\x39\x70")
-            # At 1200 baud the boot/page may still be queued ahead of this probe.
-            self._presence_deadline = now + 1 + queued * 10 / BAUD
+            self._presence_deadline = self.reply_deadline(1)
             self._presence_due = now + 2
 
     def presence_reply(self):
@@ -487,6 +485,24 @@ class Term:
             # when the driver reports out_waiting == 0. Track all queued 7E1
             # bytes so protocol deadlines include the screen ahead of them.
             self._tx_until = max(started, getattr(self, "_tx_until", 0)) + len(data) * 10 / baud
+
+    def reply_deadline(self, timeout, *, now=None):
+        """One serial timing budget for routing ACKs and presence replies."""
+        now = time.monotonic() if now is None else now
+        queued = self.io(getattr, self.s, "out_waiting", 0)
+        if not isinstance(queued, int) or queued < 0:
+            queued = 0
+        baud = getattr(self.s, "baudrate", BAUD)
+        if not isinstance(baud, int) or baud <= 0:
+            baud = BAUD
+        return max(now, getattr(self, "_tx_until", 0), now + queued * 10 / baud) + timeout
+
+    def waiting(self, text):
+        if self.view is not None:
+            self.view.busy(text)
+        else:
+            self.line()
+            self.center(text)
 
     def clear(self):
         self.view = None
@@ -1472,8 +1488,7 @@ def run_session(t):
         greeted = False
         if (isinstance(getattr(memory, "welcome", None), memory_session.onboarding.Session)
                 and memory.welcome.should_greet() and not (pending is not None and pending[0].is_alive())):
-            t.line()
-            t.center(loading_msg)
+            t.waiting(loading_msg)
             pending = start_answer(system_prompt, [], language, options, knowledge,
                                    memory=memory, welcome_start=True)
             t._pending = pending
@@ -1633,8 +1648,7 @@ def run_session(t):
                 elif pending is not None and pending[0].is_alive():
                     answer = "Requete precedente en cours. Reessayez bientot."
                 else:
-                    t.w(bytes([CR, LF]))
-                    t.center("CONSULTATION PRONOTE")
+                    t.waiting("CONSULTATION PRONOTE")
                     pending = start_pronote(direct, school_mode.backend, language, options, knowledge)
                     t._pending = pending
                     response, action = wait_answer(t, pending, options[2], allow_retour=True)
@@ -1749,13 +1763,11 @@ def run_session(t):
             except pronote.PronoteError:
                 # A broken school configuration must not feed private input to learning.
                 private_question = True
-            t.w(bytes([CR, LF]))
             calculator_request = calc.explicit(question) or (
                 calculator.candidate(question) and not calculator_blocked(mail, memory)
                 and not (isinstance(getattr(memory, "welcome", None), memory_session.onboarding.Session)
                          and memory.welcome.should_greet()))
-            t.w(FG_CYAN); t.line("")
-            t.center(calculator.content(language)["loading"] if calculator_request else loading_msg)
+            t.waiting(calculator.content(language)["loading"] if calculator_request else loading_msg)
             # Do not pile up paid calls while a locally abandoned HTTP request
             # is still running. Its isolated queue is discarded when it ends.
             response = None

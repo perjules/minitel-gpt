@@ -139,6 +139,18 @@ class View:
         fallback = "Commande + ENVOI / SOMMAIRE" if self.language == "fr" else "Command + ENVOI / SOMMAIRE"
         self.row(self.geometry.status_row, text or fallback)
 
+    def busy(self, message):
+        chat = rose_terminal.api()
+        label = chat.safe_display(message).replace("\n", " ").replace("\t", " ")
+        if len(label) > self.geometry.width:
+            label = label[:self.geometry.width - 3] + "..."
+        self.buffer.clear()
+        self.pending_input.clear()
+        self.carry_input = False
+        self.input()
+        self.status(label.center(self.geometry.width))
+        self.term.w(self.geometry.position(self.geometry.input_first, 3) + b"\x14")
+
     def input(self):
         text = "".join(self.buffer)
         # A three-row viewport, with one cell reserved for the cursor. Move in
@@ -178,6 +190,7 @@ class View:
         self.carry_input = False
         overflow = False
         self.draw()
+        self.term.w(b"\x11")  # Input is ready; keep the caret inside its region.
         while True:
             self.active()
             kind, code = self.term.read_key(0.2 if self.check is not None else chat.IDLE_TIMEOUT)

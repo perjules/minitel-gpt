@@ -155,6 +155,30 @@ PRONOTE mode keys, paging with partial input, hidden password entry and bounded
 failure when replies stop. Actual Matra confirmation of this correction remains
 required.
 
+### Presence polling during page changes and waiting placement
+
+A further hardware report exposed a second deadline path: production enables
+terminal-presence polling, while the original paced UART fixture did not. With
+two genuinely different full pages, the redraw queued several seconds of output;
+presence polling still trusted only `out_waiting`, counted three premature
+misses and retired a live terminal (`terminal_status_lost`). The earlier paging
+fixture also reused identical page text, so its delta redraw barely transmitted
+anything. Both omissions are corrected in the regression coverage.
+
+Routing ACKs and presence probes now share `Term.reply_deadline`, taking the
+maximum of the tracked wire completion time, driver-reported backlog and current
+time before adding the finite reply allowance. Disconnect detection remains
+active; long redraws no longer count transmission delay as power loss. All paced
+input tests enable the production presence monitor and use atomic function-key
+frames; added cases page through distinct full screens in both directions while
+preserving a partial command.
+
+Chat/CALC/PRONOTE waiting output now uses an explicit frame operation: the message
+is centered on status row 21, long wording is visibly abbreviated, submitted
+input is cleared and the cursor is hidden while processing. Input setup restores
+the cursor within rows 22–24. Raw CR/LF operations are no longer used to position
+these waiting messages. The console mirrors cursor visibility as well as text.
+
 ## WP6 physical acceptance — owner to run after the branch is made available
 
 The offline suite cannot validate CRT readability, serial input latency or the

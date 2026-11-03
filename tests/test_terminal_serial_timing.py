@@ -74,8 +74,12 @@ class QueuedUART:
                 self.routes[receiver] |= 2
             else:
                 self.routes[receiver] &= ~2
+        reply = None
         if receiver is not None and self.replies:
             reply = b"\x1b\x3b\x63" + bytes([receiver, self.routes[receiver]])
+        elif data == b"\x1b\x39\x70" and self.replies:
+            reply = b"\x1b\x3a\x71\x40"
+        if reply is not None:
             for index, code in enumerate(reply, 1):
                 self.later(self.clock.now + .02 + index * 10 / self.baudrate,
                            lambda code=code: self.incoming.append(code))
@@ -91,7 +95,12 @@ class QueuedUART:
         if self.input and not self.events and not any(value & 2 for value in self.routes.values()):
             code = self.input.popleft()
             self.input_reads += 1
-            if 0x20 <= code <= 0x7E:
+            if code == 0x13 and self.input:
+                # A function key is one atomic two-byte message; an unrelated
+                # protocol reply cannot split its SEP from its key code.
+                self.incoming.append(self.input.popleft())
+                self.input_reads += 1
+            elif 0x20 <= code <= 0x7E:
                 self.echo.append((code, 0))
             return bytes([code])
         return b""
@@ -113,7 +122,13 @@ def paced(monkeypatch):
     monkeypatch.setattr(chat.time, "sleep", clock.sleep)
     def make(keys=b"", **kwargs):
         uart = QueuedUART(clock, keys, **kwargs)
-        return chat.Term(uart), uart, clock
+        term = chat.Term(uart)
+        # Match production defaults: earlier timing tests accidentally skipped
+        # the real serial terminal's presence monitor.
+        term._presence_enabled = True
+        term._presence_seen = True
+        term.start_presence()
+        return term, uart, clock
     return make
 
 
@@ -201,3 +216,33 @@ def test_unconfirmed_restoration_is_a_link_failure_not_local_echo_fallback(paced
         rose_terminal.hidden_echo(term),
     ):
         uart.replies = False
+
+
+@pytest.mark.parametrize("reader", ["chat", "document"])
+def test_distinct_full_page_redraw_with_production_presence_polling(paced, reader):
+    term, uart, _clock = paced(b"\x13\x48" + submitted("FOLLOWUP"))
+    term._presence_enabled = True
+    term._presence_seen = True
+    term.start_presence()
+    text = "\n".join(["A" * 39] * 18 + ["Z" * 39] * 18)
+    if reader == "chat":
+        chat.show_response(term, text)
+        result = chat.read_question(term)
+    else:
+        result = terminal_documents.read(term, text)
+    assert result == ("FOLLOWUP", "envoi")
+    assert term.view.page == 1
+    assert term._presence_enabled and term._presence_seen
+    assert "".join(uart.screen.rows[1]).startswith("Z" * 39)
+    assert b"Saisie indisponible" not in uart.output
+
+
+def test_repeated_distinct_page_navigation_preserves_command_with_presence_enabled(paced):
+    keys = b"RE" + b"\x13\x48" * 2 + b"\x13\x42" * 2 + submitted("PONDRE oui")
+    term, uart, _clock = paced(keys)
+    text = "\n".join([letter * 39 for letter in "AZY" for _ in range(18)])
+    assert terminal_documents.read(term, text) == ("REPONDRE oui", "envoi")
+    assert term.view.page == 0
+    assert term._presence_enabled and term._presence_seen
+    assert uart.screen.rows[1][:39] == list("A" * 39)
+    assert uart.output.count(b"\x0c") == 1
