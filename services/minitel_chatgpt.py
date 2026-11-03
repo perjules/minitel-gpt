@@ -392,6 +392,7 @@ class Term:
     def __init__(self, transport=None):
         self.geometry = terminal_display.STANDARD
         self.view = None
+        self._tx_until = 0.0
         self.link_activity = lambda: None
         if transport is not None:
             self.s = transport
@@ -476,9 +477,16 @@ class Term:
     def w(self, data):
         if isinstance(data, str):
             data = to_ascii(data).encode("ascii", errors="replace")
+        baud = getattr(self.s, "baudrate", None)
+        started = time.monotonic() if isinstance(baud, int) and baud > 0 else None
         written = self.io(self.s.write, data)
         if written is not None and written != len(data):
             raise terminal_link.Unavailable("short_write")
+        if started is not None:
+            # write() queues bytes; the USB adapter can still be transmitting
+            # when the driver reports out_waiting == 0. Track all queued 7E1
+            # bytes so protocol deadlines include the screen ahead of them.
+            self._tx_until = max(started, getattr(self, "_tx_until", 0)) + len(data) * 10 / baud
 
     def clear(self):
         self.view = None

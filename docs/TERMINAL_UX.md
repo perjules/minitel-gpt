@@ -127,6 +127,34 @@ review, grade keys, reset, maintenance, printing and the existing full suite.
 The fixtures now inspect rendered frames where cursor-delta writes replace the
 old assumption of complete page strings separated by FF.
 
+## Buffered serial regression and correction (3 November 2026)
+
+The first real-hardware rollout exposed a gap in the tests: the console and
+original UART fakes handled outgoing bytes immediately. The Matra receives only
+120 bytes/second at 1200 baud, 7E1. A complete response can remain queued for many
+seconds after Python's `write()` returns. The routing guard's one-second timeout
+therefore expired before its query reached the terminal, producing the observed
+`Saisie indisponible` message and unwanted reset/fallback instead of input.
+WP1 did not catch this because the diagnostic explicitly paced its own writes.
+
+`Term` now tracks a conservative transmission completion time for transports
+that provide a baud rate. Routing timeouts allow for all preceding display bytes
+and the query, then grant the normal finite reply budget. This does not rely
+solely on the driver's `out_waiting`, which can omit bytes already handed to a
+USB adapter. It does not call an unbounded serial `flush()`.
+
+The echo guard also reads and verifies both restoration acknowledgements before
+returning. Previously these were only queued and could be mistaken for a later
+OFF command's reply. Unconfirmed restoration is treated as a link failure,
+rather than falling back to an editor that assumes local echo works.
+
+`tests/test_terminal_serial_timing.py` reproduces the original failure with a
+virtual 1200-baud queue, split/delayed acknowledgements and a driver reporting
+`out_waiting == 0`. It covers long results, successive mail-like commands,
+PRONOTE mode keys, paging with partial input, hidden password entry and bounded
+failure when replies stop. Actual Matra confirmation of this correction remains
+required.
+
 ## WP6 physical acceptance — owner to run after the branch is made available
 
 The offline suite cannot validate CRT readability, serial input latency or the

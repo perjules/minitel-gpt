@@ -94,3 +94,8 @@ shared editor/view behavior and WP6 physical checklist. The console and offline
 fixtures interpret absolute cursor writes; tests of visible output must inspect
 rendered rows rather than count whole-page UART substrings. Focused tests live in
 `tests/test_terminal_display.py` and `tests/test_terminal_documents.py`.
+
+The fixed-frame suite also includes `tests/test_terminal_serial_timing.py`, whose
+1200-baud virtual transport delays screen delivery and protocol replies. Console
+checks and immediate-ACK UART fakes alone cannot detect output-backlog deadline
+failures on the physical Matra.
