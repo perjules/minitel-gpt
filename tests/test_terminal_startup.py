@@ -1,6 +1,7 @@
 """Exercise startup through the real UART key decoder and conversation loop."""
 import unittest
 from collections import deque
+from contextlib import ExitStack
 from pathlib import Path
 from queue import Queue
 from tempfile import TemporaryDirectory
@@ -254,33 +255,37 @@ class StartupTests(unittest.TestCase):
         post = Mock(return_value=response, side_effect=boot_error)
         boot_screen = Mock(wraps=chat.show_boot)
 
-        with (
-            patch.object(chat, "select_memory_user", selected_user),
-            patch.object(chat.memory_session, "MemorySession", side_effect=memory),
-            patch.object(chat.serial, "Serial", return_value=uart),
-            patch.object(chat.time, "sleep"),
-            patch.object(chat.Term, "read_key", read_key),
-            patch.object(chat.terminal_display.View, "install", capture_install),
-            patch.object(chat.terminal_display.View, "move", capture_move),
-            patch.object(chat, "load_preset", return_value=preset or (
-                "Reponds en francais.", "*** 3615 IA ***",
-                "Quelle est votre requete ?", "ATTENTE...", None,
-            )),
-            patch.object(chat, "build_title", return_value=["LOGO"]),
-            patch.object(chat, "call_llm", side_effect=reply),
-            patch.object(chat, "start_answer", side_effect=start),
-            patch.object(chat.mistral_answers, "answer", side_effect=factual_reply),
-            patch.dict(chat.os.environ, {"MISTRAL_ANSWER_API": (
-                "conversations" if factual_reply else "chat_completions")}),
-            patch.object(chat.requests, "post", post),
-            patch.object(chat, "MISTRAL_KEY", "test-key" if boot_text or boot_error else ""),
-            patch.object(chat, "ANTHROPIC_KEY", ""),
-            patch.object(chat, "PROVIDER", "mistral"),
-            patch.object(chat, "show_boot", boot_screen),
-            patch.object(chat, "get_ip", return_value="192.0.2.1"),
-            patch.object(chat.log, "info"),
-            self.assertRaises(EndOfInput),
-        ):
+        # Keep the patches below Python 3.11's static block nesting limit.
+        with ExitStack() as stack:
+            contexts = (
+                patch.object(chat, "select_memory_user", selected_user),
+                patch.object(chat.memory_session, "MemorySession", side_effect=memory),
+                patch.object(chat.serial, "Serial", return_value=uart),
+                patch.object(chat.time, "sleep"),
+                patch.object(chat.Term, "read_key", read_key),
+                patch.object(chat.terminal_display.View, "install", capture_install),
+                patch.object(chat.terminal_display.View, "move", capture_move),
+                patch.object(chat, "load_preset", return_value=preset or (
+                    "Reponds en francais.", "*** 3615 IA ***",
+                    "Quelle est votre requete ?", "ATTENTE...", None,
+                )),
+                patch.object(chat, "build_title", return_value=["LOGO"]),
+                patch.object(chat, "call_llm", side_effect=reply),
+                patch.object(chat, "start_answer", side_effect=start),
+                patch.object(chat.mistral_answers, "answer", side_effect=factual_reply),
+                patch.dict(chat.os.environ, {"MISTRAL_ANSWER_API": (
+                    "conversations" if factual_reply else "chat_completions")}),
+                patch.object(chat.requests, "post", post),
+                patch.object(chat, "MISTRAL_KEY", "test-key" if boot_text or boot_error else ""),
+                patch.object(chat, "ANTHROPIC_KEY", ""),
+                patch.object(chat, "PROVIDER", "mistral"),
+                patch.object(chat, "show_boot", boot_screen),
+                patch.object(chat, "get_ip", return_value="192.0.2.1"),
+                patch.object(chat.log, "info"),
+                self.assertRaises(EndOfInput),
+            )
+            for context in contexts:
+                stack.enter_context(context)
             chat.run()
         self.boot_requests = post.call_args_list
         self.boot_screens = boot_screen.call_args_list
