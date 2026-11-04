@@ -62,6 +62,8 @@ class View:
         self.term, self.geometry, self.language = term, getattr(term, "geometry", STANDARD), language
         term.geometry = self.geometry
         self.title = chat.safe_display(title)
+        heading = self.title.replace("\n", " ").replace("\t", " ")[:max(0, self.geometry.width - 8)]
+        self.heading = f"*** {heading} ***".center(self.geometry.width)
         self.text = text
         lines = chat.wrap(chat.safe_display(text), self.geometry.columns)
         height = self.geometry.content_rows
@@ -127,7 +129,7 @@ class View:
 
     def draw(self):
         self.active()
-        self.row(1, self.title, inverse=True)
+        self.row(1, self.heading)
         if self.processing:
             self._frame()
             self.active()
@@ -146,7 +148,7 @@ class View:
 
     def _frame(self):
         """Restore chrome/input after FF without displaying or acknowledging a page."""
-        self.row(1, self.title, inverse=True)
+        self.row(1, self.heading)
         navigation = {"grades": "SUITE:note+ RETOUR:note-", "exit": "SUITE:page RETOUR:quitter"}.get(
             self.feature_navigation, "SUITE:suiv RETOUR:prec")
         self.row(self.geometry.navigation_row, "Requete en cours..." if self.processing else
@@ -201,14 +203,16 @@ class View:
 
     def _erase_row(self, row, column=1):
         """Erase right to left, without writing in column 40 or crossing rows."""
-        old = self.cache.get(row, (" " * self.geometry.width, False))[0]
+        old, inverse = self.cache.get(row, (" " * self.geometry.width, False))
         right = len(old.rstrip())
         if right < column:
             return
         self.term.w(self.geometry.position(row, right + 1))
+        self.term.w((INVERSE if inverse else POSITIVE) + b"\x1b\x47")
         self.term.w(b"\x08 \x08" * (right - column + 1))
+        self.term.w(POSITIVE)
         spaces = " " * (self.geometry.width - column + 1)
-        self.cache[row] = (old[:column - 1] + spaces, False)
+        self.cache[row] = (old[:column - 1] + spaces, inverse)
 
     def input(self):
         text = "".join(self.buffer)
@@ -219,7 +223,7 @@ class View:
         visible = "> " + text[start:]
         for offset in range(self.geometry.input_rows):
             self.row(self.geometry.input_first + offset,
-                     visible[offset * self.geometry.width:(offset + 1) * self.geometry.width])
+                     visible[offset * self.geometry.width:(offset + 1) * self.geometry.width], inverse=True)
         if start or len(text) >= capacity:
             self.status(f"Saisie {len(text)}/{io_limits.MAX_QUESTION_CHARS} | CORRECTION / ANNUL")
         elif self.notice.startswith("Saisie "):

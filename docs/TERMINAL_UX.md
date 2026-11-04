@@ -21,8 +21,9 @@ The owner's Matra Minitel 1, 722 079 V / XB0006B-2, stayed in Videotex during WP
 
 The test strongly supports using the original display, without 80-column
 switching or a smaller-font setting. Eight protocol colors are **gray levels on
-this CRT**. The working frame uses white body text and an inverse heading, so
-readability does not depend on distinguishing colors or dim text. The probe and
+this CRT**. The working frame uses white body text, a centered starred heading
+and an experimental inverse input area. Readability does not depend on
+distinguishing colors or dim text. The probe and
 STUM references remain in [DISPLAY_PROBE.md](DISPLAY_PROBE.md).
 
 ## Screen layout
@@ -32,11 +33,11 @@ wrap and bottom-right rollover; text lines have up to 39 characters.
 
 | Physical rows | Purpose |
 | --- | --- |
-| 01 | Inverse service/context heading |
+| 01 | Centered `*** service/context ***` heading, normal video |
 | 02–19 | 18 rows of loaded content |
 | 20 | Page number and contextual function-key navigation |
 | 21 | Ready/waiting/status/length notice |
-| 22–24 | Fixed input area, up to three visible lines |
+| 22–24 | Fixed inverse input area: white rectangle, black prompt/text |
 
 `services/terminal_display.py` defines a small immutable geometry and one loaded
 `View`: complete text/pages, current page, draft input, displayed-page set and
@@ -254,6 +255,24 @@ pages and repeated forward/backward navigation, actual footer/input positions,
 finite stalled-write failure without replay, and return to the short budget once
 the queue drains. Repeat these paths on the Matra before treating the fix as
 physically validated.
+
+### Heading and inverse-input trial (5 November 2026)
+
+The owner found inverse video effective as an accent but too heavy for the
+top-level heading. Row 1 now centers `*** title ***` in normal video. Long titles
+are shortened to leave room for all three stars on each side.
+
+The three input rows are filled with inverse white spaces across the existing
+39 usable columns, including blank rows. Typed characters, backspace, viewport
+updates and ANNULATION keep that inverse style. Reverse submission erasure also
+uses inverse spaces so it cannot punch black holes in the white field. Full
+clears rebuild the entire white input region; content, heading, status and
+navigation stay in normal video. Column 40 remains the unused rollover margin.
+Private password screens retain their separate hidden-input behavior.
+
+This is a physical presentation trial, not a confirmed readability improvement.
+Check the idle white field, black typed text and cursor visibility on the Matra,
+then compare short/long input, submission and both paging directions.
 
 ## WP6 physical acceptance — owner to run after the branch is made available
 

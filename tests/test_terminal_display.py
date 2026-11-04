@@ -60,6 +60,58 @@ def test_geometry_and_cursor_bounds():
         display.Geometry(columns=80)
 
 
+def assert_white_input(uart):
+    assert all(style == (7, True) for row in uart.screen.styles[21:24] for style in row[:39])
+    assert all(not inverse for row in uart.screen.styles[:21] for _, inverse in row)
+    assert all(row[39] == (7, False) for row in uart.screen.styles)
+
+
+@pytest.mark.parametrize("title", ["3615 IA", "3615 IA / COURRIER", "A" * 80])
+def test_heading_is_centered_between_stars_and_input_is_solid_inverse(hardware, title):
+    term, uart = hardware()
+    display.View(term, "Body", title=title).install()
+    heading = uart.lines()[0][:39]
+    assert heading.strip().startswith("*** ") and heading.strip().endswith(" ***")
+    assert abs(len(heading) - len(heading.lstrip()) - (len(heading) - len(heading.rstrip()))) <= 1
+    assert len(heading.strip()) <= 39
+    assert_white_input(uart)
+    assert uart.lines()[21].strip() == ">"
+    assert all(not line.strip() for line in uart.lines()[22:])
+
+
+def test_inverse_input_survives_editing_viewport_and_reverse_submission_wipe(hardware, monkeypatch):
+    term, uart = hardware()
+    chat.show_response(term, "Small answer")
+    for value in ("HELLO", "HELL", "", "Q" * 113, "Q" * 114, "Q" * 115, "Q" * 100):
+        term.view.buffer = list(value)
+        term.view.input()
+        assert_white_input(uart)
+
+    original = uart.write
+    styles = []
+    def observe(data):
+        written = original(data)
+        styles.append(all(style == (7, True) for row in uart.screen.styles[21:24] for style in row[:39]))
+        return written
+    monkeypatch.setattr(uart, "write", observe)
+    term.waiting("WAIT")
+    assert styles and all(styles)  # Erased characters must not leave black holes in the white field.
+    assert_white_input(uart)
+    assert uart.lines()[21].strip() == ">"
+
+
+def test_full_clear_restores_inverse_input_and_centred_heading_with_draft(hardware):
+    term, uart = hardware(b"DRAFT" + fn(chat.K_SUITE) + fn(chat.K_RETOUR) + submitted(" END"))
+    chat.show_response(term, long_answer())
+    assert chat.read_question(term) == ("DRAFT END", "envoi")
+    assert uart.output.count(b"\x0c") == 3
+    assert uart.lines()[0][:39] == "*** 3615 IA ***".center(39)
+    assert_white_input(uart)
+    assert uart.lines()[21].startswith("> DRAFT END")
+    term.waiting("WAIT")  # Dense content clears the screen and rebuilds the white field.
+    assert_white_input(uart)
+
+
 @pytest.mark.parametrize("length", [36, 37, 38, 76, 77, 113, 114, 115, 1999, 2000])
 def test_input_wrap_and_viewport_never_touch_content_or_roll_screen(hardware, length):
     term, uart = hardware(submitted("A" * length))
@@ -88,8 +140,8 @@ def test_dense_paging_preserves_input_and_only_clears_on_real_page_changes(hardw
     assert uart.lines()[1].startswith("Result 00")
     assert uart.lines()[18].startswith("Result 17")
     assert uart.lines()[21].startswith("> REPONDRE oui")
-    assert uart.lines()[0].startswith("3615 IA")
-    assert uart.screen.styles[0][0][1] is True
+    assert uart.lines()[0][:39] == "*** 3615 IA ***".center(39)
+    assert all(not inverse for _, inverse in uart.screen.styles[0])
     assert uart.screen.styles[1][0][1] is False
 
 
@@ -353,7 +405,7 @@ def test_dense_waiting_clear_removes_uncached_tail_and_restores_frame(hardware):
     term.waiting("WAIT")
     assert uart.output.count(b"\x0c") == 2
     assert all(not line.strip() for line in uart.lines()[1:19])
-    assert uart.lines()[0].startswith("3615 IA")
+    assert uart.lines()[0][:39] == "*** 3615 IA ***".center(39)
     assert uart.lines()[19].startswith("Requete en cours")
     assert uart.lines()[20][:39] == "WAIT".center(39)
     assert uart.lines()[21].strip() == ">"
@@ -369,7 +421,7 @@ def test_clear_threshold_applies_to_visible_content(hardware, visible, clears):
     assert uart.output[before:].count(b"\x0c") == clears
     assert uart.lines()[1].startswith("Short")
     assert all(not line.strip() for line in uart.lines()[2:19])
-    assert uart.lines()[0].startswith("3615 IA")
+    assert uart.lines()[0][:39] == "*** 3615 IA ***".center(39)
     assert "Page 1/1" in uart.lines()[19]
 
 
@@ -406,6 +458,6 @@ def test_local_document_replacement_uses_clear_transition_without_waiting(hardwa
     before = len(uart.output)
     assert terminal_documents.read(term, "Short document", title=title) == ("SOMETHING", "envoi")
     assert uart.output[before:].count(b"\x0c") == 1
-    assert uart.lines()[0].startswith(title)
+    assert uart.lines()[0][:39] == f"*** {title} ***".center(39)
     assert uart.lines()[1].startswith("Short document")
     assert all(not line.strip() for line in uart.lines()[2:19])
