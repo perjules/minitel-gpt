@@ -51,6 +51,7 @@ STANDARD = Geometry()
 NORMAL = b"\x0f\x1b\x4c\x1b\x49\x1b\x59\x1b\x5c\x1b\x47"
 INVERSE = b"\x1b\x5d"
 POSITIVE = b"\x1b\x5c"
+FULL_CLEAR_THRESHOLD = 100  # Characters on the visible answer page, excluding trailing padding.
 
 
 class View:
@@ -76,6 +77,7 @@ class View:
         self.carry_input = False
         self.notice = ""
         self.feature_navigation = False
+        self.processing = False
 
     def active(self):
         if self.check is not None:
@@ -103,29 +105,37 @@ class View:
         self.cache[row] = (text, inverse)
 
     def install(self):
+        self.active()
         previous = getattr(self.term, "view", None)
         if previous is None:
             self.term.clear()
-            self.cache = {row: (" " * self.geometry.width, False)
-                          for row in range(1, self.geometry.rows + 1)}
+            self._blank_cache()
         else:
             self.cache = dict(previous.cache)
         self.term.w(NORMAL)
         self.term.view = self
+        if previous is not None:
+            if not previous.carry_input:
+                self._erase_input()
+            self._clear_content()
         self.draw()
         return self
+
+    def _blank_cache(self):
+        self.cache = {row: (" " * self.geometry.width, False)
+                      for row in range(1, self.geometry.rows + 1)}
 
     def draw(self):
         self.active()
         self.row(1, self.title, inverse=True)
+        if self.processing:
+            self._frame()
+            self.active()
+            return
         for offset in range(self.geometry.content_rows):
             page = self.pages[self.page]
             self.row(self.geometry.content_first + offset, page[offset] if offset < len(page) else "")
-        navigation = {"grades": "SUITE:note+ RETOUR:note-", "exit": "SUITE:page RETOUR:quitter"}.get(
-            self.feature_navigation, "SUITE:suiv RETOUR:prec")
-        self.row(self.geometry.navigation_row, f"Page {self.page + 1}/{len(self.pages)} | {navigation}")
-        self.status(self.notice)
-        self.input()
+        self._frame()
         # Private lock/expiry validation must bracket every displayed page and
         # its review acknowledgement, including the last page.
         self.active()
@@ -134,18 +144,23 @@ class View:
             self.reviewed()
             self.acknowledged = True
 
+    def _frame(self):
+        """Restore chrome/input after FF without displaying or acknowledging a page."""
+        self.row(1, self.title, inverse=True)
+        navigation = {"grades": "SUITE:note+ RETOUR:note-", "exit": "SUITE:page RETOUR:quitter"}.get(
+            self.feature_navigation, "SUITE:suiv RETOUR:prec")
+        self.row(self.geometry.navigation_row, "Requete en cours..." if self.processing else
+                 f"Page {self.page + 1}/{len(self.pages)} | {navigation}")
+        self.status(self.notice)
+        self.input()
+
     def status(self, text=""):
         self.notice = text
         fallback = "Commande + ENVOI / SOMMAIRE" if self.language == "fr" else "Command + ENVOI / SOMMAIRE"
         self.row(self.geometry.status_row, text or fallback)
 
     def busy(self, message):
-        """Accept the prompt, then wipe upward while the request is in flight.
-
-        Serial writes are queued: a fast answer is sent after this wipe rather
-        than mixed with the old text. Keep the frame and use only the Matra's
-        validated positioning and ordinary spaces, with no full-screen clear.
-        """
+        """Accept input, show waiting status, then clear the previous answer."""
         self.active()
         chat = rose_terminal.api()
         label = chat.safe_display(message).replace("\n", " ").replace("\t", " ")
@@ -154,23 +169,46 @@ class View:
         self.buffer.clear()
         self.pending_input.clear()
         self.carry_input = False
-        self.term.w(NORMAL + b"\x14")
-        for row in reversed(range(self.geometry.input_first, self.geometry.rows + 1)):
-            self._erase_row(row, 3 if row == self.geometry.input_first else 1)
+        self.processing = True
+        self._erase_input()
         self.status(label.center(self.geometry.width))
-        for row in reversed(range(self.geometry.content_first, self.geometry.navigation_row)):
-            self._erase_row(row)
+        self.row(self.geometry.navigation_row, "Requete en cours...")
+        self._clear_content()
         self.term.w(self.geometry.position(self.geometry.input_first, 3))
         self.active()
 
+    def _erase_input(self):
+        self.term.w(NORMAL + b"\x14")
+        for row in reversed(range(self.geometry.input_first, self.geometry.rows + 1)):
+            self._erase_row(row, 3 if row == self.geometry.input_first else 1)
+
+    def _clear_content(self):
+        """One transition for submission, replacement documents and loaded pages."""
+        self.active()
+        self.term.w(NORMAL + b"\x14")
+        rows = range(self.geometry.content_first, self.geometry.navigation_row)
+        visible = sum(len(self.cache.get(row, (" " * self.geometry.width, False))[0].rstrip())
+                      for row in rows)
+        if visible > FULL_CLEAR_THRESHOLD:
+            # Do not call Term.clear(): this is still the same view/session.
+            self.term.w(b"\x0c\x1e" + NORMAL + b"\x14")
+            self._blank_cache()
+            self._frame()
+        else:
+            for row in reversed(rows):
+                self._erase_row(row)
+        self.active()
+
     def _erase_row(self, row, column=1):
-        # Wipe the full field width, including cells the cache considers blank.
-        # NORMAL is set by busy(); column 40 and the prompt's '> ' stay intact.
+        """Erase right to left, without writing in column 40 or crossing rows."""
+        old = self.cache.get(row, (" " * self.geometry.width, False))[0]
+        right = len(old.rstrip())
+        if right < column:
+            return
+        self.term.w(self.geometry.position(row, right + 1))
+        self.term.w(b"\x08 \x08" * (right - column + 1))
         spaces = " " * (self.geometry.width - column + 1)
-        self.term.w(self.geometry.position(row, column))
-        self.term.w(spaces)
-        prefix = self.cache.get(row, (" " * self.geometry.width, False))[0][:column - 1]
-        self.cache[row] = (prefix + spaces, False)
+        self.cache[row] = (old[:column - 1] + spaces, False)
 
     def input(self):
         text = "".join(self.buffer)
@@ -190,8 +228,14 @@ class View:
                                           len(visible) % self.geometry.width + 1))
 
     def move(self, step):
-        self.page = max(0, min(len(self.pages) - 1, self.page + step))
+        page = max(0, min(len(self.pages) - 1, self.page + step))
+        if page == self.page:
+            self.input()
+            return
+        self.page = page
+        self._clear_content()
         self.draw()
+        self.term.w(b"\x11")
 
     def read(self, *, allow_empty=False, calculator_mode=False, navigation_mode=False,
              touch=None, echo=False):

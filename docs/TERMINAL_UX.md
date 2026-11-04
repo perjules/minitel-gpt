@@ -1,7 +1,7 @@
 # Matra terminal UX: 40 columns, fixed input, loaded-result navigation
 
-Implementation branch: `feature/terminal-ux`. Changes remain local until the
-owner requests a push. Physical validation is required before stable `main`.
+Implementation branch: `feature/terminal-ux`. Physical validation is required
+before stable `main`.
 
 ## Hardware decision and evidence (1 November 2026)
 
@@ -45,13 +45,12 @@ existing byte transport and key decoder. `COLS`, `SCREEN_ROWS` and `CONTENT_ROWS
 remain compatibility aliases for the standard geometry.
 
 View rendering uses the Matra-validated `US row column` addresses and standard
-Videotex attributes. Editing and paging send only changed spans. Submitting a
-request that needs processing wipes the input and previous answer before drawing
-the next answer; see the wire-order description below. Paging does not clear the
-whole screen, and consecutive results reuse the frame.
-A full clear is retained when entering/leaving the frame, on session resets and
-for the existing full-screen theatre/password workflows. No dependencies,
-database schema, model prompts or service configuration change.
+Videotex attributes. Editing sends changed spans. Every new result and real page
+change clears the previous visible content before drawing the next page, using
+reverse erasure for sparse pages or a full-screen clear above the threshold.
+The same loaded view, draft input and review/context state survive that clear.
+Existing session resets and full-screen theatre/password workflows are retained.
+No dependencies, database schema, model prompts or service configuration change.
 
 ## Interaction
 
@@ -181,42 +180,80 @@ input is cleared and the cursor is hidden while processing. Input setup restores
 the cursor within rows 22–24. Raw CR/LF operations are no longer used to position
 these waiting messages. The console mirrors cursor visibility as well as text.
 
-### Submission sequence on a slow display (4 November 2026)
+### Shared content transitions (4 November 2026)
 
-The owner confirmed that normal chat works on the Matra, but replacing one answer
-in place made old and new sentences visibly mingle during transmission. The
-submission transition now treats drawing order as part of the reading experience:
+The owner confirmed that normal chat and the initial upward wipe worked, then
+clarified that the wipe should run **right to left, bottom to top**. Email/local
+results also need the same transition; the earlier wipe was attached only to API
+waiting, leaving document replacement and paging to overwrite old text in place.
 
-1. Hide the cursor and erase the submitted input, rows 24 back through 22. Keep
-   the `> ` marker and the existing heading/navigation frame.
-2. Write the centered waiting message on status row 21.
-3. Erase the entire answer region, rows 19 back through 2.
-4. Write the next answer from its beginning, top to bottom, onto that blank area.
+`FULL_CLEAR_THRESHOLD = 100` in `services/terminal_display.py` is the single
+adjustment point. Count the lengths of the currently displayed answer rows after
+removing trailing padding; internal spaces count, input/frame text and unseen
+pages do not. At **100 characters or fewer**, erase each occupied row right to
+left, visiting lower rows first. Skip already blank rows and trailing padding.
+Cursor positioning plus `BS SPACE BS` erases cells without writing in column 40
+or crossing a row boundary. The heading remains visible.
 
-The reverse order is **bottom row to top row** in each field. Within a row, spaces
-travel left to right using the existing verified cursor positioning. Every field
-row is erased to column 39, including cells the software cache considered blank;
-column 40 is untouched. This removes old tails before a shorter response appears.
-The header and navigation row are not erased or repainted during the wipe.
+Above 100 characters, send `FF` and rebuild the heading, navigation/status and
+input region. `FF` is one control byte; the frame itself still needs transmission.
+This avoids an approximately eighteen-second reverse erase of a full answer at
+1200 baud, 7E1. A full clear does not discard loaded pages, visited-page review,
+selected feature context or a partial input draft. It does not invoke a service.
 
-There are no artificial animation sleeps and no serial flush. The erase bytes
-are queued before launching the API worker, so transmission overlaps the request.
-Even an immediate response queues behind the wipe. At 1200 baud, 7E1, the full
-transition occupies roughly eight seconds of wire time, including three input
-rows, eighteen answer rows, positioning and status text. The remaining latency
-depends on the API and the length of the new answer. The waiting indicator stays
-visible while the wipe runs; the hidden cursor remains in the input region.
+On submission, erase the submitted prompt in reverse order first, retain `> `,
+write the centered waiting indicator, and clear the old content by the chosen
+method. Navigation reads `Requete en cours...` while processing, rather than
+showing the previous result's page count. The API response is queued after the
+wipe; a new view inherits the blank cache and does not erase the field twice.
+Serial backpressure can block individual writes, but there is no added animation
+sleep or serial flush.
 
-This change applies to the existing chat/CALC/PRONOTE waiting path. Page changes
-retain their existing delta rendering and loaded-result behavior for a separate
-physical review. The original first-frame drawing sequence is preserved.
+Local result replacement, including email list/read/reply and PRONOTE grade
+changes, uses this same content transition even without an API wait. Paging also
+uses it, restoring the input buffer/viewport after a full clear; first/last-page
+boundary keys cause no wipe. New answer text is drawn top to bottom onto blank
+cells. Review acknowledgements happen only when actual content pages are drawn,
+never while rebuilding the empty frame. The cursor is hidden during transitions
+and returned to the input region when the reader is ready.
 
-Regression tests inspect the displayed sequence byte by byte: input first,
-status next, content wiped upward, frame untouched, and a short reply drawn only
-onto blank cells. A paced 1200-baud test returns a mock API response while the
-erase is still transmitting and checks subsequent input with presence monitoring
-enabled. Physical review should check the upward reading cue, waiting-text
-placement and the short-answer case after a full previous page.
+Tests inspect erasure byte by byte in descending row/column order, threshold
+boundaries, visible-page-only counting, shorter answers sharing an old prefix,
+local document replacement, long input across full-clear paging, private expiry
+and review checks. Paced tests cover both loaded-page directions and a fast API
+response arriving before the erase reaches the hardware. The console models BS
+and FF; its lack of baud pacing still makes physical review necessary.
+
+### Write-side backpressure after PRECEDENT (4 November 2026)
+
+The owner reported an interrupted answer with the old `Page 1/1` footer and
+waiting label still visible, followed by local keyboard echo inside the answer.
+The journal confirmed `Terminal link unavailable (SerialTimeoutException)` and
+a subsequent transport reopen, specifically after PRECEDENT. This is an aborted
+redraw: the new page counter, ready status and input cursor had not reached the
+screen when the write failed. Recovery then waited for SOMMAIRE, leaving the
+partial frame visible with the original echo route restored.
+
+The earlier deadline corrections covered incoming protocol replies, but physical
+writes still had a fixed two-second timeout. The paced UART fixture also accepted
+an unlimited output queue. It now has a bounded USB-batch variant that starts
+applying backpressure on RETOUR; with the old write budget, it reproduces the
+same exception during the backward redraw. Its batch sizes are test scenarios,
+not measurements of the owner's particular adapter.
+
+Each physical write now gets a finite budget from the same tracked/driver queue
+estimate as protocol replies, plus its own 7E1 wire time and the original
+two-second slack. The slack is saved separately so enlarged budgets cannot
+compound from one write to the next. The operation is attempted once: a real
+timeout can follow a partial write and must still use the existing recovery path.
+There is no blind retry, serial flush or page/model refetch.
+
+Tests cover backward navigation with two buffer sizes in chat and the document
+reader, partial command preservation, the upward wipe followed by three distinct
+pages and repeated forward/backward navigation, actual footer/input positions,
+finite stalled-write failure without replay, and return to the short budget once
+the queue drains. Repeat these paths on the Matra before treating the fix as
+physically validated.
 
 ## WP6 physical acceptance — owner to run after the branch is made available
 
@@ -227,7 +264,9 @@ an outgoing draft before any deliberate send. No deployment/push is automatic.
 | Check | Expected observation |
 | --- | --- |
 | Power-on/boot/30-second continuation | Original startup; no repeated boot after SOMMAIRE |
-| Login and long chat result | Fixed frame; heading/status readable; 18 content rows |
+| Login and long chat result | Frame restored after dense-page clear; correct page count and input cursor |
+| Short answer followed by another short answer | Right-to-left, bottom-to-top erasure; no old tail |
+| Dense answer followed by a short answer; MAIL list/read/reply | Fast full clear and rebuilt frame; new content starts on blank cells |
 | Follow-up on page 1, then page forward/back | Immediate submission from page 1; paging loaded text makes no new request |
 | Type `REPONDRE ...`, page, correct, submit | Draft preserved; one echo; no text in content/status rows |
 | Input crossing rows and 114-character viewport; backspace; ANNULATION | Viewport stays below status; full clear/correction; no top-of-screen rollover |

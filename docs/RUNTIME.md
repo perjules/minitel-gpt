@@ -192,7 +192,10 @@ unreferenced generated releases. User archives and legacy log files are untouche
 A missing adapter or failed serial read/write is an expected availability state.
 The GPT process stays alive, closes the old transport, redetects the port, and
 retries after 5, 10, 30, then 60 seconds (remaining at 60 seconds).
-Serial writes have a two-second timeout. The first failure is logged once;
+Serial writes have a finite timeout: the queued transmission and current payload
+at 1200 baud, plus two seconds of slack. This lets a healthy USB buffer drain
+during page redraws; a genuine timeout still retires the link without replaying
+potentially partial output. The first failure is logged once;
 continued failures are summarized at most every five minutes. Recovery is logged
 only after 30 seconds of stable serial I/O, avoiding repeated open/fail messages.
 Unexpected application errors still retain their traceback and systemd restart.

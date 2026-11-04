@@ -28,6 +28,7 @@ class Clock:
 
 class QueuedUART:
     baudrate = 1200
+    write_timeout = 2
 
     def __init__(self, clock, keys=b"", *, direct=False, modem=True, replies=True):
         self.clock = clock
@@ -115,13 +116,51 @@ class QueuedUART:
             self.pump()
 
 
+class BufferedUART(QueuedUART):
+    """USB batches free space only after queued bytes have drained at 7E1.
+
+    Exercise write-side backpressure, which the unlimited QueuedUART omits.
+    Enable it on RETOUR to reproduce a failure during backward navigation.
+    """
+
+    def __init__(self, *args, capacity=256, on_retour=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.capacity, self.congested = capacity, not on_retour
+        self.previous_byte = None
+        self.waits, self.timeouts = [], []
+        self.write_calls = 0
+
+    def read(self, count):
+        data = super().read(count)
+        if self.previous_byte == b"\x13" and data == b"\x42":
+            self.congested = True
+        if data:
+            self.previous_byte = data
+        return data
+
+    def write(self, data):
+        self.write_calls += 1
+        backlog = max(0, self.tx_until - self.clock.now)
+        wait = backlog if self.congested and backlog * self.baudrate / 10 + len(data) > self.capacity else 0
+        if wait > self.write_timeout:
+            self.timeouts.append(self.write_timeout)
+            self.clock.sleep(self.write_timeout)
+            self.pump()
+            raise chat.serial.SerialTimeoutException("fixture write backpressure")
+        if wait:
+            self.waits.append(wait)
+            self.clock.sleep(wait)
+            self.pump()
+        return super().write(data)
+
+
 @pytest.fixture
 def paced(monkeypatch):
     clock = Clock()
     monkeypatch.setattr(chat.time, "monotonic", clock.monotonic)
     monkeypatch.setattr(chat.time, "sleep", clock.sleep)
-    def make(keys=b"", **kwargs):
-        uart = QueuedUART(clock, keys, **kwargs)
+    def make(keys=b"", *, transport=QueuedUART, **kwargs):
+        uart = transport(clock, keys, **kwargs)
         term = chat.Term(uart)
         # Match production defaults: earlier timing tests accidentally skipped
         # the real serial terminal's presence monitor.
@@ -130,6 +169,84 @@ def paced(monkeypatch):
         term.start_presence()
         return term, uart, clock
     return make
+
+
+@pytest.mark.parametrize("reader", ["chat", "document"])
+@pytest.mark.parametrize("capacity", [320, 512])
+def test_precedent_with_usb_backpressure_keeps_all_pages_and_input(paced, reader, capacity):
+    keys = b"RE" + b"\x13\x48" + b"\x13\x42" + submitted("PONDRE oui")
+    term, uart, _clock = paced(keys, transport=BufferedUART, capacity=capacity, on_retour=True)
+    text = "\n".join([letter * 39 for letter in "AZ" for _ in range(18)])
+    before = dict(uart.routes)
+    if reader == "chat":
+        chat.show_response(term, text)
+        result = chat.read_question(term)
+    else:
+        result = terminal_documents.read(term, text)
+    assert result == ("REPONDRE oui", "envoi")
+    assert term.view.page == 0 and len(term.view.pages) == 2
+    assert "Page 1/2" in "".join(uart.screen.rows[19])
+    assert uart.screen.rows[1][:39] == list("A" * 39)
+    assert "".join(uart.screen.rows[21]).startswith("> REPONDRE oui")
+    assert 21 <= uart.screen.row <= 23
+    assert uart.waits and max(uart.waits) > 2  # Healthy writes can block beyond the old budget.
+    assert not uart.timeouts
+    assert uart.routes == before
+    assert all(copies == 0 for _, copies in uart.echo)
+    assert uart.output.count(b"\x0c") == 3
+
+
+@pytest.mark.parametrize("backward", [b"\x13\x42", submitted("PRECEDENT")])
+def test_upward_wipe_then_long_answer_and_paging_with_usb_backpressure(paced, backward):
+    term, uart, _clock = paced(submitted("NEXT"), transport=BufferedUART)
+    chat.show_response(term, "Old answer")
+    assert chat.read_question(term) == ("NEXT", "envoi")
+    term.waiting("WAIT")
+    text = "\n".join([letter * 39 for letter in "AZY" for _ in range(18)])
+    chat.show_response(term, text)
+    uart.input.extend(b"\x13\x48" * 2 + backward * 2 + submitted("NEW QUESTION"))
+    assert chat.read_question(term) == ("NEW QUESTION", "envoi")
+    assert term.view.page == 0 and len(term.view.pages) == 3
+    assert "Page 1/3" in "".join(uart.screen.rows[19])
+    assert "WAIT" not in "".join(uart.screen.rows[20])
+    assert 21 <= uart.screen.row <= 23
+    assert not uart.timeouts
+    assert term._presence_enabled and term._presence_seen
+
+
+def test_stalled_write_has_a_finite_budget_and_does_not_replay_partial_output(paced, monkeypatch):
+    term, uart, clock = paced()
+    term.w(b"A" * 120)  # One second of queued transmission.
+    calls = []
+
+    def stalled(data):
+        calls.append(data)
+        uart.output.extend(data[:2])  # The exception does not report how much was sent.
+        clock.sleep(uart.write_timeout)
+        uart.pump()
+        raise chat.serial.SerialTimeoutException("fixture private payload")
+
+    monkeypatch.setattr(uart, "write", stalled)
+    before = clock.now
+    with pytest.raises(chat.terminal_link.Unavailable, match="SerialTimeoutException"):
+        term.w(b"NEW")
+    assert 3 <= clock.now - before < 3.1  # Backlog + payload + original two-second slack.
+    assert calls == [b"NEW"]
+    assert uart.output.endswith(b"AANE")
+
+
+def test_write_budget_uses_driver_backlog_and_returns_to_baseline_after_drain(paced, monkeypatch):
+    term, uart, clock = paced()
+    with monkeypatch.context() as patch:
+        patch.setattr(QueuedUART, "out_waiting", property(lambda self: 600))
+        term.w(b"A")
+        assert 7 <= uart.write_timeout < 7.1
+    uart.finish()
+    for _ in range(4):
+        term.w(b"A" * 120)
+        assert uart.write_timeout == pytest.approx(3)  # Do not add slack to the last enlarged budget.
+        uart.finish()
+    assert clock.now > 4
 
 
 def full_page():
@@ -194,7 +311,7 @@ def test_paged_document_accepts_commands_and_keeps_echo_off_after_redraw(paced):
         "REPONDRE oui", "envoi")
     assert term.view.page == 0
     assert uart.routes == before
-    assert uart.output.count(b"\x0c") == 1
+    assert uart.output.count(b"\x0c") == 3
     assert all(copies == 0 for _, copies in uart.echo)
 
 
@@ -245,7 +362,7 @@ def test_repeated_distinct_page_navigation_preserves_command_with_presence_enabl
     assert term.view.page == 0
     assert term._presence_enabled and term._presence_seen
     assert uart.screen.rows[1][:39] == list("A" * 39)
-    assert uart.output.count(b"\x0c") == 1
+    assert uart.output.count(b"\x0c") == 5
 
 
 def test_fast_api_reply_queues_behind_upward_wipe_and_keyboard_recovers(paced, monkeypatch):
@@ -268,7 +385,7 @@ def test_fast_api_reply_queues_behind_upward_wipe_and_keyboard_recovers(paced, m
     before = clock.now
     term.waiting("WAIT")
     assert clock.now == before  # Queue erasure; no sleep/flush before launching the API.
-    assert 6 < uart.tx_until - clock.now < 10
+    assert 0 < uart.tx_until - clock.now < 4  # Dense content uses the short FF/frame path.
     monkeypatch.setattr(chat, "call_answer", lambda *args, **kwargs: {"display": "SHORT", "turn": None})
     pending = chat.start_answer("", [], "fr", ("conversations", False, 30), "")
     pending[0].join(1)
@@ -282,4 +399,4 @@ def test_fast_api_reply_queues_behind_upward_wipe_and_keyboard_recovers(paced, m
     assert term._presence_enabled and term._presence_seen
     assert uart.screen.rows[1][:5] == list("SHORT")
     assert not any("".join(row).strip() for row in uart.screen.rows[2:19])
-    assert uart.output.count(b"\x0c") == 1
+    assert uart.output.count(b"\x0c") == 2

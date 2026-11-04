@@ -96,6 +96,8 @@ rendered rows rather than count whole-page UART substrings. Focused tests live i
 `tests/test_terminal_display.py` and `tests/test_terminal_documents.py`.
 
 The fixed-frame suite also includes `tests/test_terminal_serial_timing.py`, whose
-1200-baud virtual transport delays screen delivery and protocol replies. Console
+1200-baud virtual transport delays screen delivery and protocol replies. Its
+bounded USB-batch variant also exercises write backpressure during PRECEDENT,
+finite write budgets, partial-output failure and full-clear paging. Console
 checks and immediate-ACK UART fakes alone cannot detect output-backlog deadline
 failures on the physical Matra.

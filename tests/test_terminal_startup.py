@@ -174,6 +174,8 @@ def render_videotex(data):
             column = 0
         elif code == 0x0A:
             down()
+        elif code == 0x08:
+            column = max(0, column - 1)
         elif 0x20 <= code <= 0x7E:
             current = screen[row].ljust(column + 1)
             screen[row] = current[:column] + chr(code) + current[column + 1:]

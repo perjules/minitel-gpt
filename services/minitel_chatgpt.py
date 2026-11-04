@@ -400,6 +400,7 @@ class Term:
             self.s = self.io(serial.Serial, detect_port(), BAUD, bytesize=7,
                              parity="E", stopbits=1, timeout=0.1, write_timeout=2)
             time.sleep(0.3)
+        self._write_slack = getattr(self.s, "write_timeout", None)
         self._presence_enabled = isinstance(self.s, serial.SerialBase)
         self._presence_due = float("inf")
         self._presence_deadline = None
@@ -477,6 +478,14 @@ class Term:
             data = to_ascii(data).encode("ascii", errors="replace")
         baud = getattr(self.s, "baudrate", None)
         started = time.monotonic() if isinstance(baud, int) and baud > 0 else None
+        slack = getattr(self, "_write_slack", None)
+        if started is not None and type(slack) in (int, float) and 0 < slack < float("inf"):
+            # A full USB/driver buffer can block a healthy write while earlier
+            # bytes drain at 120 bytes/s. Allow that backlog plus this payload,
+            # then the original finite slack. Never retry a partly sent write.
+            budget = self.reply_deadline(slack + len(data) * 10 / baud, now=started) - started
+            if self.s.write_timeout != budget:
+                self.io(setattr, self.s, "write_timeout", budget)
         written = self.io(self.s.write, data)
         if written is not None and written != len(data):
             raise terminal_link.Unavailable("short_write")
