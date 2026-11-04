@@ -140,6 +140,13 @@ class View:
         self.row(self.geometry.status_row, text or fallback)
 
     def busy(self, message):
+        """Accept the prompt, then wipe upward while the request is in flight.
+
+        Serial writes are queued: a fast answer is sent after this wipe rather
+        than mixed with the old text. Keep the frame and use only the Matra's
+        validated positioning and ordinary spaces, with no full-screen clear.
+        """
+        self.active()
         chat = rose_terminal.api()
         label = chat.safe_display(message).replace("\n", " ").replace("\t", " ")
         if len(label) > self.geometry.width:
@@ -147,9 +154,23 @@ class View:
         self.buffer.clear()
         self.pending_input.clear()
         self.carry_input = False
-        self.input()
+        self.term.w(NORMAL + b"\x14")
+        for row in reversed(range(self.geometry.input_first, self.geometry.rows + 1)):
+            self._erase_row(row, 3 if row == self.geometry.input_first else 1)
         self.status(label.center(self.geometry.width))
-        self.term.w(self.geometry.position(self.geometry.input_first, 3) + b"\x14")
+        for row in reversed(range(self.geometry.content_first, self.geometry.navigation_row)):
+            self._erase_row(row)
+        self.term.w(self.geometry.position(self.geometry.input_first, 3))
+        self.active()
+
+    def _erase_row(self, row, column=1):
+        # Wipe the full field width, including cells the cache considers blank.
+        # NORMAL is set by busy(); column 40 and the prompt's '> ' stay intact.
+        spaces = " " * (self.geometry.width - column + 1)
+        self.term.w(self.geometry.position(row, column))
+        self.term.w(spaces)
+        prefix = self.cache.get(row, (" " * self.geometry.width, False))[0][:column - 1]
+        self.cache[row] = (prefix + spaces, False)
 
     def input(self):
         text = "".join(self.buffer)

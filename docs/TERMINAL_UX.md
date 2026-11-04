@@ -45,8 +45,10 @@ existing byte transport and key decoder. `COLS`, `SCREEN_ROWS` and `CONTENT_ROWS
 remain compatibility aliases for the standard geometry.
 
 View rendering uses the Matra-validated `US row column` addresses and standard
-Videotex attributes. It sends only changed spans, with spaces to erase old text.
-Paging does not clear the whole screen, and consecutive results reuse the frame.
+Videotex attributes. Editing and paging send only changed spans. Submitting a
+request that needs processing wipes the input and previous answer before drawing
+the next answer; see the wire-order description below. Paging does not clear the
+whole screen, and consecutive results reuse the frame.
 A full clear is retained when entering/leaving the frame, on session resets and
 for the existing full-screen theatre/password workflows. No dependencies,
 database schema, model prompts or service configuration change.
@@ -178,6 +180,43 @@ is centered on status row 21, long wording is visibly abbreviated, submitted
 input is cleared and the cursor is hidden while processing. Input setup restores
 the cursor within rows 22–24. Raw CR/LF operations are no longer used to position
 these waiting messages. The console mirrors cursor visibility as well as text.
+
+### Submission sequence on a slow display (4 November 2026)
+
+The owner confirmed that normal chat works on the Matra, but replacing one answer
+in place made old and new sentences visibly mingle during transmission. The
+submission transition now treats drawing order as part of the reading experience:
+
+1. Hide the cursor and erase the submitted input, rows 24 back through 22. Keep
+   the `> ` marker and the existing heading/navigation frame.
+2. Write the centered waiting message on status row 21.
+3. Erase the entire answer region, rows 19 back through 2.
+4. Write the next answer from its beginning, top to bottom, onto that blank area.
+
+The reverse order is **bottom row to top row** in each field. Within a row, spaces
+travel left to right using the existing verified cursor positioning. Every field
+row is erased to column 39, including cells the software cache considered blank;
+column 40 is untouched. This removes old tails before a shorter response appears.
+The header and navigation row are not erased or repainted during the wipe.
+
+There are no artificial animation sleeps and no serial flush. The erase bytes
+are queued before launching the API worker, so transmission overlaps the request.
+Even an immediate response queues behind the wipe. At 1200 baud, 7E1, the full
+transition occupies roughly eight seconds of wire time, including three input
+rows, eighteen answer rows, positioning and status text. The remaining latency
+depends on the API and the length of the new answer. The waiting indicator stays
+visible while the wipe runs; the hidden cursor remains in the input region.
+
+This change applies to the existing chat/CALC/PRONOTE waiting path. Page changes
+retain their existing delta rendering and loaded-result behavior for a separate
+physical review. The original first-frame drawing sequence is preserved.
+
+Regression tests inspect the displayed sequence byte by byte: input first,
+status next, content wiped upward, frame untouched, and a short reply drawn only
+onto blank cells. A paced 1200-baud test returns a mock API response while the
+erase is still transmitting and checks subsequent input with presence monitoring
+enabled. Physical review should check the upward reading cue, waiting-text
+placement and the short-answer case after a full previous page.
 
 ## WP6 physical acceptance — owner to run after the branch is made available
 

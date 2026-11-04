@@ -246,3 +246,40 @@ def test_repeated_distinct_page_navigation_preserves_command_with_presence_enabl
     assert term._presence_enabled and term._presence_seen
     assert uart.screen.rows[1][:39] == list("A" * 39)
     assert uart.output.count(b"\x0c") == 1
+
+
+def test_fast_api_reply_queues_behind_upward_wipe_and_keyboard_recovers(paced, monkeypatch):
+    term, uart, clock = paced(submitted("NEXT"))
+    chat.show_response(term, "\n".join(["X" * 39] * 18))
+    assert chat.read_question(term) == ("NEXT", "envoi")
+    deliver = uart.deliver
+    blank_seen = []
+
+    def observe(data):
+        deliver(data)
+        content = ["".join(row) for row in uart.screen.rows[1:19]]
+        if not any(line.strip() for line in content):
+            blank_seen.append(clock.now)
+        if "SHORT" in content[0]:
+            assert blank_seen  # Old text is gone before the new reply starts.
+            assert not any("X" in line for line in content)
+
+    monkeypatch.setattr(uart, "deliver", observe)
+    before = clock.now
+    term.waiting("WAIT")
+    assert clock.now == before  # Queue erasure; no sleep/flush before launching the API.
+    assert 6 < uart.tx_until - clock.now < 10
+    monkeypatch.setattr(chat, "call_answer", lambda *args, **kwargs: {"display": "SHORT", "turn": None})
+    pending = chat.start_answer("", [], "fr", ("conversations", False, 30), "")
+    pending[0].join(1)
+    assert not pending[0].is_alive()
+    result, action = chat.wait_answer(term, pending, 30)
+    assert action == "done"
+    assert clock.now < uart.tx_until  # A quick reply arrives while the wipe is still on the wire.
+    chat.show_response(term, result["display"])
+    uart.input.extend(submitted("AGAIN"))
+    assert chat.read_question(term) == ("AGAIN", "envoi")
+    assert term._presence_enabled and term._presence_seen
+    assert uart.screen.rows[1][:5] == list("SHORT")
+    assert not any("".join(row).strip() for row in uart.screen.rows[2:19])
+    assert uart.output.count(b"\x0c") == 1

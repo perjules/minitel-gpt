@@ -264,16 +264,16 @@ def test_waiting_message_is_centered_in_status_and_caret_returns_to_input(hardwa
     chat.show_response(term, "Loaded content remains here")
     term.view.buffer = list("previous command")
     term.view.input()
-    content = uart.lines()[1:19]
     before = len(uart.output)
     term.waiting("CONSULTATION PRONOTE")
-    assert uart.lines()[1:19] == content
+    assert all(not line.strip() for line in uart.lines()[1:19])
     assert uart.lines()[20][:39] == "CONSULTATION PRONOTE".center(39)
     assert uart.lines()[21].strip() == ">"
     assert all(not row.strip() for row in uart.lines()[22:])
     assert not uart.screen.cursor_visible
     assert 21 <= uart.screen.row <= 23
     assert b"\r\n" not in uart.output[before:]
+    chat.show_response(term, "New answer")
     assert chat.read_question(term) == ("NEXT", "envoi")
     assert uart.screen.cursor_visible
     assert 21 <= uart.screen.row <= 23
@@ -284,5 +284,72 @@ def test_long_waiting_message_stays_on_one_status_row(hardware):
     chat.show_response(term, "KEEP")
     term.waiting("A very long waiting message\n" * 5)
     assert uart.lines()[20][:39].endswith("...")
-    assert uart.lines()[1].startswith("KEEP")
+    assert not uart.lines()[1].strip()
     assert uart.lines()[21].strip() == ">"
+
+
+def test_submission_wipes_input_then_status_then_answer_upward_before_short_reply(hardware):
+    term, uart = hardware(submitted("Q" * 100))
+    old = "\n".join(["Repeated prefix " + "X" * 23] * 18)
+    chat.show_response(term, old)
+    assert chat.read_question(term) == ("Q" * 100, "envoi")
+    before = len(uart.output)
+    screen = Screen()
+    screen.write(uart.output)
+    header, navigation = list(screen.rows[0]), list(screen.rows[19])
+
+    term.waiting("ATTENTE...")
+    phases, input_rows, answer_rows = [], [], []
+    # Inspect the visible sequence one byte at a time, not just the final frame.
+    for code in uart.output[before:]:
+        previous = [list(row) for row in screen.rows]
+        screen.write(bytes([code]))
+        assert screen.rows[0] == header
+        assert screen.rows[19] == navigation
+        assert all(row[-1] == " " for row in screen.rows)
+        changed = [row + 1 for row in range(24) if screen.rows[row] != previous[row]]
+        for row in changed:
+            assert not screen.cursor_visible
+            if row >= 22:
+                phases.append(0)
+                input_rows.append(row)
+            elif row == 21:
+                phases.append(1)
+            else:
+                phases.append(2)
+                answer_rows.append(row)
+                assert "".join(screen.rows[20][:39]) == "ATTENTE...".center(39)
+                assert "".join(screen.rows[21]).strip() == ">"
+                assert not any("".join(row).strip() for row in screen.rows[22:])
+    assert phases == sorted(phases) and set(phases) == {0, 1, 2}
+    assert list(dict.fromkeys(input_rows)) == [24, 23, 22]
+    assert list(dict.fromkeys(answer_rows)) == list(range(19, 1, -1))
+    assert not any("".join(row).strip() for row in screen.rows[1:19])
+
+    before = len(uart.output)
+    chat.show_response(term, "Repeated prefix NEW")
+    assert b"Repeated prefix NEW" in uart.output[before:]  # Shared prefix must be repainted too.
+    for code in uart.output[before:]:
+        previous = [list(row) for row in screen.rows]
+        screen.write(bytes([code]))
+        for row in range(1, 19):
+            for column in range(39):
+                if previous[row][column] != screen.rows[row][column]:
+                    assert previous[row][column] == " "
+    assert uart.lines()[1].startswith("Repeated prefix NEW")
+    assert all(not line.strip() for line in uart.lines()[2:19])
+    assert uart.output.count(b"\x0c") == 1
+
+
+def test_waiting_erases_full_fields_even_where_cache_says_blank(hardware):
+    term, uart = hardware()
+    chat.show_response(term, "Old")
+    # Simulate stale cells beyond the software's known text; reserve column 40.
+    for row in (1, 18, 21, 23):
+        uart.screen.rows[row][38] = "X"
+        uart.screen.rows[row][39] = "|"
+    term.waiting("WAIT")
+    assert all(not line[:39].strip() for line in uart.lines()[1:19])
+    assert uart.lines()[21][:39].strip() == ">"
+    assert all(not line[:39].strip() for line in uart.lines()[22:])
+    assert all(uart.screen.rows[row][39] == "|" for row in (1, 18, 21, 23))
