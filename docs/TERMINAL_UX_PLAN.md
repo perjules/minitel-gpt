@@ -1,7 +1,7 @@
 # Matra M1 UX follow-up implementation plan
 
 Prepared 5 November 2026 against `develop` commit `8154ded`.
-Implementation status: **WP1 implemented; offline checks passed (1,320 tests); physical acceptance pending**.
+Implementation status: **WP1–WP2 implemented; offline checks passed (1,370 tests); physical acceptance pending**.
 
 Final owner decision after the hardware review: use verified **native lowercase**
 for the physical Minitel, including passwords, controlled through the admin
@@ -282,3 +282,10 @@ capability passes do not replace application regression and rollout acceptance.
   10 wire bytes (3 position + 4 attributes + 1 CAN + 2 positive),
   rather than three bytes per erased character. See package tests for exact
   transmission checks; physical acceptance follows implementation of all packages.
+
+- WP2: printable ASCII spans use REP only when shorter than literal text; split
+  runs at 64 cells and retain literal fallback for runs shorter than four. Logical
+  rows/cache remain uncompressed. The console accepts split REP sequences, with
+  identical cells/styles/cursor. A dense repeated-text page saves at least 648
+  bytes; the USB backpressure fixture deliberately uses incompressible rows so
+  it still exercises the original failure condition after optimization.

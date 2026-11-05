@@ -176,7 +176,9 @@ def paced(monkeypatch):
 def test_precedent_with_usb_backpressure_keeps_all_pages_and_input(paced, reader, capacity):
     keys = b"RE" + b"\x13\x48" + b"\x13\x42" + submitted("PONDRE oui")
     term, uart, _clock = paced(keys, transport=BufferedUART, capacity=capacity, on_retour=True)
-    text = "\n".join([letter * 39 for letter in "AZ" for _ in range(18)])
+    # Keep this backpressure fixture incompressible after REP optimization.
+    suffix = "0123456789abcdefghijklmnopqrstuvwxyz!?"
+    text = "\n".join([letter + suffix for letter in "AZ" for _ in range(18)])
     before = dict(uart.routes)
     if reader == "chat":
         chat.show_response(term, text)
@@ -186,7 +188,7 @@ def test_precedent_with_usb_backpressure_keeps_all_pages_and_input(paced, reader
     assert result == ("REPONDRE oui", "envoi")
     assert term.view.page == 0 and len(term.view.pages) == 2
     assert "Page 1/2" in "".join(uart.screen.rows[19])
-    assert uart.screen.rows[1][:39] == list("A" * 39)
+    assert uart.screen.rows[1][:39] == list("A" + suffix)
     assert "".join(uart.screen.rows[21]).startswith("> REPONDRE oui")
     assert 21 <= uart.screen.row <= 23
     assert uart.waits and max(uart.waits) > 2  # Healthy writes can block beyond the old budget.

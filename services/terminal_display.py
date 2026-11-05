@@ -54,6 +54,34 @@ POSITIVE = b"\x1b\x5c"
 INPUT_FOREGROUND = 2  # Green: nominal 70% CRT luminance; inversion makes it the field background.
 
 
+def encode_runs(text):
+    """Encode printable ASCII only; callers bound each span to its screen row.
+
+    REP's parameter counts additional copies (maximum 63). Runs of at least
+    four save bytes; shorter runs remain literal. Never apply this to controls.
+    """
+    data = text.encode("ascii")
+    if any(code < 0x20 or code > 0x7E for code in data):
+        raise ValueError("REP encoder accepts printable ASCII only")
+    result = bytearray()
+    start = 0
+    while start < len(data):
+        end = start + 1
+        while end < len(data) and data[end] == data[start]:
+            end += 1
+        count = end - start
+        while count:
+            size = min(count, 64)
+            result.append(data[start])
+            if size >= 4:
+                result.extend((0x12, 0x40 + size - 1))
+            else:
+                result.extend([data[start]] * (size - 1))
+            count -= size
+        start = end
+    return bytes(result)
+
+
 class View:
     """Complete loaded text and display-only paging, independent of feature state."""
 
@@ -106,7 +134,7 @@ class View:
             # CAN also establishes the untouched C40 background without printing
             # there or advancing the cursor. Keep its shade stable on later clears.
             self.term.w(b"\x18")
-        self.term.w(text[left:right])
+        self.term.w(encode_runs(text[left:right]))
         self.term.w(POSITIVE)
         self.cache[row] = (text, inverse, foreground)
 

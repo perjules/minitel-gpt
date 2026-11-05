@@ -23,6 +23,8 @@ class Screen:
         self.scrolling = False
         self.cursor_visible = True
         self.escape = bytearray()
+        self.repeat_pending = False
+        self.last_character = 0x20
 
     def down(self):
         if self.row < self.geometry.rows - 1:
@@ -35,9 +37,23 @@ class Screen:
         else:
             self.row = 0
 
+    def put(self, code):
+        self.rows[self.row][self.column] = chr(code)
+        self.styles[self.row][self.column] = (self.foreground, self.inverse)
+        self.last_character = code
+        self.column += 1
+        if self.column == self.geometry.columns:
+            self.column = 0
+            self.down()
+
     def write(self, data):
         for code in data:
-            if self.address is not None:
+            if self.repeat_pending:
+                self.repeat_pending = False
+                if 0x40 <= code <= 0x7F:
+                    for _ in range(code - 0x40):
+                        self.put(self.last_character)
+            elif self.address is not None:
                 self.address.append(code)
                 if len(self.address) == 2:
                     row, column = (value - 0x40 for value in self.address)
@@ -58,6 +74,8 @@ class Screen:
                     elif command in (0x5C, 0x5D):
                         self.inverse = command == 0x5D
                     self.escape.clear()
+            elif code == 0x12:
+                self.repeat_pending = True
             elif code == 0x11:
                 self.cursor_visible = True
             elif code == 0x14:
@@ -84,12 +102,7 @@ class Screen:
             elif code == 0x08:
                 self.column = max(0, self.column - 1)
             elif 0x20 <= code <= 0x7E:
-                self.rows[self.row][self.column] = chr(code)
-                self.styles[self.row][self.column] = (self.foreground, self.inverse)
-                self.column += 1
-                if self.column == self.geometry.columns:
-                    self.column = 0
-                    self.down()
+                self.put(code)
 
 
 def key_bytes(key):

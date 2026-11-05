@@ -37,7 +37,7 @@ buffered typeahead and the R22 C3 input caret. Native lowercase also works on th
 particular original M1: AZaz becomes azAZ and restores correctly. The agreed
 later implementation remains a global Python case swap with an admin setting.
 The [interaction evidence](INTERACTION_PROBE.md#completed-run-protocol-keyboard-and-echo-review-5-november-2026)
-closes the corresponding hardware gates; CAN clearing is implemented; subsequent package status is recorded in the plan. Full accent parsing remains separate and last priority.
+closes the corresponding hardware gates; CAN clearing and REP compression are implemented; subsequent package status is recorded in the plan. Full accent parsing remains separate and last priority.
 
 ## Screen layout
 
@@ -319,3 +319,13 @@ an outgoing draft before any deliberate send. No deployment/push is automatic.
 Return a photo of a multi-page answer with partially typed input, plus any
 observed duplication, typing lag, flicker, wrong key meaning or stale content.
 Keep stable `main` unchanged until these checks pass.
+
+### Repeated-run wire encoding (5 November 2026)
+
+The fixed viewer compresses printable ASCII runs of four or more cells with REP,
+including spaces in the gray input field. REP counts additional copies, at most
+63 per sequence; shorter runs remain literal. Logical text, paging, review state
+and cache contents do not change. Controls and accented-byte sequences are never
+passed through this encoder. The console implements REP, including sequences
+split between writes. A repeated 39-character row takes three character-data
+bytes instead of 39; regular prose retains its usual progressive rendering.
