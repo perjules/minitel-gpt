@@ -371,7 +371,9 @@ def answer(history, language, key, model, timeout, knowledge, *, env=None, sessi
         result = engine.parse_response(request(payload))
         observed = timestamp(last["data"].get("read_at", last["observed_at"]))
         badge = "SIMULATION - donnees fictives" if last["demo"] else "Lecture locale reelle"
-        footer = "\n\n" + badge + "\nObservation : " + observed.astimezone(ZoneInfo("Europe/Paris")).strftime("%d/%m %H:%M:%S %Z")
+        result["text"] = badge + "\n\n" + result["text"]
+        result["chunks"].insert(0, {"type": "text", "text": badge + "\n\n"})
+        footer = "\n\nObservation : " + observed.astimezone(ZoneInfo("Europe/Paris")).strftime("%d/%m %H:%M:%S %Z")
         if last["operation"] in ("probe", "state"):
             footer += "\nEtat rapporte; compresseur non verifie."
         else:

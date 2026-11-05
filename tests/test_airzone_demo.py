@@ -282,7 +282,7 @@ def test_mistral_function_dispatch_and_truthful_presentation(monkeypatch, real):
     result = engine.answer([{"role": "user", "content": "LIBERE LA CLIMATISATION !"}], "fr", "test", "model",
                            airzone_env=env(AIRZONE_GATEWAY="192.168.1.50" if real else "127.0.0.1",
                                            AIRZONE_DEMO_MOCK="0" if real else "1"))
-    assert ("Lecture locale reelle" if real else "SIMULATION") in result["text"]
+    assert result["text"].startswith("Lecture locale reelle" if real else "SIMULATION")
     assert "compresseur non verifie" in result["text"]
     assert "Observation :" in result["text"]
     assert len(posted) == 2 and capture.call_count == 1

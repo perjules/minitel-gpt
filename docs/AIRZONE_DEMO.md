@@ -72,7 +72,7 @@ without a URL, hostname or port. Port/system defaults are 3000/1.
    **synthetic** zones. This does not prove compatibility with the house gateway.
 2. With the environment above, ask the Minitel “Quelles sont les températures des
    chambres ?” or “LIBERE LA CLIMATISATION !”. Expect an explicit **SIMULATION**
-   footer, observation time in Europe/Paris and reported temperatures/settings.
+   heading on the first page, observation time in Europe/Paris and reported temperatures/settings.
 3. Ask “Trouve l'API Airzone.” Expect a simulated candidate, **not** verified HVAC.
 4. Temporarily use an unavailable checkout path and restart; ask about Airzone.
    Expect a compact diagnostic failure, no invented temperatures. Ask an unrelated
