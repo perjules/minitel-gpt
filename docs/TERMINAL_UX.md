@@ -38,7 +38,7 @@ wrap and bottom-right rollover; text lines have up to 39 characters.
 | 02–19 | 18 rows of loaded content |
 | 20 | Page number and contextual function-key navigation |
 | 21 | Ready/waiting/status/length notice |
-| 22–24 | Fixed inverse input area: white rectangle, black prompt/text |
+| 22–24 | Fixed inverse input area: light-gray rectangle, black prompt/text |
 
 `services/terminal_display.py` defines a small immutable geometry and one loaded
 `View`: complete text/pages, current page, draft input, displayed-page set and
@@ -263,17 +263,34 @@ The owner found inverse video effective as an accent but too heavy for the
 top-level heading. Row 1 now centers `*** title ***` in normal video. Long titles
 are shortened to leave room for all three stars on each side.
 
-The three input rows are filled with inverse white spaces across the existing
+The three input rows are filled with inverse spaces across the existing
 39 usable columns, including blank rows. Typed characters, backspace, viewport
 updates and ANNULATION keep that inverse style. Reverse submission erasure also
-uses inverse spaces so it cannot punch black holes in the white field. Full
-clears rebuild the entire white input region; content, heading, status and
+uses the same shade of inverse spaces so it cannot punch holes in the field. Full
+clears rebuild the entire input region; content, heading, status and
 navigation stay in normal video. Column 40 remains the unused rollover margin.
 Private password screens retain their separate hidden-input behavior.
 
-This is a physical presentation trial, not a confirmed readability improvement.
-Check the idle white field, black typed text and cursor visibility on the Matra,
+The owner confirmed the inverse input works well, but found its initial white
+background too bright. Check the gray field, black typed text and cursor visibility on the Matra,
 then compare short/long input, submission and both paging directions.
+
+### Softer input background (5 November 2026)
+
+`INPUT_FOREGROUND = 2` selects the Videotex green code. On a monochrome CRT this
+is a gray level, documented by [STUM 1B](https://jbellue.github.io/stum1b/) as
+nominally 70% luminance, versus white's 100%; actual luminance depends on the tube.
+Inverse video swaps the foreground and background pixels, so the input becomes
+black text on gray while ordinary content remains white on black. This uses the
+existing character inversion rather than changing zone-background delimiters.
+
+The row cache now includes foreground color as well as text/inversion; a color
+change therefore repaints even identical text. Reverse erasure preserves the
+cached color, and full clears restore all three input rows at the selected level.
+The constant is the single adjustment point if the Matra needs further dimming;
+Videotex color numbers are not ordered by brightness (magenta code 5 is nominally
+60%, cyan code 6 is 80%). Console gray-level rendering is approximate; assess
+comfort on the physical screen.
 
 ## WP6 physical acceptance — owner to run after the branch is made available
 

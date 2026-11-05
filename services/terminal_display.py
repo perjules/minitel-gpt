@@ -52,6 +52,7 @@ NORMAL = b"\x0f\x1b\x4c\x1b\x49\x1b\x59\x1b\x5c\x1b\x47"
 INVERSE = b"\x1b\x5d"
 POSITIVE = b"\x1b\x5c"
 FULL_CLEAR_THRESHOLD = 100  # Characters on the visible answer page, excluding trailing padding.
+INPUT_FOREGROUND = 2  # Green: nominal 70% CRT luminance; inversion makes it the field background.
 
 
 class View:
@@ -85,26 +86,26 @@ class View:
         if self.check is not None:
             self.check()
 
-    def row(self, row, text, inverse=False):
+    def row(self, row, text, inverse=False, foreground=7):
         """Transmit only the changed span, including spaces that erase old text."""
         chat = rose_terminal.api()
         text = chat.safe_display(text).replace("\n", " ").replace("\t", " ")
         text = text[:self.geometry.width].ljust(self.geometry.width)
         previous = self.cache.get(row)
-        if previous == (text, inverse):
+        if previous == (text, inverse, foreground):
             return
         left, right = 0, len(text)
-        if previous is not None and previous[1] == inverse:
+        if previous is not None and previous[1:] == (inverse, foreground):
             old = previous[0]
             while left < right and old[left] == text[left]:
                 left += 1
             while right > left and old[right - 1] == text[right - 1]:
                 right -= 1
         self.term.w(self.geometry.position(row, left + 1))
-        self.term.w((INVERSE if inverse else POSITIVE) + b"\x1b\x47")
+        self.term.w((INVERSE if inverse else POSITIVE) + bytes([0x1B, 0x40 + foreground]))
         self.term.w(text[left:right])
         self.term.w(POSITIVE)
-        self.cache[row] = (text, inverse)
+        self.cache[row] = (text, inverse, foreground)
 
     def install(self):
         self.active()
@@ -124,7 +125,7 @@ class View:
         return self
 
     def _blank_cache(self):
-        self.cache = {row: (" " * self.geometry.width, False)
+        self.cache = {row: (" " * self.geometry.width, False, 7)
                       for row in range(1, self.geometry.rows + 1)}
 
     def draw(self):
@@ -189,7 +190,7 @@ class View:
         self.active()
         self.term.w(NORMAL + b"\x14")
         rows = range(self.geometry.content_first, self.geometry.navigation_row)
-        visible = sum(len(self.cache.get(row, (" " * self.geometry.width, False))[0].rstrip())
+        visible = sum(len(self.cache.get(row, (" " * self.geometry.width, False, 7))[0].rstrip())
                       for row in rows)
         if visible > FULL_CLEAR_THRESHOLD:
             # Do not call Term.clear(): this is still the same view/session.
@@ -203,16 +204,16 @@ class View:
 
     def _erase_row(self, row, column=1):
         """Erase right to left, without writing in column 40 or crossing rows."""
-        old, inverse = self.cache.get(row, (" " * self.geometry.width, False))
+        old, inverse, foreground = self.cache.get(row, (" " * self.geometry.width, False, 7))
         right = len(old.rstrip())
         if right < column:
             return
         self.term.w(self.geometry.position(row, right + 1))
-        self.term.w((INVERSE if inverse else POSITIVE) + b"\x1b\x47")
+        self.term.w((INVERSE if inverse else POSITIVE) + bytes([0x1B, 0x40 + foreground]))
         self.term.w(b"\x08 \x08" * (right - column + 1))
         self.term.w(POSITIVE)
         spaces = " " * (self.geometry.width - column + 1)
-        self.cache[row] = (old[:column - 1] + spaces, inverse)
+        self.cache[row] = (old[:column - 1] + spaces, inverse, foreground)
 
     def input(self):
         text = "".join(self.buffer)
@@ -223,7 +224,8 @@ class View:
         visible = "> " + text[start:]
         for offset in range(self.geometry.input_rows):
             self.row(self.geometry.input_first + offset,
-                     visible[offset * self.geometry.width:(offset + 1) * self.geometry.width], inverse=True)
+                     visible[offset * self.geometry.width:(offset + 1) * self.geometry.width],
+                     inverse=True, foreground=INPUT_FOREGROUND)
         if start or len(text) >= capacity:
             self.status(f"Saisie {len(text)}/{io_limits.MAX_QUESTION_CHARS} | CORRECTION / ANNUL")
         elif self.notice.startswith("Saisie "):
