@@ -177,6 +177,34 @@ Enter, and report that behavior. Do not repeat a whole key sequence while the
 control path is unconfirmed. Keep the original report/transcript alongside the
 new results directory. Cedilla remains optional.
 
+### Completed run: photo review (5 November 2026)
+
+The owner reported finishing the corrected probe and supplied seven photographs.
+The final SSH summary/JSON has not yet been supplied. Record visual evidence
+separately from cursor replies, keyboard events and restoration acknowledgements.
+Photo names below are the owner's uploaded filenames, not repository assets.
+
+| Photo | Stage | Visual finding |
+| --- | --- | --- |
+| `40306.jpg` | C1 before | Normal/gray test text, prefixes, fences and bottom-row text populated |
+| `40307.jpg` | C2 after | Whole/partial clears look correct; LEFT STAYS retained; fences/heading intact; bottom-row text gone; gray retained |
+| `40308.jpg` | C3 redraw, still headed C2 | NEW SHORT ANSWER and gray `> abc` replace cleared content without old tails/holes |
+| `40309.jpg`, `40310.jpg` | R1 | Literal/compressed pairs look identical: one/two X, full dashed lines, eight accented e characters |
+| `40311.jpg` | R2 | Adjacent gray rows form a uniform strip; old text absent and black test rows blank |
+| `40312.jpg` | T1 | Displayed case, digits, punctuation, acute/grave/cedilla, circumflex/diaeresis, ligatures and pound sign look correct |
+
+Visual clearing, repeated runs and the tested output repertoire are supported
+by these photos. They do not establish exact post-command cursor positions,
+native case mode, echo suppression/restoration or typeahead reception. In
+particular, an adjacent pair of gray-filled rows naturally appears as one taller
+strip; that alone is not a missing-row or compression failure.
+
+Next evidence needed: the existing run's `MINITEL INTERACTION REPORT v1` block,
+or `report.json`, including cursor checks, E1/Q1/Q2/E2 observations and recovery
+errors/status. No repeat hardware run is requested. Implementation gates remain
+conditional on that report; no production rendering/parsing changes follow from
+photos alone. Accented input stays deferred despite confirmed accented output.
+
 On ordinary exit, q, Ctrl-C, SIGHUP, SIGTERM, timeout or I/O failure, the probe
 attempts each independent cleanup: original case if changed, original keyboard
 routes if changed, page mode, normal text, clear display and visible cursor.

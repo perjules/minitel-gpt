@@ -62,7 +62,12 @@ Record results here after review:
 
 | Gate | Decision | Evidence / limitation |
 | --- | --- | --- |
-| G0–G8 | PENDING | Full gate results pending; partial K1 observations below |
+| G0 | PENDING | Completed-run recovery and E2 summary not supplied |
+| G1/G2 | VISUAL PASS; gate pending | C1/C2/C3 photos show correct normal/gray clearing and redraw; exact cursor checks pending |
+| G3/G4/G8 | VISUAL PASS; gate pending | R1 literal/compressed pairs and R2 spaces look correct; exact cursor checks pending |
+| G5 | PARTIAL | Earlier K1 captured `13 43`; completed-run echo/typeahead/caret evidence pending |
+| G6 | INFORMATIONAL; unknown | No native-mode status/raw results supplied; Python case swap remains the selected approach |
+| G7 | OUTPUT VISUALLY CONFIRMED; input partial | T1 repertoire looks correct; earlier K1 captured four accented letters; full completed-run raw input pending |
 
 Partial evidence, 5 November 2026: first K1 captured correct unshifted/shifted
 letters, digits, punctuation, four SS2 accented letters and all eight function
@@ -70,6 +75,13 @@ keys (`13 43` for RÉPÉTITION). Owner confirmed visual echo. Cedilla and keypad
 `*`/`#` remain unobserved. SSH Enter did not advance the probe; timeout attempted
 recovery before CAN/REP/echo tests. No full gate is marked passed. Preserve these
 bytes; repeat only the untested stages with the fixed controlling-tty input.
+
+Subsequently the owner reported finishing and supplied C1/C2/C3, R1/R2 and T1
+photos. Visual findings above supersede the initial absence of CAN/REP evidence;
+the final SSH report/JSON is still needed to close the gates without assuming
+cursor or restoration behavior from screenshots. No rerun is required: retrieve
+the existing report. See the filename/stage review in
+[INTERACTION_PROBE.md](INTERACTION_PROBE.md#completed-run-photo-review-5-november-2026).
 
 ## WP1 — Shared clearing with validated CAN
 
