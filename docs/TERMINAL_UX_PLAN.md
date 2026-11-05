@@ -1,7 +1,7 @@
 # Matra M1 UX follow-up implementation plan
 
 Prepared 5 November 2026 against `develop` commit `8154ded`.
-Implementation status: **hardware gate pending; application unchanged**.
+Implementation status: **hardware review complete; application unchanged**.
 
 Subsequent owner decisions: use a global Python ASCII-letter case swap for the
 physical Minitel, including passwords, controlled through the admin console.
@@ -32,7 +32,7 @@ in a separate work package**. Hardware tests may cover all of them together.
 - Gmail reviewed-draft checks, PRONOTE grade/exit keys, private expiry, hidden
   entry, SOMMAIRE/LOGOUT and terminal recovery are existing compatibility contracts.
 
-## H0 — Hardware evidence (ready for the owner)
+## H0 — Hardware evidence (reviewed 5 November 2026)
 
 Run [INTERACTION_PROBE.md](INTERACTION_PROBE.md); return its final report and
 labelled photos. The single-script `--interaction` mode never imports production
@@ -62,25 +62,27 @@ Record results here after review:
 
 | Gate | Decision | Evidence / limitation |
 | --- | --- | --- |
-| G0 | PENDING | Completed-run recovery and E2 summary not supplied |
-| G1/G2 | VISUAL PASS; gate pending | C1/C2/C3 photos show correct normal/gray clearing and redraw; exact cursor checks pending |
-| G3/G4/G8 | VISUAL PASS; gate pending | R1 literal/compressed pairs and R2 spaces look correct; exact cursor checks pending |
-| G5 | PARTIAL | Earlier K1 captured `13 43`; completed-run echo/typeahead/caret evidence pending |
-| G6 | INFORMATIONAL; unknown | No native-mode status/raw results supplied; Python case swap remains the selected approach |
-| G7 | OUTPUT VISUALLY CONFIRMED; input partial | T1 repertoire looks correct; earlier K1 captured four accented letters; full completed-run raw input pending |
+| G0 | GO | Completed run; original case and keyboard routes acknowledged, page mode restored; owner explicitly confirmed final E2 echo passed |
+| G1/G2 | GO | C1/C2/C3 photos show correct normal/gray clearing and redraw; all six CAN cursor checks pass, including bottom and empty rows |
+| G3/G4/G8 | GO | R1/R2 photos show identical literal/compressed runs, uniform gray and no stale text; all five REP cursor checks pass, including eight accented cells |
+| G5 | GO for implementation | RÉPÉTITION is `13 43`; all eight function codes captured; E1 echo absent, Q1 receives complete ordered ABC123 + ENVOI without visible output contamination, Q2 cursor exactly R22 C3 |
+| G6 | SUPPORTED; informational | Native mode changes AZaz to azAZ, status `40` → `48` → `40`; original case restored. Python case swap remains the selected approach |
+| G7 | VERIFIED SUBSET | T1 output repertoire confirmed; input captures case, digits, `*`/`#`, punctuation and é/à/è/ù. Cedilla input remains untested; full parsing stays deferred |
 
 Partial evidence, 5 November 2026: first K1 captured correct unshifted/shifted
 letters, digits, punctuation, four SS2 accented letters and all eight function
 keys (`13 43` for RÉPÉTITION). Owner confirmed visual echo. Cedilla and keypad
-`*`/`#` remain unobserved. SSH Enter did not advance the probe; timeout attempted
-recovery before CAN/REP/echo tests. No full gate is marked passed. Preserve these
-bytes; repeat only the untested stages with the fixed controlling-tty input.
+`*`/`#` were unobserved in that first run. SSH Enter did not advance the probe;
+timeout attempted recovery before CAN/REP/echo tests. That interrupted run did
+not pass full gates; retain it as historical evidence alongside the completed run.
 
 Subsequently the owner reported finishing and supplied C1/C2/C3, R1/R2 and T1
-photos. Visual findings above supersede the initial absence of CAN/REP evidence;
-the final SSH report/JSON is still needed to close the gates without assuming
-cursor or restoration behavior from screenshots. No rerun is required: retrieve
-the existing report. See the filename/stage review in
+photos, followed by the complete log from `minitel-interaction-FCO0uZ`, five
+keyboard/echo/typeahead photos, and explicit confirmation that final E2 echo
+passed. These close the applicable hardware gates; no rerun is required. Manual
+OBS fields remain `unknown` in the original report because Enter was used;
+the reviewed decisions above use the separate photos, raw checks and owner
+confirmation without rewriting that report. See the detailed evidence in
 [INTERACTION_PROBE.md](INTERACTION_PROBE.md#completed-run-photo-review-5-november-2026).
 
 ## WP1 — Shared clearing with validated CAN
@@ -256,7 +258,7 @@ WP independently; unsupported symbols keep readable ASCII fallbacks.
 brief in-character messages grounded in actual activity, plus a later WP-B for a
 concrete autonomous task's full-screen scrolling view. Provider event streaming
 can carry progress while final answer text remains buffered. This does not change
-the pending hardware gates or the order of WP1–WP3. Global lowercase stays in
+the hardware gate criteria or the order of WP1–WP3. Global lowercase stays in
 WP4A; full accents stay last in WP4B. Scheduling activity implementation is separate
 from recording the design; no runtime progress/agent work begins in this change.
 
@@ -284,8 +286,9 @@ heading/attribute polish and mosaic experiments are out of scope.
 
 ## Resume checklist
 
-When report/photos arrive, map them to G0–G8, record limitations, then implement
-only the eligible WPs in order. If evidence is missing, name the exact stage
-needed; do not ask the owner to repeat the entire experiment unnecessarily.
-No production change is awaiting an additional design decision before reviewing
-hardware evidence; the only current blocker is that evidence.
+Hardware review is complete: G0–G5 and G8 allow WP1–WP3 implementation in order.
+Fetch/reinspect remote `develop` before production edits, then validate each WP
+offline and physically as described above. Native lowercase support does not
+change the agreed Python/admin approach in WP4A. Cedilla input remains untested
+for WP4B and does not block clearing, compression or prompt recall. Hardware
+capability passes do not replace application regression and rollout acceptance.

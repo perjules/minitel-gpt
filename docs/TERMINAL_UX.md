@@ -31,6 +31,15 @@ and an experimental inverse input area. Readability does not depend on
 distinguishing colors or dim text. The probe and
 STUM references remain in [DISPLAY_PROBE.md](DISPLAY_PROBE.md).
 
+Follow-up physical testing on 5 November confirmed normal/inverse CAN row clears,
+REP runs (including gray spaces and accented cells), echo suppression/restoration,
+buffered typeahead and the R22 C3 input caret. Native lowercase also works on this
+particular original M1: AZaz becomes azAZ and restores correctly. The agreed
+later implementation remains a global Python case swap with an admin setting.
+The [interaction evidence](INTERACTION_PROBE.md#completed-run-protocol-keyboard-and-echo-review-5-november-2026)
+closes the corresponding hardware gates; CAN/REP/recall production changes have
+not yet been implemented. Full accent parsing remains separate and last priority.
+
 ## Screen layout
 
 Service row 00 is left alone. Physical column 40 is reserved to avoid automatic

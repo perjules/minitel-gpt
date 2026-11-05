@@ -1,6 +1,6 @@
 # Matra M1 interaction hardware probe
 
-Status: prepared, offline tested; **physical results pending**. No production
+Status: offline tested; **physical results reviewed 5 November 2026**. No production
 renderer, parser, configuration or dependencies change in this work package.
 The follow-up implementation and acceptance gates are in
 [TERMINAL_UX_PLAN.md](TERMINAL_UX_PLAN.md).
@@ -179,9 +179,9 @@ new results directory. Cedilla remains optional.
 
 ### Completed run: photo review (5 November 2026)
 
-The owner reported finishing the corrected probe and supplied seven photographs.
-The final SSH summary/JSON has not yet been supplied. Record visual evidence
-separately from cursor replies, keyboard events and restoration acknowledgements.
+The owner finished the corrected probe and supplied seven initial photographs,
+then the complete SSH log and five additional photographs. Visual evidence is
+recorded separately from cursor replies, keyboard events and restoration ACKs.
 Photo names below are the owner's uploaded filenames, not repository assets.
 
 | Photo | Stage | Visual finding |
@@ -199,11 +199,53 @@ native case mode, echo suppression/restoration or typeahead reception. In
 particular, an adjacent pair of gray-filled rows naturally appears as one taller
 strip; that alone is not a missing-row or compression failure.
 
-Next evidence needed: the existing run's `MINITEL INTERACTION REPORT v1` block,
-or `report.json`, including cursor checks, E1/Q1/Q2/E2 observations and recovery
-errors/status. No repeat hardware run is requested. Implementation gates remain
-conditional on that report; no production rendering/parsing changes follow from
-photos alone. Accented input stays deferred despite confirmed accented output.
+### Completed run: protocol, keyboard and echo review (5 November 2026)
+
+The supplied transcript identifies the Pi report as
+`/home/minitel/minitel-interaction-FCO0uZ/report.json`. It reports `Completed: True`
+and `Recovery: commands_completed_verify_visually`, without a reported recovery
+failure. The owner subsequently explicitly confirmed the final E2 echo check
+passed; no E2 photo was taken. This is owner-observed evidence, not an inferred
+visual pass from a routing acknowledgement.
+
+| Check | Captured result | Assessment |
+| --- | --- | --- |
+| CAN cursor positions | R24 C1, R14 C11, R12 C11, R10 C1, R8 C1, R16 C1 | All six match; together with C2/C3 photos, normal and gray CAN gates pass |
+| REP cursor positions | R6 C2, R9 C3, R12 C40, R15 C9, R7 C40 | All five match; 1/2/39-cell, accented and gray runs pass with R1/R2 photos |
+| Native keyboard case | K2 `41 5a 61 7a`; K3 `61 7a 41 5a`; K4 `41 5a 61 7a` | AZaz becomes azAZ, then restores |
+| Operating-mode status | Snapshot/K2 `40`, K3 `48`, restored `40` | Lowercase bit changes and restores on this original Matra M1 |
+| Echo routing | Receiver `58`: `4d` throughout; receiver `5a`: `46` → `44` → `46` | Original routes restored with acknowledgements |
+| E1 hidden typing | `41 42 43 41 31 32 33`; photo has no typed text | Bytes received with hardware echo suppressed |
+| Q1 buffered typeahead | `41 42 43 31 32 33 13 41` | Complete ABC123 + ENVOI; photo has intact answer rows without echoed letters |
+| Q2 input caret | Reply `1f 56 43` | Exactly R22 C3, below output |
+| E2 restored echo | `41 42 44 13 41`; owner confirms normal visible echo | Recovery gate passes; typed dummy text differs from requested abc123 |
+| Final page mode | `1b 3a 73 40` | Page-mode restoration acknowledged |
+
+Additional photographs: `40313.jpg` = K2 upper, `40314.jpg` = K3 lower,
+`40315.jpg` = K4 restored (motion blurred), `40316.jpg` = E1 hidden,
+`40317.jpg` = Q1 output. K4's blurred image is not evidence of duplicate echo.
+
+The complete keyboard capture now includes keypad `*`/`#` (`2a 23`), digits,
+punctuation, unshifted/shifted letters and é/à/è/ù. All eight function codes appear
+across the captures: CORRECTION `13 47`, ANNULATION `13 45`, ENVOI `13 41`,
+SUITE `13 48`, RETOUR `13 42`, GUIDE `13 44`, SOMMAIRE `13 46`, RÉPÉTITION
+`13 43`. Cedilla input was not located and remains untested; T1 confirms its
+output glyph. K2 contains `19 42 45` where the other captures have `19 42 65`;
+the exact Shift gesture for that accented entry is not established, so this
+does not establish a general native accented-case rule.
+
+All manual OBS fields are `unknown` because the owner advanced with Enter.
+The reviewed gate decisions use independent photos, protocol checks, raw keys
+and the explicit E2 confirmation; the original report is not relabelled. Q1
+also captured early typing in its separate ready stage. The ordered post-cue
+sequence supports buffered reception, but the report does not timestamp each
+keypress against each transmitted row. Production editor concurrency, bounds
+and responsiveness still need their planned tests.
+
+G0–G5 and G8 are satisfied for the planned implementation; G6 documents native
+support without changing the chosen Python case swap. G7 is limited to the
+verified repertoire. No repeat probe run is needed. Accented input remains a
+separate last-priority work package; no production behavior changes in this review.
 
 On ordinary exit, q, Ctrl-C, SIGHUP, SIGTERM, timeout or I/O failure, the probe
 attempts each independent cleanup: original case if changed, original keyboard
@@ -233,8 +275,8 @@ promise to restore them; power-cycle instead. Do not run two recovery tools at o
   by `40 + additional repeats`; US parameters are `40 + row/column`.
 - [STUM 1B, Videotex display and module operating modes](https://jbellue.github.io/stum1b/):
   mode-status query `1B 39 72`, reply `1B 3A 73 status`; lowercase START/STOP
-  `1B 3A 69/6A 45`, with lowercase flag bit `08`. This is a **candidate extension**
-  on the original Matra M1, not an assumed firmware capability.
+  `1B 3A 69/6A 45`, with lowercase flag bit `08`. The probe treated this as a
+  candidate extension; the 5 November test confirms it on this particular Matra M1.
 - SS2 accent examples: `19 42 65` = e-acute; `19 41 61` = a-grave;
   `19 4B 63` = c-cedilla. G2 repertoire varies; record unsupported glyphs.
 
