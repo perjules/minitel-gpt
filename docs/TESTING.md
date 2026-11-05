@@ -87,6 +87,19 @@ procedure, recovery and observations needed before any geometry change. Focused
 offline checks: `uv run --locked --all-extras pytest tests/test_display_probe.py`.
 The diagnostic is never run against hardware by the automated suite.
 
+The separate `--interaction` mode tests CAN line clearing, REP compression, raw
+keys/accents, candidate lowercase mode, echo and buffered input during redraws.
+See [INTERACTION_PROBE.md](INTERACTION_PROBE.md) for the single-script Pi procedure
+and recovery, and [TERMINAL_UX_PLAN.md](TERMINAL_UX_PLAN.md) for hardware gates.
+Run its offline checks with:
+
+```bash
+uv run --locked --all-extras pytest tests/test_display_probe.py tests/test_interaction_probe.py
+```
+
+Production parsing and rendering remain unchanged until the corresponding gates
+are reviewed.
+
 ## Fixed 40-column frame
 
 [TERMINAL_UX.md](TERMINAL_UX.md) records the WP1 hardware findings, frame layout,
