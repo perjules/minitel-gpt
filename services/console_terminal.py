@@ -71,6 +71,10 @@ class Screen:
                 self.styles = [[(7, False)] * self.geometry.columns for _ in range(self.geometry.rows)]
                 self.foreground, self.inverse = 7, False
                 self.row = self.column = 0
+            elif code == 0x18:  # CAN: erase to end of line, without moving.
+                self.rows[self.row][self.column:] = [" "] * (self.geometry.columns - self.column)
+                self.styles[self.row][self.column:] = [(self.foreground, self.inverse)] * (
+                    self.geometry.columns - self.column)
             elif code == 0x1E:
                 self.row = self.column = 0
             elif code == 0x0D:

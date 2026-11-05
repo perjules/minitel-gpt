@@ -51,7 +51,6 @@ STANDARD = Geometry()
 NORMAL = b"\x0f\x1b\x4c\x1b\x49\x1b\x59\x1b\x5c\x1b\x47"
 INVERSE = b"\x1b\x5d"
 POSITIVE = b"\x1b\x5c"
-FULL_CLEAR_THRESHOLD = 100  # Characters on the visible answer page, excluding trailing padding.
 INPUT_FOREGROUND = 2  # Green: nominal 70% CRT luminance; inversion makes it the field background.
 
 
@@ -103,6 +102,10 @@ class View:
                 right -= 1
         self.term.w(self.geometry.position(row, left + 1))
         self.term.w((INVERSE if inverse else POSITIVE) + bytes([0x1B, 0x40 + foreground]))
+        if previous is None or previous[1:] != (inverse, foreground):
+            # CAN also establishes the untouched C40 background without printing
+            # there or advancing the cursor. Keep its shade stable on later clears.
+            self.term.w(b"\x18")
         self.term.w(text[left:right])
         self.term.w(POSITIVE)
         self.cache[row] = (text, inverse, foreground)
@@ -190,10 +193,9 @@ class View:
         self.active()
         self.term.w(NORMAL + b"\x14")
         rows = range(self.geometry.content_first, self.geometry.navigation_row)
-        visible = sum(len(self.cache.get(row, (" " * self.geometry.width, False, 7))[0].rstrip())
-                      for row in rows)
-        if visible > FULL_CLEAR_THRESHOLD:
-            # Do not call Term.clear(): this is still the same view/session.
+        if len(self.cache) != self.geometry.rows:
+            # An uncertain cache requires recovery; ordinary page moves retain
+            # the frame and input, regardless of the old answer's density.
             self.term.w(b"\x0c\x1e" + NORMAL + b"\x14")
             self._blank_cache()
             self._frame()
@@ -203,17 +205,20 @@ class View:
         self.active()
 
     def _erase_row(self, row, column=1):
-        """Erase right to left, without writing in column 40 or crossing rows."""
+        """Clear a row tail with validated CAN; cursor stays at its start.
+
+        Rows are visited bottom-to-top by callers. CAN clears through physical
+        C40 with the selected attributes and never causes a wrap.
+        """
         old, inverse, foreground = self.cache.get(row, (" " * self.geometry.width, False, 7))
-        right = len(old.rstrip())
-        if right < column:
+        if not old[column - 1:].strip():
             return
-        self.term.w(self.geometry.position(row, right + 1))
+        self.term.w(self.geometry.position(row, column))
         self.term.w((INVERSE if inverse else POSITIVE) + bytes([0x1B, 0x40 + foreground]))
-        self.term.w(b"\x08 \x08" * (right - column + 1))
+        self.term.w(b"\x18")
         self.term.w(POSITIVE)
-        spaces = " " * (self.geometry.width - column + 1)
-        self.cache[row] = (old[:column - 1] + spaces, inverse, foreground)
+        self.cache[row] = (old[:column - 1] + " " * (self.geometry.width - column + 1),
+                           inverse, foreground)
 
     def input(self):
         text = "".join(self.buffer)

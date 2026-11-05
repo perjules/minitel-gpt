@@ -37,8 +37,7 @@ buffered typeahead and the R22 C3 input caret. Native lowercase also works on th
 particular original M1: AZaz becomes azAZ and restores correctly. The agreed
 later implementation remains a global Python case swap with an admin setting.
 The [interaction evidence](INTERACTION_PROBE.md#completed-run-protocol-keyboard-and-echo-review-5-november-2026)
-closes the corresponding hardware gates; CAN/REP/recall production changes have
-not yet been implemented. Full accent parsing remains separate and last priority.
+closes the corresponding hardware gates; CAN clearing is implemented; subsequent package status is recorded in the plan. Full accent parsing remains separate and last priority.
 
 ## Screen layout
 
@@ -62,7 +61,7 @@ remain compatibility aliases for the standard geometry.
 View rendering uses the Matra-validated `US row column` addresses and standard
 Videotex attributes. Editing sends changed spans. Every new result and real page
 change clears the previous visible content before drawing the next page, using
-reverse erasure for sparse pages or a full-screen clear above the threshold.
+validated bottom-to-top CAN row clears while retaining the frame.
 The same loaded view, draft input and review/context state survive that clear.
 Existing session resets and full-screen theatre/password workflows are retained.
 No dependencies, database schema, model prompts or service configuration change.
@@ -202,42 +201,31 @@ clarified that the wipe should run **right to left, bottom to top**. Email/local
 results also need the same transition; the earlier wipe was attached only to API
 waiting, leaving document replacement and paging to overwrite old text in place.
 
-`FULL_CLEAR_THRESHOLD = 100` in `services/terminal_display.py` is the single
-adjustment point. Count the lengths of the currently displayed answer rows after
-removing trailing padding; internal spaces count, input/frame text and unseen
-pages do not. At **100 characters or fewer**, erase each occupied row right to
-left, visiting lower rows first. Skip already blank rows and trailing padding.
-Cursor positioning plus `BS SPACE BS` erases cells without writing in column 40
-or crossing a row boundary. The heading remains visible.
+Following the 5 November hardware validation, occupied rows clear with cursor
+positioning, explicit attributes and CAN (`18`), visiting lower rows first.
+CAN erases the entire row tail at once and leaves the cursor in place. This
+supersedes the earlier right-to-left `BS SPACE BS` animation and 100-character
+full-screen threshold. One row clear uses 10 bytes; all 18 content rows take
+180 bytes, approximately 1.5 seconds of UART time, excluding other frame updates.
+The heading remains visible regardless of answer length. FF is reserved for
+initial setup or an uncertain screen cache.
 
-Above 100 characters, send `FF` and rebuild the heading, navigation/status and
-input region. `FF` is one control byte; the frame itself still needs transmission.
-This avoids an approximately eighteen-second reverse erase of a full answer at
-1200 baud, 7E1. A full clear does not discard loaded pages, visited-page review,
-selected feature context or a partial input draft. It does not invoke a service.
+On submission, clear submitted input first, retain `> `, update the centered
+waiting indicator, then clear old content. Input clearing retains the gray
+attributes through physical C40 without ever printing there. The API response
+is queued after the wipe; a new view inherits the blank cache. There is no added
+animation sleep or serial flush.
 
-On submission, erase the submitted prompt in reverse order first, retain `> `,
-write the centered waiting indicator, and clear the old content by the chosen
-method. Navigation reads `Requete en cours...` while processing, rather than
-showing the previous result's page count. The API response is queued after the
-wipe; a new view inherits the blank cache and does not erase the field twice.
-Serial backpressure can block individual writes, but there is no added animation
-sleep or serial flush.
+Email list/read/reply, journal, PRONOTE, replacement results and both page
+directions use the same transition. Drafts, loaded results, feature context and
+review state remain intact. First/last-page boundary keys do not clear content.
+New text is drawn top-to-bottom onto blank cells. Private checks bracket the
+transition; the caret is hidden until the editor is ready at the input region.
 
-Local result replacement, including email list/read/reply and PRONOTE grade
-changes, uses this same content transition even without an API wait. Paging also
-uses it, restoring the input buffer/viewport after a full clear; first/last-page
-boundary keys cause no wipe. New answer text is drawn top to bottom onto blank
-cells. Review acknowledgements happen only when actual content pages are drawn,
-never while rebuilding the empty frame. The cursor is hidden during transitions
-and returned to the input region when the reader is ready.
-
-Tests inspect erasure byte by byte in descending row/column order, threshold
-boundaries, visible-page-only counting, shorter answers sharing an old prefix,
-local document replacement, long input across full-clear paging, private expiry
-and review checks. Paced tests cover both loaded-page directions and a fast API
-response arriving before the erase reaches the hardware. The console models BS
-and FF; its lack of baud pacing still makes physical review necessary.
+Tests inspect blank-before-replacement ordering, bottom-to-top clears, partial
+row and bottom-row behavior, normal/inverse attributes, uncertain-cache recovery,
+shorter answers, long drafts, review checks and serial backpressure. The console
+models CAN as well as BS and FF; physical acceptance remains necessary.
 
 ### Write-side backpressure after PRECEDENT (4 November 2026)
 

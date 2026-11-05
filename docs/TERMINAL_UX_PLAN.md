@@ -1,12 +1,14 @@
 # Matra M1 UX follow-up implementation plan
 
 Prepared 5 November 2026 against `develop` commit `8154ded`.
-Implementation status: **hardware review complete; application unchanged**.
+Implementation status: **WP1 implemented; offline checks passed (1,320 tests); physical acceptance pending**.
 
-Subsequent owner decisions: use a global Python ASCII-letter case swap for the
-physical Minitel, including passwords, controlled through the admin console.
-Console/web input stays unchanged. Native keyboard-mode changes are not the chosen
-implementation. Full accented-character support is a separate last-priority task.
+Final owner decision after the hardware review: use verified **native lowercase**
+for the physical Minitel, including passwords, controlled through the admin
+console. Console/web input stays unchanged. This supersedes the earlier Python
+swap proposal. Accented-character parsing is explicitly deferred and unchanged.
+The owner authorized completing WP1–WP4A offline before physical acceptance; no
+intermediate hardware run is required to continue implementation.
 
 This plan follows the owner's ordering: clear/redraw efficiency and prompt recall
 first; **all text parsing, accent handling and uppercase/lowercase changes later
@@ -47,7 +49,7 @@ contradictory or interrupted tests do not count as passes.
 | G3 basic REP | R1: exact 1/2/39-cell pairs and correct cursor positions; no rollover | Keep literal runs for ordinary text; no REP optimization |
 | G4 gray REP | R2: literal/compressed gray and black runs identical and no stale text; cursor at C40 | Keep literal input fills; G3 can still enable separately validated normal runs |
 | G5 RÉPÉTITION | K1 records `13 43`, other function keys retain their codes; E1/Q1/Q2 have no routing/caret anomalies | Defer recall key binding if key/routing unreliable; do not add a command substitute automatically |
-| G6 native lowercase (informational) | K2/K3 status/raw results and K4 restoration document firmware capability | No effect on the chosen Python swap; native mode is not a prerequisite |
+| G6 native lowercase (informational) | K2/K3 status/raw results and K4 restoration document firmware capability | Retain original behavior and report failure if native mode cannot be confirmed |
 | G7 repertoire | T1 photos identify supported glyphs; K1/K2/K3 raw accented/special input captured without ambiguity | Later parsing WP supports only verified sequences; retain readable ASCII output fallback |
 | G8 REP accents | R1 eight accented cells identical and cursor advances eight cells | No multibyte-character repeat compression; unrelated REP runs may still qualify |
 
@@ -66,7 +68,7 @@ Record results here after review:
 | G1/G2 | GO | C1/C2/C3 photos show correct normal/gray clearing and redraw; all six CAN cursor checks pass, including bottom and empty rows |
 | G3/G4/G8 | GO | R1/R2 photos show identical literal/compressed runs, uniform gray and no stale text; all five REP cursor checks pass, including eight accented cells |
 | G5 | GO for implementation | RÉPÉTITION is `13 43`; all eight function codes captured; E1 echo absent, Q1 receives complete ordered ABC123 + ENVOI without visible output contamination, Q2 cursor exactly R22 C3 |
-| G6 | SUPPORTED; informational | Native mode changes AZaz to azAZ, status `40` → `48` → `40`; original case restored. Python case swap remains the selected approach |
+| G6 | SUPPORTED; informational | Native mode changes AZaz to azAZ, status `40` → `48` → `40`; original case restored. Native mode selected; no Python case swap |
 | G7 | VERIFIED SUBSET | T1 output repertoire confirmed; input captures case, digits, `*`/`#`, punctuation and é/à/è/ù. Cedilla input remains untested; full parsing stays deferred |
 
 Partial evidence, 5 November 2026: first K1 captured correct unshifted/shifted
@@ -179,54 +181,33 @@ inputs excluded. Console needs a documented RÉPÉTITION binding, preserving cur
 shortcuts. Physical pass: repeated presses recover exact prompts and the original
 draft, keep gray fill/caret intact, and never auto-submit.
 
-## WP4A — Global Python lowercase input (separate, AFTER WP1–WP3)
+## WP4A — Native lowercase input (separate, AFTER WP1–WP3)
 
-Explicit hold: no production changes to encoding, decoding, case, command parsing
-or password values in the probe/clearing/compression/history work. Unsupported
-earlier display optimizations can be closed as no-go without blocking this later
-WP; supported preceding work must first pass regression and physical acceptance.
+Final owner decision: use the firmware mode confirmed by G6, with no software
+case swap and no accent/parser changes. Implement after preceding packages pass
+offline regression; physical acceptance of the combined branch follows.
 
-1. Apply exactly `A-Z <-> a-z` once at the lowest shared **physical-keyboard
-   character-event** boundary, normally `Term.read_key()`, before any editor,
-   buffer/history or software echo. Cover every physical input path: usernames,
-   commands, chat, composition, calculator, onboarding, confirmations and all
-   password/secret readers. No per-feature opt-outs. Shift retains opposite-case
-   behavior; preserve resulting case in drafts and normalize only command matching.
-2. Do not transform `read_byte()` or the raw UART stream. Protocol payloads,
-   function codes and SS2 selectors can contain ASCII letter bytes without being
-   typed letters. Frame these sequences, including split/incomplete input, before
-   swapping ordinary letters. Minimal framing to avoid corruption belongs here;
-   full accent decoding/editing/display remains WP4B. Do not expose selector bytes
-   as text. Digits, punctuation, symbols and function keys retain their meaning.
-3. Classify the physical transport explicitly. Curses `ConsoleSerial`, browser/
-   admin test input, API input and outbound text bypass the swap regardless of
-   the setting. Do not infer transport from letter case or baud rate. Apply no
-   native lowercase command and do not rewrite stored credentials or password
-   hashes; existing mixed-case secrets must remain enterable with the new keys.
-4. Add one Terminal/keyboard selector to the existing admin console:
-   **Lowercase by default** (Python swap; intended default when this WP ships) /
-   **Original Minitel behavior** (letters unchanged). Persist allowlisted
-   `MINITEL_INPUT_CASE=lowercase|legacy` using existing `read_env`/`write_env_key`,
-   admin authentication, CSRF protection and restart feedback. Saving applies via
-   a clearly announced terminal-service restart with success/failure feedback.
-   Hold the effective mode fixed for each running Term; never change it halfway
-   through a prompt/password. This setting does not affect browser password entry.
-5. Audit all editor and legacy fallback paths for local-echo assumptions. Displayed
-   and stored characters must agree. If echo suppression fails, do not silently
-   show hardware uppercase while storing software lowercase; define an explicit
-   recovery/fallback consistent with the selected mode. Keep bounded UART budgets.
+1. Configure only the physical terminal. Snapshot its case flag, set the selected
+   mode and verify its acknowledgement at initialization/reconnection. Consume
+   complete protocol replies internally; preserve any early typed input.
+2. Cover all input, including usernames, composition, confirmations and passwords,
+   through the keyboard mode itself. Shift gives the opposite case. Leave stored
+   credentials/hashes, output, command normalization and accent parsing unchanged.
+3. Add an authenticated, CSRF-protected Terminal/keyboard selector to the admin
+   console. Persist allowlisted `MINITEL_INPUT_CASE=lowercase|legacy`; default to
+   lowercase. Apply by an explicitly announced service restart, never mid-entry.
+   Console, browser and API input are unaffected.
+4. If support/configuration cannot be confirmed, log a bounded warning and attempt
+   confirmed original behavior; never pretend lowercase was enabled or add a
+   Python swap fallback. Restore the previous case flag on clean close where
+   possible; retry the configured mode on each new physical connection. Report
+   unconfirmed restoration without logging input or secrets.
 
-Validation: both modes at the shared boundary; unshifted/Shift letters; unchanged
-nonletters and protocol replies; exactly one swap in public/private/secret editors;
-output/history never re-swapped; old mixed-case passwords; settings persistence,
-validation, admin authentication/CSRF and confirmed/failed restart; no mid-entry
-change; console/browser/API input unchanged with either setting; reconnect keeps
-the configured Python behavior without altering the native keyboard mode.
-
-Acceptance: consistent lowercase-first physical typing including passwords,
-Shift gives uppercase, admin can restore legacy behavior, all existing features
-and recovery tests pass. G6 is not a dependency. Roll back independently from
-clearing/compression/history if needed.
+Validation: correct exact commands/status flag, unsupported/malformed/delayed
+replies, early key buffering, serial budgets, reconnection and cleanup; both modes
+across ordinary/secret readers, mixed-case existing passwords, Shift/nonletters,
+console bypass, admin persistence/validation/auth/CSRF/restart success and failure.
+G6 supports implementation; production physical acceptance remains separate.
 
 ## WP4B — Accented and supplementary characters (last, separate)
 
@@ -248,8 +229,7 @@ accent support must not expand the small lowercase change into a Unicode overhau
    decoded strings only after this WP changes the representation.
 
 Separate acceptance: verified accents round-trip, one-key correction and cell
-counting work, all existing passwords/features remain usable. Account for WP4A's
-mode once per decoded character, never on selectors or encoding. Roll back this
+counting work, all existing passwords/features remain usable. Keep native keyboard case independent of SS2 selectors and output encoding. Roll back this
 WP independently; unsupported symbols keep readable ASCII fallbacks.
 
 ## Additional direction — activity feedback and autonomous tasks
@@ -258,7 +238,7 @@ WP independently; unsupported symbols keep readable ASCII fallbacks.
 brief in-character messages grounded in actual activity, plus a later WP-B for a
 concrete autonomous task's full-screen scrolling view. Provider event streaming
 can carry progress while final answer text remains buffered. This does not change
-the hardware gate criteria or the order of WP1–WP3. Global lowercase stays in
+the hardware gate criteria or the order of WP1–WP3. Native lowercase stays in
 WP4A; full accents stay last in WP4B. Scheduling activity implementation is separate
 from recording the design; no runtime progress/agent work begins in this change.
 
@@ -288,7 +268,17 @@ heading/attribute polish and mosaic experiments are out of scope.
 
 Hardware review is complete: G0–G5 and G8 allow WP1–WP3 implementation in order.
 Fetch/reinspect remote `develop` before production edits, then validate each WP
-offline and physically as described above. Native lowercase support does not
-change the agreed Python/admin approach in WP4A. Cedilla input remains untested
+offline and physically as described above. Native lowercase support is used by the agreed native/admin approach in WP4A. Cedilla input remains untested
 for WP4B and does not block clearing, compression or prompt recall. Hardware
 capability passes do not replace application regression and rollout acceptance.
+
+## Implementation record
+
+- WP1: shared normal/inverse CAN tail clears, bottom-to-top occupied rows; normal
+  transitions retain the frame and draft. Full clear is reserved for initialization
+  and uncertain-cache recovery. CAN establishes input C40 shade without printing
+  into it; the console mirrors CAN cursor and attribute semantics. The old
+  100-character FF threshold is removed because one occupied row now clears in
+  10 wire bytes (3 position + 4 attributes + 1 CAN + 2 positive),
+  rather than three bytes per erased character. See package tests for exact
+  transmission checks; physical acceptance follows implementation of all packages.

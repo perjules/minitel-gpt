@@ -193,7 +193,7 @@ def test_precedent_with_usb_backpressure_keeps_all_pages_and_input(paced, reader
     assert not uart.timeouts
     assert uart.routes == before
     assert all(copies == 0 for _, copies in uart.echo)
-    assert uart.output.count(b"\x0c") == 3
+    assert uart.output.count(b"\x0c") == 1
 
 
 @pytest.mark.parametrize("backward", [b"\x13\x42", submitted("PRECEDENT")])
@@ -311,7 +311,7 @@ def test_paged_document_accepts_commands_and_keeps_echo_off_after_redraw(paced):
         "REPONDRE oui", "envoi")
     assert term.view.page == 0
     assert uart.routes == before
-    assert uart.output.count(b"\x0c") == 3
+    assert uart.output.count(b"\x0c") == 1
     assert all(copies == 0 for _, copies in uart.echo)
 
 
@@ -362,7 +362,7 @@ def test_repeated_distinct_page_navigation_preserves_command_with_presence_enabl
     assert term.view.page == 0
     assert term._presence_enabled and term._presence_seen
     assert uart.screen.rows[1][:39] == list("A" * 39)
-    assert uart.output.count(b"\x0c") == 5
+    assert uart.output.count(b"\x0c") == 1
 
 
 def test_fast_api_reply_queues_behind_upward_wipe_and_keyboard_recovers(paced, monkeypatch):
@@ -385,7 +385,7 @@ def test_fast_api_reply_queues_behind_upward_wipe_and_keyboard_recovers(paced, m
     before = clock.now
     term.waiting("WAIT")
     assert clock.now == before  # Queue erasure; no sleep/flush before launching the API.
-    assert 0 < uart.tx_until - clock.now < 4  # Dense content uses the short FF/frame path.
+    assert 0 < uart.tx_until - clock.now < 4  # CAN queues occupied rows without repainting the frame.
     monkeypatch.setattr(chat, "call_answer", lambda *args, **kwargs: {"display": "SHORT", "turn": None})
     pending = chat.start_answer("", [], "fr", ("conversations", False, 30), "")
     pending[0].join(1)
@@ -399,4 +399,4 @@ def test_fast_api_reply_queues_behind_upward_wipe_and_keyboard_recovers(paced, m
     assert term._presence_enabled and term._presence_seen
     assert uart.screen.rows[1][:5] == list("SHORT")
     assert not any("".join(row).strip() for row in uart.screen.rows[2:19])
-    assert uart.output.count(b"\x0c") == 2
+    assert uart.output.count(b"\x0c") == 1
