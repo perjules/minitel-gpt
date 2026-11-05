@@ -142,6 +142,8 @@ class View:
         self.buffer = list(self.pending_input)
         self.carry_input = False
         self.notice = ""
+        self.input_notice = None  # Optional pinned status for private editors.
+        self.input_limit = io_limits.MAX_QUESTION_CHARS
         self.feature_navigation = False
         self.processing = False
 
@@ -217,7 +219,8 @@ class View:
     def _frame(self):
         """Restore chrome/input after FF without displaying or acknowledging a page."""
         self.row(1, self.heading)
-        navigation = {"grades": "SUITE:note+ RETOUR:note-", "exit": "SUITE:page RETOUR:quitter"}.get(
+        navigation = {"grades": "SUITE:note+ RETOUR:note-", "exit": "SUITE:page RETOUR:quitter",
+                      "catalogue": "SUITE:catalogue RETOUR:quitter"}.get(
             self.feature_navigation, "SUITE:suiv RETOUR:prec")
         self.row(self.geometry.navigation_row, "Requete en cours..." if self.processing else
                  f"Page {self.page + 1}/{len(self.pages)} | {navigation}")
@@ -295,8 +298,10 @@ class View:
             self.row(self.geometry.input_first + offset,
                      visible[offset * self.geometry.width:(offset + 1) * self.geometry.width],
                      inverse=True, foreground=INPUT_FOREGROUND)
-        if start or len(text) >= capacity:
-            self.status(f"Saisie {len(text)}/{io_limits.MAX_QUESTION_CHARS} | CORRECTION / ANNUL")
+        if self.input_notice is not None:
+            self.status(self.input_notice)
+        elif start or len(text) >= capacity:
+            self.status(f"Saisie {len(text)}/{self.input_limit} | CORRECTION / ANNUL")
         elif self.notice.startswith("Saisie "):
             self.status()
         self.term.w(self.geometry.position(self.geometry.input_first + len(visible) // self.geometry.width,

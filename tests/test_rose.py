@@ -32,6 +32,7 @@ class KeyTerm:
     def __init__(self, keys):
         self.keys = iter(keys)
         self.rows = []
+        self.view = None
         self.s = Mock()
         self.s.local_echo = True
 
@@ -39,7 +40,7 @@ class KeyTerm:
         return next(self.keys)
 
     def clear(self):
-        pass
+        self.view = None
 
     def w(self, value):
         self.rows.append(value)
@@ -1040,11 +1041,13 @@ def test_evaluation_biographies_fit_every_roster_page(gender):
         term = KeyTerm(keys)
         assert terminal.roster(term, gender) == (None, "retour")
         assert "[Réponse abrégée]" not in term.rows
-        assert f"Catalogue {page + 1}/{pages}" in term.rows
+        assert len(term.view.pages) == 1
+        shown = term.view.pages[0]
+        assert f"Catalogue {page + 1}/{pages}" in shown
         for person in people[page * 2:page * 2 + 2]:
-            assert chat.safe_display(person["name"]) in term.rows
+            assert chat.safe_display(person["name"]) in shown
             for line in chat.wrap(chat.safe_display(person["bio"])):
-                assert line in term.rows
+                assert line in shown
                 assert len(line) <= 39
 
 

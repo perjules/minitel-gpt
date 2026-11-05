@@ -377,3 +377,14 @@ technical-symbol mappings and readable currency/fraction fallbacks. An unknown
 Unicode character becomes one `?` instead of a six- or ten-character code-point
 escape. Raw terminal controls remain escaped; source mail, school data, model
 responses and stored text are not rewritten. Keyboard/accent input is unchanged.
+
+### Rose uses the shared frame (6 November 2026)
+
+Rose's catalogue and live conversation now use the same View drawing, CAN clears,
+REP encoding and gray input region. Its existing private reader keeps its own
+800-character bound, stop-word and exit behavior; it does not use public prompt
+recall. Stop-word status stays pinned during long input, paging and waiting.
+Hardware echo is suppressed while editing or waiting and restored exactly on
+exit. Private frames are detached before ordinary chat resumes; the secret gate,
+animated bill and scripted transcript workshop retain their dedicated paths.
+See [ROSE.md](ROSE.md#affichage-partagé-6-novembre-2026) for keys and physical checks.

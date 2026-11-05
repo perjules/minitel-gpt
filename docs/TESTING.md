@@ -131,3 +131,9 @@ password entry, console bypass and authenticated admin persistence/restarts.
 The physical acceptance procedure is in
 [TERMINAL_UX_PLAN.md](TERMINAL_UX_PLAN.md#resume-checklist). No accent codec or
 activity/scrolling behavior is added by these packages.
+
+Rose's fixed-frame adapter has focused checks in `tests/test_rose_display.py`:
+visible gray input, CAN transitions, long replies, pinned stop word, local paging,
+private exit keys, echo restoration/failure, bounded input and retiring private
+frames before ordinary chat. `tests/test_terminal_ascii.py` checks readable symbol
+fallbacks and unchanged source text through email/school document views.
