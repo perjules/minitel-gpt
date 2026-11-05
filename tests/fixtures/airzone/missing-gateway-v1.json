@@ -1,0 +1,1 @@
+{"schema_version":1,"operation":"state","ok":false,"demo":false,"observed_at":"2026-11-05T00:38:46.295174+00:00","target":null,"data":{},"warnings":[],"error":{"code":"invalid_arguments","message":"Use a literal IPv4 host, without URL, port or DNS name.","retryable":false}}

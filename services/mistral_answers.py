@@ -198,8 +198,16 @@ def request_payload(history, language, model, web_search=True, knowledge="", *, 
             "completion_args": {"max_tokens": 700}}
 
 
-def answer(history, language, key, model, web_search=True, timeout=60, knowledge="", pronote=None, *, session_context=""):
+def answer(history, language, key, model, web_search=True, timeout=60, knowledge="", pronote=None, *, session_context="", airzone_env=None):
     """One complete request; no retry, stored session or endpoint fallback."""
+    try:
+        from . import airzone_demo
+    except ImportError:
+        import airzone_demo
+    if airzone_demo.enabled(airzone_env) and airzone_demo.interested(history[-1]["content"]):
+        return airzone_demo.answer(history, language,
+                                   key, model, timeout, knowledge, env=airzone_env,
+                                   session_context=session_context)
     if pronote is not None and pronote.tools():
         try:
             from . import pronote_answers
