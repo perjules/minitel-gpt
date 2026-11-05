@@ -51,7 +51,8 @@ sources, pages et règles de confirmation. Elle reproduit le texte réellement
 émis, après conversion ASCII, sur un écran de 40 × 24 cellules, avec les modes
 page et défilement. Elle conserve les pauses applicatives et les délais réseau.
 
-Les couleurs et caractères de double taille sont ignorés. Il n'y a ni UART,
+Le positionnement absolu, les niveaux de gris (approximés par dim/bold) et
+l’inversion vidéo sont reproduits. Les caractères de double taille restent ignorés. Il n'y a ni UART,
 ni délai 1200 bauds, ni validation des particularités du vrai CRT/clavier.
 Le service physique peut rester lancé : les ports ne se disputent pas et les
 conversations sont distinctes. Les sessions d'un même nom partagent néanmoins
@@ -101,3 +102,18 @@ Ctrl-P réinitialise la session et Ctrl-G garde l'administration existante.
 Les lectures directes restent transitoires et ne sont pas ajoutées au journal
 mémoire. Les appels PRONOTE, l'éventuel fallback AI et l'impression sont réels.
 Voir [PRONOTE.md](PRONOTE.md) pour les commandes, limites et vérifications live.
+
+## Expérience sur le terminal physique
+
+Le diagnostic isolé [DISPLAY_PROBE.md](DISPLAY_PROBE.md) compare le Vidéotex
+40 colonnes au mode mixte éventuel de la Matra. Il exige l'arrêt du service
+série; contrairement à cette console, il utilise réellement l'UART. L'émulateur
+reste en 40 × 24 et ne valide pas le support matériel du mode mixte.
+
+## Saisie fixe et pagination
+
+Le [nouveau cadre 40 colonnes](TERMINAL_UX.md) conserve 18 lignes de contenu et
+réserve trois lignes à la saisie. SUITE/RETOUR parcourent le résultat chargé;
+une commande reste saisissable sur chaque page. La saisie partielle survit au
+changement de page. PRONOTE conserve ses touches de navigation entre notes, et
+RETOUR quitte toujours les modes CALC/PRONOTE selon le contexte.

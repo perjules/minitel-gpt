@@ -192,7 +192,10 @@ unreferenced generated releases. User archives and legacy log files are untouche
 A missing adapter or failed serial read/write is an expected availability state.
 The GPT process stays alive, closes the old transport, redetects the port, and
 retries after 5, 10, 30, then 60 seconds (remaining at 60 seconds).
-Serial writes have a two-second timeout. The first failure is logged once;
+Serial writes have a finite timeout: the queued transmission and current payload
+at 1200 baud, plus two seconds of slack. This lets a healthy USB buffer drain
+during page redraws; a genuine timeout still retires the link without replaying
+potentially partial output. The first failure is logged once;
 continued failures are summarized at most every five minutes. Recovery is logged
 only after 30 seconds of stable serial I/O, avoiding repeated open/fail messages.
 Unexpected application errors still retain their traceback and systemd restart.
@@ -413,6 +416,29 @@ and private installation data are protected. A target branch must support the
 shared runtime assets. Power requests are delayed transient systemd jobs and do
 not run concurrently with deployment. This adds no permanent monitoring service.
 
+
+### First switch to a new branch
+
+Older helpers queried missing local branches with `git show-ref --verify`, which
+returns 128 rather than the expected 1. The corrected preflight and checkout use
+`--quiet` so a missing branch is distinguished from a real Git failure. Existing
+branch ancestry, local data protection, readiness and rollback checks still apply.
+
+A fix on the target branch cannot repair the helper that must first switch to
+it. If the installed helper has this bug, create only the local branch reference
+from the remote target, then preview and confirm again in Maintenance:
+
+```bash
+cd /home/minitel/minitel-gpt
+git fetch origin +refs/heads/feature/terminal-ux:refs/remotes/origin/feature/terminal-ux
+git branch --no-track feature/terminal-ux refs/remotes/origin/feature/terminal-ux
+```
+
+These commands do not switch the checkout, change tracked files or restart any
+service. If Git reports that the local branch already exists, leave it intact.
+Use a fresh admin preview after fetching, since the confirmed commit may change.
+If deployment still fails, inspect `sudo journalctl -u minitel-deploy -n 100
+--no-pager`; a generic `CalledProcessError` does not identify the failed step.
 
 ## Multi-user compatibility
 

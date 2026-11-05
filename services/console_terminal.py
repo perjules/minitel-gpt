@@ -7,28 +7,44 @@ the application still owns every page, timeout, request and tool action.
 import curses
 from collections import deque
 
+from .terminal_display import STANDARD
+
 
 class Screen:
-    """Small streaming Videotex text screen, without colour or double-size art."""
+    """Streaming 40-column screen: absolute cursor, gray levels and inverse text."""
 
-    def __init__(self):
-        self.rows = [list(" " * 40) for _ in range(24)]
+    def __init__(self, geometry=STANDARD):
+        self.geometry = geometry
+        self.foreground, self.inverse = 7, False
+        self.address = None
+        self.styles = [[(7, False)] * geometry.columns for _ in range(geometry.rows)]
+        self.rows = [list(" " * self.geometry.columns) for _ in range(self.geometry.rows)]
         self.row = self.column = 0
         self.scrolling = False
+        self.cursor_visible = True
         self.escape = bytearray()
 
     def down(self):
-        if self.row < 23:
+        if self.row < self.geometry.rows - 1:
             self.row += 1
         elif self.scrolling:
             self.rows.pop(0)
-            self.rows.append(list(" " * 40))
+            self.rows.append(list(" " * self.geometry.columns))
+            self.styles.pop(0)
+            self.styles.append([(7, False)] * self.geometry.columns)
         else:
             self.row = 0
 
     def write(self, data):
         for code in data:
-            if self.escape:
+            if self.address is not None:
+                self.address.append(code)
+                if len(self.address) == 2:
+                    row, column = (value - 0x40 for value in self.address)
+                    if 1 <= row <= self.geometry.rows and 1 <= column <= self.geometry.columns:
+                        self.row, self.column = row - 1, column - 1
+                    self.address = None
+            elif self.escape:
                 self.escape.append(code)
                 command = self.escape[1]
                 length = command - 0x38 + 2 if command in (0x39, 0x3A, 0x3B) else 2
@@ -37,11 +53,23 @@ class Screen:
                         self.scrolling = True
                     elif bytes(self.escape) == b"\x1b\x3a\x6a\x43":
                         self.scrolling = False
+                    elif 0x40 <= command <= 0x47:
+                        self.foreground = command - 0x40
+                    elif command in (0x5C, 0x5D):
+                        self.inverse = command == 0x5D
                     self.escape.clear()
+            elif code == 0x11:
+                self.cursor_visible = True
+            elif code == 0x14:
+                self.cursor_visible = False
+            elif code == 0x1F:
+                self.address = bytearray()
             elif code == 0x1B:
                 self.escape.append(code)
             elif code == 0x0C:
-                self.rows = [list(" " * 40) for _ in range(24)]
+                self.rows = [list(" " * self.geometry.columns) for _ in range(self.geometry.rows)]
+                self.styles = [[(7, False)] * self.geometry.columns for _ in range(self.geometry.rows)]
+                self.foreground, self.inverse = 7, False
                 self.row = self.column = 0
             elif code == 0x1E:
                 self.row = self.column = 0
@@ -53,8 +81,9 @@ class Screen:
                 self.column = max(0, self.column - 1)
             elif 0x20 <= code <= 0x7E:
                 self.rows[self.row][self.column] = chr(code)
+                self.styles[self.row][self.column] = (self.foreground, self.inverse)
                 self.column += 1
-                if self.column == 40:
+                if self.column == self.geometry.columns:
                     self.column = 0
                     self.down()
 
@@ -103,13 +132,33 @@ class ConsoleSerial:
         else:
             for row, cells in enumerate(self.screen.rows):
                 try:
-                    self.window.addstr(row, 0, "".join(cells))
+                    start = 0
+                    while start < len(cells):
+                        style = self.screen.styles[row][start]
+                        end = start + 1
+                        while end < len(cells) and self.screen.styles[row][end] == style:
+                            end += 1
+                        foreground, inverse = style
+                        attribute = curses.A_DIM if foreground in (1, 4, 5) else curses.A_NORMAL
+                        if foreground in (3, 7):
+                            attribute |= curses.A_BOLD
+                        if inverse:
+                            attribute |= curses.A_REVERSE
+                        text = "".join(cells[start:end])
+                        if foreground == 0:
+                            text = " " * len(text)
+                        self.window.addstr(row, start, text, attribute)
+                        start = end
                 except curses.error:
                     # ncurses reports ERR after writing the bottom-right cell.
                     pass
             if height > 24:
                 self.window.addnstr(24, 0, self.hint, width - 1)
             self.window.move(self.screen.row, self.screen.column)
+            try:
+                curses.curs_set(1 if self.screen.cursor_visible else 0)
+            except curses.error:
+                pass
         self.window.refresh()
 
     def write(self, data):

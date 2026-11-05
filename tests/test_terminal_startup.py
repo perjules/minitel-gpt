@@ -1,6 +1,7 @@
 """Exercise startup through the real UART key decoder and conversation loop."""
 import unittest
 from collections import deque
+from contextlib import ExitStack
 from pathlib import Path
 from queue import Queue
 from tempfile import TemporaryDirectory
@@ -84,6 +85,14 @@ class FakeSerial:
         self.keys = deque(keys)
         self.output = bytearray()
         self.consumed = bytearray()
+        self.local_echo = True
+
+    def set_local_echo(self, enabled):
+        # Future keys remain queued; this fixture records UART output only.
+        self.local_echo = bool(enabled)
+
+    def reset_input_buffer(self):
+        pass
 
     def read(self, count):
         if not self.keys:
@@ -114,6 +123,8 @@ def screen_text(data):
         elif escape:
             skip = code - 0x38 if code in (0x39, 0x3A, 0x3B) else 0
             escape = False
+        elif code == 0x1F:
+            skip = 2
         elif code == chat.ESC:
             escape = True
         elif code in (chat.CR, chat.LF) or 0x20 <= code <= 0x7E:
@@ -149,6 +160,11 @@ def render_videotex(data):
                 index += 2
                 if mode == 0x43:
                     scrolling = operation == 0x69
+        elif code == 0x1F:
+            address = data[index:index + 2]
+            index += 2
+            if len(address) == 2 and 0x41 <= address[0] <= 0x58 and 0x41 <= address[1] <= 0x68:
+                row, column = address[0] - 0x41, address[1] - 0x41
         elif code == 0x0C:
             screen = [""] * 24
             row = column = 0
@@ -158,6 +174,8 @@ def render_videotex(data):
             column = 0
         elif code == 0x0A:
             down()
+        elif code == 0x08:
+            column = max(0, column - 1)
         elif 0x20 <= code <= 0x7E:
             current = screen[row].ljust(column + 1)
             screen[row] = current[:column] + chr(code) + current[column + 1:]
@@ -205,6 +223,25 @@ class StartupTests(unittest.TestCase):
                 output.put((None, error))
             return Mock(is_alive=lambda: False), output, chat.time.monotonic()
 
+        from services.console_terminal import Screen
+        rendered, offset, self.result_screens = Screen(), 0, []
+        install, move = chat.terminal_display.View.install, chat.terminal_display.View.move
+
+        def snapshot():
+            nonlocal offset
+            rendered.write(uart.output[offset:])
+            offset = len(uart.output)
+            self.result_screens.append("\n".join("".join(row) for row in rendered.rows))
+
+        def capture_install(view):
+            result = install(view)
+            snapshot()
+            return result
+
+        def capture_move(view, step):
+            move(view, step)
+            snapshot()
+
         real_read_key = chat.Term.read_key
 
         def read_key(term, timeout):
@@ -220,31 +257,37 @@ class StartupTests(unittest.TestCase):
         post = Mock(return_value=response, side_effect=boot_error)
         boot_screen = Mock(wraps=chat.show_boot)
 
-        with (
-            patch.object(chat, "select_memory_user", selected_user),
-            patch.object(chat.memory_session, "MemorySession", side_effect=memory),
-            patch.object(chat.serial, "Serial", return_value=uart),
-            patch.object(chat.time, "sleep"),
-            patch.object(chat.Term, "read_key", read_key),
-            patch.object(chat, "load_preset", return_value=preset or (
-                "Reponds en francais.", "*** 3615 IA ***",
-                "Quelle est votre requete ?", "ATTENTE...", None,
-            )),
-            patch.object(chat, "build_title", return_value=["LOGO"]),
-            patch.object(chat, "call_llm", side_effect=reply),
-            patch.object(chat, "start_answer", side_effect=start),
-            patch.object(chat.mistral_answers, "answer", side_effect=factual_reply),
-            patch.dict(chat.os.environ, {"MISTRAL_ANSWER_API": (
-                "conversations" if factual_reply else "chat_completions")}),
-            patch.object(chat.requests, "post", post),
-            patch.object(chat, "MISTRAL_KEY", "test-key" if boot_text or boot_error else ""),
-            patch.object(chat, "ANTHROPIC_KEY", ""),
-            patch.object(chat, "PROVIDER", "mistral"),
-            patch.object(chat, "show_boot", boot_screen),
-            patch.object(chat, "get_ip", return_value="192.0.2.1"),
-            patch.object(chat.log, "info"),
-            self.assertRaises(EndOfInput),
-        ):
+        # Keep the patches below Python 3.11's static block nesting limit.
+        with ExitStack() as stack:
+            contexts = (
+                patch.object(chat, "select_memory_user", selected_user),
+                patch.object(chat.memory_session, "MemorySession", side_effect=memory),
+                patch.object(chat.serial, "Serial", return_value=uart),
+                patch.object(chat.time, "sleep"),
+                patch.object(chat.Term, "read_key", read_key),
+                patch.object(chat.terminal_display.View, "install", capture_install),
+                patch.object(chat.terminal_display.View, "move", capture_move),
+                patch.object(chat, "load_preset", return_value=preset or (
+                    "Reponds en francais.", "*** 3615 IA ***",
+                    "Quelle est votre requete ?", "ATTENTE...", None,
+                )),
+                patch.object(chat, "build_title", return_value=["LOGO"]),
+                patch.object(chat, "call_llm", side_effect=reply),
+                patch.object(chat, "start_answer", side_effect=start),
+                patch.object(chat.mistral_answers, "answer", side_effect=factual_reply),
+                patch.dict(chat.os.environ, {"MISTRAL_ANSWER_API": (
+                    "conversations" if factual_reply else "chat_completions")}),
+                patch.object(chat.requests, "post", post),
+                patch.object(chat, "MISTRAL_KEY", "test-key" if boot_text or boot_error else ""),
+                patch.object(chat, "ANTHROPIC_KEY", ""),
+                patch.object(chat, "PROVIDER", "mistral"),
+                patch.object(chat, "show_boot", boot_screen),
+                patch.object(chat, "get_ip", return_value="192.0.2.1"),
+                patch.object(chat.log, "info"),
+                self.assertRaises(EndOfInput),
+            )
+            for context in contexts:
+                stack.enter_context(context)
             chat.run()
         self.boot_requests = post.call_args_list
         self.boot_screens = boot_screen.call_args_list
@@ -339,12 +382,13 @@ class StartupTests(unittest.TestCase):
             + b"ex" + fn(chat.K_CORR) + b"n" + fn(chat.K_ENVOI) + b"Hello" + fn(chat.K_ENVOI))
         self.assertIn("Reply in English", calls[0][0])
 
-    def test_english_pagination_still_requires_french_suite_key(self):
+    def test_english_pagination_keeps_french_function_keys_and_does_not_block(self):
         uart = FakeSerial(fn(chat.K_ENVOI) + fn(chat.K_SUITE))
         term = chat.Term(uart)
         with patch.object(chat.time, "sleep"):
             self.assertEqual(chat.show_response(term, "\n".join(["Answer"] * 19), "en"), 'done')
-        self.assertIn("SUITE for the next page", screen_text(uart.output))
+        self.assertIn("SUITE:suiv RETOUR:prec", screen_text(uart.output))
+        self.assertEqual(bytes(uart.keys), fn(chat.K_ENVOI) + fn(chat.K_SUITE))
 
     def test_start_screens_fit_without_truncation(self):
         rows = chat.UI["fr"]["boot"]

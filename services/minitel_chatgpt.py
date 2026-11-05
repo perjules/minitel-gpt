@@ -35,6 +35,7 @@ try:  # Support both systemd's direct script and package imports in tests.
         pronote,
         pronote_answers,
         pronote_mode,
+        terminal_display,
         terminal_link,
         user_services,
     )
@@ -54,6 +55,7 @@ except ImportError:
         pronote,
         pronote_answers,
         pronote_mode,
+        terminal_display,
         terminal_link,
         user_services,
     )
@@ -101,9 +103,9 @@ def detect_port():
 
 PORT = detect_port()
 BAUD = 1200
-COLS = 40
-SCREEN_ROWS = 24
-CONTENT_ROWS = 18          # lignes de contenu par page de réponse
+COLS = terminal_display.STANDARD.columns
+SCREEN_ROWS = terminal_display.STANDARD.rows
+CONTENT_ROWS = terminal_display.STANDARD.content_rows          # lignes de contenu par page de réponse
 IDLE_TIMEOUT = 300         # 5 min → nouvelle conversation, même utilisateur
 BOOT_CONTINUE_TIMEOUT = 30
 BOOT_CONTINUE_PROMPT = "SUITE: continuer / connexion dans 30 s"
@@ -251,9 +253,9 @@ FG_CYAN   = bytes([ESC,0x46])
 FG_YELLOW = bytes([ESC,0x43])
 FG_GREEN  = bytes([ESC,0x42])
 BG_BLACK  = bytes([ESC,0x50])
-DBL_HEIGHT= bytes([ESC,0x4C])   # double hauteur
+DBL_HEIGHT= bytes([ESC,0x4D])   # double hauteur
 DBL_SIZE  = bytes([ESC,0x4F])   # double hauteur+largeur
-SZ_NORMAL = bytes([ESC,0x4C-0x0C])  # 0x40 normal (placeholder)
+SZ_NORMAL = bytes([ESC,0x4C])
 # PRO2 START/STOP ROULEAU: scrolling within the 40-column Videotex screen.
 SCROLL_ON = bytes([ESC, 0x3A, 0x69, 0x43])
 SCROLL_OFF = bytes([ESC, 0x3A, 0x6A, 0x43])
@@ -384,7 +386,13 @@ def build_title(title_art=None):
 
 # ── Serial helpers ───────────────────────────────────────────────────────
 class Term:
+    geometry = terminal_display.STANDARD
+    view = None
+
     def __init__(self, transport=None):
+        self.geometry = terminal_display.STANDARD
+        self.view = None
+        self._tx_until = 0.0
         self.link_activity = lambda: None
         if transport is not None:
             self.s = transport
@@ -392,6 +400,7 @@ class Term:
             self.s = self.io(serial.Serial, detect_port(), BAUD, bytesize=7,
                              parity="E", stopbits=1, timeout=0.1, write_timeout=2)
             time.sleep(0.3)
+        self._write_slack = getattr(self.s, "write_timeout", None)
         self._presence_enabled = isinstance(self.s, serial.SerialBase)
         self._presence_due = float("inf")
         self._presence_deadline = None
@@ -430,10 +439,8 @@ class Term:
                 log.info("Terminal status unsupported; physical power detection disabled")
                 return
         if self._presence_deadline is None and now >= self._presence_due:
-            queued = self.io(getattr, self.s, "out_waiting", 0)
             self.w(b"\x1b\x39\x70")
-            # At 1200 baud the boot/page may still be queued ahead of this probe.
-            self._presence_deadline = now + 1 + queued * 10 / BAUD
+            self._presence_deadline = self.reply_deadline(1)
             self._presence_due = now + 2
 
     def presence_reply(self):
@@ -469,20 +476,61 @@ class Term:
     def w(self, data):
         if isinstance(data, str):
             data = to_ascii(data).encode("ascii", errors="replace")
+        baud = getattr(self.s, "baudrate", None)
+        started = time.monotonic() if isinstance(baud, int) and baud > 0 else None
+        slack = getattr(self, "_write_slack", None)
+        if started is not None and type(slack) in (int, float) and 0 < slack < float("inf"):
+            # A full USB/driver buffer can block a healthy write while earlier
+            # bytes drain at 120 bytes/s. Allow that backlog plus this payload,
+            # then the original finite slack. Never retry a partly sent write.
+            budget = self.reply_deadline(slack + len(data) * 10 / baud, now=started) - started
+            if self.s.write_timeout != budget:
+                self.io(setattr, self.s, "write_timeout", budget)
         written = self.io(self.s.write, data)
         if written is not None and written != len(data):
             raise terminal_link.Unavailable("short_write")
+        if started is not None:
+            # write() queues bytes; the USB adapter can still be transmitting
+            # when the driver reports out_waiting == 0. Track all queued 7E1
+            # bytes so protocol deadlines include the screen ahead of them.
+            self._tx_until = max(started, getattr(self, "_tx_until", 0)) + len(data) * 10 / baud
+
+    def reply_deadline(self, timeout, *, now=None):
+        """One serial timing budget for routing ACKs and presence replies."""
+        now = time.monotonic() if now is None else now
+        queued = self.io(getattr, self.s, "out_waiting", 0)
+        if not isinstance(queued, int) or queued < 0:
+            queued = 0
+        baud = getattr(self.s, "baudrate", BAUD)
+        if not isinstance(baud, int) or baud <= 0:
+            baud = BAUD
+        return max(now, getattr(self, "_tx_until", 0), now + queued * 10 / baud) + timeout
+
+    def waiting(self, text):
+        if self.view is not None:
+            self.view.busy(text)
+        else:
+            self.line()
+            self.center(text)
 
     def clear(self):
+        self.view = None
         self.w(bytes([FF, RS]))
         time.sleep(0.2)
 
     def line(self, text=""):
-        self.w(text[:COLS]); self.w(bytes([CR, LF]))
+        if self.view is not None:
+            if text:
+                self.view.status(text)
+            return
+        self.w(text[:self.geometry.width]); self.w(bytes([CR, LF]))
 
     def center(self, text):
-        text = text[:COLS]
-        self.w(" " * ((COLS - len(text)) // 2)); self.w(text); self.w(bytes([CR, LF]))
+        if self.view is not None:
+            self.line(text)
+            return
+        text = text[:self.geometry.width]
+        self.w(" " * ((self.geometry.columns - len(text)) // 2)); self.w(text); self.w(bytes([CR, LF]))
 
     def read_byte(self):
         b = self.io(self.s.read, 1)
@@ -1079,6 +1127,9 @@ def terminal_update(t, language):
             t.line(words["cancelled"])
             return "done", pending
         if answer in {"OUI", "YES"}:
+            if isinstance(t.view, terminal_display.View) and len(t.view.seen) < len(t.view.pages):
+                t.line("SUITE: lire le dossier avant de confirmer")
+                continue
             break
         t.line(words["invalid"])
     t.line(words["preparing"])
@@ -1122,11 +1173,9 @@ def wait_connection(t):
 
 
 def show_question_prompt(t: Term, question_msg):
-    t.clear()
-    t.w(FG_WHITE)
-    t.center(question_msg)
-    t.center("SOMMAIRE: reset / LOGOUT: connexion")
-    t.line()
+    if t.view is None:
+        terminal_display.View(t, question_msg).install()
+    t.view.status("SOMMAIRE: reset / LOGOUT: connexion")
 
 
 def show_guide(t: Term, language="fr"):
@@ -1212,6 +1261,21 @@ def terminal_memory_unlock(t, selected):
 
 
 def read_question(t: Term, allow_empty=False, calculator_mode=False, navigation_mode=False):
+    if getattr(t, "view", None) is not None:
+        try:
+            return t.view.read(allow_empty=allow_empty, calculator_mode=calculator_mode,
+                               navigation_mode=navigation_mode)
+        except rose_terminal.EchoUnavailable:
+            # Older/unknown firmware: preserve public conversation with the
+            # original local-echo editor. Private readers still fail closed.
+            page = list(t.view.pages[t.view.page])
+            t.clear()
+            for line in page:
+                t.line(line)
+    return read_question_legacy(t, allow_empty, calculator_mode, navigation_mode)
+
+
+def read_question_legacy(t: Term, allow_empty=False, calculator_mode=False, navigation_mode=False):
     """Lit une question. Retourne (texte, 'envoi') / (None,'sommaire') / (None,'timeout')."""
     t.w(FG_GREEN)
     t.w("> ")
@@ -1266,33 +1330,12 @@ def read_question(t: Term, allow_empty=False, calculator_mode=False, navigation_
 
 
 def show_response(t: Term, text: str, language="fr", allow_retour=False):
-    """Affiche la réponse en pages. Retourne 'sommaire' / 'done' / 'timeout'."""
-    lines = wrap(text)
-    pages = [lines[i:i+CONTENT_ROWS] for i in range(0, len(lines), CONTENT_ROWS)] or [[""]]
-    for pidx, page in enumerate(pages):
-        t.clear()
-        t.w(FG_WHITE)
-        for ln in page:
-            t.line(ln)
-        last = (pidx == len(pages) - 1)
-        if not last:
-            t.w(bytes([CR, LF]))
-            t.w(FG_CYAN)
-            t.center(UI[language]["next_page"])
-            typed = []
-            while True:
-                kind, code = t.read_key(IDLE_TIMEOUT)
-                if kind == 'timeout':
-                    return 'timeout'
-                if allow_retour and retour_requested(kind, code, typed):
-                    return 'retour'
-                if kind == 'fn':
-                    if allow_retour and code in (K_RETOUR, K_GUIDE):
-                        return 'retour' if code == K_RETOUR else 'guide'
-                    if code == K_SUITE:
-                        break
-                    if code == K_SOMMAIRE:
-                        return 'sommaire'
+    """Install the complete result without blocking input on intermediate pages.
+
+    read_question owns navigation/editing next. PRONOTE and CALC keep their
+    RETOUR behavior through its explicit mode flags, not through paging.
+    """
+    terminal_display.View(t, text, language).install()
     return 'done'
 
 
@@ -1395,6 +1438,8 @@ def run_session(t):
         show_guide(t, "fr")
 
     while True:  # boucle sommaire
+        if t.view is not None:
+            t.clear()  # Retire loaded output/input at every session boundary.
         # Recharger le preset à chaque retour au sommaire (prise en compte des édits)
         system_prompt, title_msg, question_msg, loading_msg, title_art = load_preset()
         title_lines = build_title(title_art)
@@ -1452,8 +1497,7 @@ def run_session(t):
         greeted = False
         if (isinstance(getattr(memory, "welcome", None), memory_session.onboarding.Session)
                 and memory.welcome.should_greet() and not (pending is not None and pending[0].is_alive())):
-            t.line()
-            t.center(loading_msg)
+            t.waiting(loading_msg)
             pending = start_answer(system_prompt, [], language, options, knowledge,
                                    memory=memory, welcome_start=True)
             t._pending = pending
@@ -1613,8 +1657,7 @@ def run_session(t):
                 elif pending is not None and pending[0].is_alive():
                     answer = "Requete precedente en cours. Reessayez bientot."
                 else:
-                    t.w(bytes([CR, LF]))
-                    t.center("CONSULTATION PRONOTE")
+                    t.waiting("CONSULTATION PRONOTE")
                     pending = start_pronote(direct, school_mode.backend, language, options, knowledge)
                     t._pending = pending
                     response, action = wait_answer(t, pending, options[2], allow_retour=True)
@@ -1729,13 +1772,11 @@ def run_session(t):
             except pronote.PronoteError:
                 # A broken school configuration must not feed private input to learning.
                 private_question = True
-            t.w(bytes([CR, LF]))
             calculator_request = calc.explicit(question) or (
                 calculator.candidate(question) and not calculator_blocked(mail, memory)
                 and not (isinstance(getattr(memory, "welcome", None), memory_session.onboarding.Session)
                          and memory.welcome.should_greet()))
-            t.w(FG_CYAN); t.line("")
-            t.center(calculator.content(language)["loading"] if calculator_request else loading_msg)
+            t.waiting(calculator.content(language)["loading"] if calculator_request else loading_msg)
             # Do not pile up paid calls while a locally abandoned HTTP request
             # is still running. Its isolated queue is discarded when it ends.
             response = None
@@ -1792,16 +1833,19 @@ def run_session(t):
                 if ticket:
                     review_ticket = ticket
                 queued_question, result = terminal_documents.read(
-                    t, answer, language,
+                    t, answer, language, title="3615 IA / COURRIER",
                     reviewed=(lambda mail=mail, ticket=ticket: mail.acknowledge(ticket)) if ticket else None,
                 )
             elif response and (response.get("memory") or response.get("christmas")):
                 # Memory inventories and Christmas lists accept commands on every page, including
                 # the last. Reuse mail's reader instead of trapping input in SUITE-only paging.
-                queued_question, result = terminal_documents.read(t, answer, language)
+                queued_question, result = terminal_documents.read(
+                    t, answer, language, title="3615 IA / NOEL" if response.get("christmas") else "3615 IA / MEMOIRE")
             else:
                 result = (show_calculator_scene(t, response["scene"], language)
                           if response and response.get("scene") else show_response(t, safe_display(answer), language))
+            if response and response.get('scene') and result == 'done':
+                show_response(t, safe_display(answer), language)
             if response and response.get('scene') and result != 'done':
                 memory.record('event', 'Scene CALC interrompue: ' + result, 'session')
             if result == 'guide':

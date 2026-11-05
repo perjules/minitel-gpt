@@ -535,3 +535,34 @@ def test_branch_switch_refuses_ignored_local_file_collisions(branch_installation
     assert manager.read()['branch'] == 'develop'
     manager.prepare.assert_not_called()
     manager.command.assert_not_called()
+
+
+def test_switch_to_previously_unseen_remote_branch_and_rollback(branch_installation):
+    manager, target, before = branch_installation
+    branch = 'feature/terminal-ux'
+    manager.git('push', 'origin', target + ':refs/heads/' + branch)
+    # The original fixture already has local main; real first-use feature
+    # branches do not. Both preflight and checkout must accept that absence.
+    manager.switch_branch(branch, target)
+    assert manager.git('branch', '--show-current') == branch
+    assert manager.read()['branch'] == branch
+    assert manager.git('rev-parse', 'HEAD') == target
+    assert manager.git('rev-parse', '--abbrev-ref', branch + '@{upstream}') == 'origin/' + branch
+    assert (manager.project / '.env').read_text() == 'private synthetic settings'
+    manager.rollback()
+    assert manager.git('branch', '--show-current') == 'develop'
+    assert manager.git('rev-parse', 'HEAD') == before
+
+
+def test_missing_branch_checkout_does_not_hide_other_git_errors(branch_installation, monkeypatch):
+    manager, _, _ = branch_installation
+    command = manager.git
+    def unavailable(*args):
+        if args[0] == 'show-ref':
+            raise subprocess.CalledProcessError(128, ['git', *args])
+        return command(*args)
+    monkeypatch.setattr(manager, 'git', unavailable)
+    with pytest.raises(subprocess.CalledProcessError) as failure:
+        manager.checkout('feature/terminal-ux')
+    assert failure.value.returncode == 128
+    assert command('branch', '--show-current') == 'develop'

@@ -5,9 +5,12 @@ import logging
 import time
 
 from PIL import Image
+
+from printing.document import PrintDocument, TextBlock
 from printing.mxw01 import MXW01
 from printing.render import render_document_pages
-from printing.document import PrintDocument, TextBlock
+
+log = logging.getLogger(__name__)
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
@@ -46,7 +49,7 @@ def main():
     try:
         asyncio.run(MXW01(args.address).print_images(chunks))
     except Exception:
-        logging.exception("Endurance job failed after %.1f seconds", time.monotonic() - started)
+        log.exception("Endurance job failed after %.1f seconds", time.monotonic() - started)
         raise
     print(f"Print acknowledged after {time.monotonic()-started:.1f} seconds")
 

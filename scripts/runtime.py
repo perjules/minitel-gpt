@@ -501,7 +501,7 @@ PrivateMounts=yes
     def checkout(self, branch):
         self.valid_branch(branch)
         try:
-            self.git("show-ref", "--verify", "refs/heads/" + branch)
+            self.git("show-ref", "--verify", "--quiet", "refs/heads/" + branch)
         except subprocess.CalledProcessError as error:
             if error.returncode != 1:
                 raise
@@ -532,11 +532,12 @@ PrivateMounts=yes
             self.status("ready", commit=target, branch=branch)
             return
         try:
-            local = self.git("show-ref", "--verify", "--hash", "refs/heads/" + branch)
+            self.git("show-ref", "--verify", "--quiet", "refs/heads/" + branch)
         except subprocess.CalledProcessError as error:
             if error.returncode != 1:
                 raise
         else:
+            local = self.git("rev-parse", "refs/heads/" + branch)
             self.git("merge-base", "--is-ancestor", local, target)
         # Reject tracked copies of private data on the target branch.
         private = self.git("ls-tree", "-r", "--name-only", target, "--", ".env", "config/prompts.json",

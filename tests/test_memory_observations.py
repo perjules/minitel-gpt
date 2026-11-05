@@ -172,7 +172,7 @@ def test_real_memory_loop_accepts_input_on_every_page_and_always_shows_navigatio
         chat.run(term)
     shown = screen_text(uart.output)
     assert start.call_count == expected
-    assert "SUITE / RETOUR" in shown and "Commande + ENVOI / SOMMAIRE" in shown
+    assert "SUITE:suiv RETOUR:prec" in shown and "Commande + ENVOI / SOMMAIRE" in shown
     assert "Page 1/" in shown
     if rows == 1:
         assert "Page 1/1" in shown

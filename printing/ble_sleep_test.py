@@ -6,6 +6,7 @@ import time
 
 from printing.mxw01 import CONTROL, NOTIFY, command, response_packet
 
+
 def log(message):
     print(f"{dt.datetime.now().astimezone().isoformat(timespec='seconds')} {message}", flush=True)
 
@@ -41,7 +42,7 @@ async def run(args):
                 if args.status:
                     try:
                         await status(client)
-                    except Exception as exc:
+                    except Exception as exc:  # noqa: BLE001 - Keep observing after a failed diagnostic probe.
                         log(f"Status failed: {exc}")
                 log(f"connected={client.is_connected}")
                 await asyncio.sleep(args.interval)
@@ -54,7 +55,7 @@ async def run(args):
             try:
                 async with BleakClient(device, timeout=15) as client:
                     await status(client)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - Keep observing after a failed diagnostic probe.
                 log(f"Keepalive failed: {exc}")
         await asyncio.sleep(args.interval)
 

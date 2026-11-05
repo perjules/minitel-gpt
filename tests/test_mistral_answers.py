@@ -6,7 +6,7 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from test_terminal_startup import FakeSerial, fn, screen_text
+from test_terminal_startup import FakeSerial, fn
 
 from services import minitel_chatgpt as chat
 from services import mistral_answers as engine
@@ -89,13 +89,13 @@ class AnswerTests(unittest.TestCase):
         rendered = engine.render(result)
         self.assertIn("xn--mnchen-3ya.example", rendered)
         uart = FakeSerial(fn(chat.K_SUITE) * 10)
-        term = object.__new__(chat.Term)
-        term.s = uart
+        term = chat.Term(uart)
         with patch.object(chat.time, "sleep"):
             self.assertEqual(chat.show_response(term, chat.safe_display(rendered), "en"), "done")
-        pages = bytes(uart.output).split(bytes([chat.FF]))
-        self.assertGreater(len(pages), 3)
-        final = screen_text(pages[-1])
+        self.assertGreater(len(term.view.pages), 2)
+        while term.view.page < len(term.view.pages) - 1:
+            term.view.move(1)
+        final = "\n".join(term.view.pages[-1])
         self.assertIn("Sources:", final)
         for domain in ("xn--mnchen-3ya.example", "example.net", "example.org"):
             self.assertIn(domain, final)

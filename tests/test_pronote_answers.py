@@ -253,10 +253,11 @@ class LocalAnswerTests(unittest.TestCase):
         self.assertTrue(response["turn"]["private"])
         self.assertNotIn("cached", response["turn"]["content"])
         uart = FakeSerial(fn(chat.K_SUITE) * 10)
-        terminal = object.__new__(chat.Term)
-        terminal.s = uart
+        terminal = chat.Term(uart)
         with patch.object(chat.time, "sleep"):
             self.assertEqual(chat.show_response(terminal, chat.safe_display(response["display"]), "en"), "done")
+        while terminal.view.page < len(terminal.view.pages) - 1:
+            terminal.view.move(1)
         self.assertIn("possibly outdated", screen_text(uart.output))
         self.assertIn("PRONOTE Alex", screen_text(uart.output))
 
@@ -287,10 +288,11 @@ class LocalAnswerTests(unittest.TestCase):
         self.assertEqual(terminal["turn"]["content"], table)
         self.assertEqual(json.dumps(result, ensure_ascii=False), snapshot)
         uart = FakeSerial(fn(chat.K_SUITE) * 10)
-        term = object.__new__(chat.Term)
-        term.s = uart
+        term = chat.Term(uart)
         with patch.object(chat.time, "sleep"):
             self.assertEqual(chat.show_response(term, chat.safe_display(preview), "fr"), "done")
+        while term.view.page < len(term.view.pages) - 1:
+            term.view.move(1)
         output = screen_text(uart.output)
         self.assertIn("17,5/20", output)
         self.assertIn("Non note", output)

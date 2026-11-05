@@ -1,7 +1,9 @@
 """Compare effective raster text resolutions on the MXW01 (one strip per run)."""
 import argparse
 import asyncio
+
 from PIL import Image, ImageDraw, ImageFont
+
 from printing.mxw01 import MXW01
 
 WIDTHS = (48, 64, 96, 128, 192, 256, 384)

@@ -313,9 +313,10 @@ def test_real_uart_confirmation_routes_locally_and_never_enters_chat(confirmatio
     text = "\n".join(screens)
     assert "Mettre a jour le mainframe ? OUI/NON" in text
     uart = bytes(harness.uart.output)
-    assert b"> \r\nFRANCE TELECOM / DOSSIER MAINTENANCE" in uart
-    assert (b"> \r\nPreparation du protocole Alcatel..." if launch else
-            b"> \r\nDossier classe sans suite.") in uart
+    assert any("Visa obtenu." in frame and "Revisions disponibles." in frame
+               for frame in harness.result_screens)
+    assert ("Preparation du protocole Alcatel..." if launch else
+            "Dossier classe sans suite.") in startup.screen_text(uart)
     assert len(calls) == 1 and calls[0][1] == [{"role": "user", "content": "Bonjour"}]
     assert queue.call_count == int(launch) and play.call_count == int(launch)
     assert requests.call_count == 1 + int(launch)

@@ -189,6 +189,7 @@ def interact(term, session):
                 token = result.get("review")
                 text, action = terminal_documents.read(
                     term, result["display"], echo=True, check=check, touch=touch,
+                    title="3615 IA / JOURNAL INTIME",
                     reviewed=(lambda token=token: session.acknowledge(token)) if token else None,
                 )
                 if action == "guide":

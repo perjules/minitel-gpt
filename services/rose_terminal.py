@@ -1,10 +1,13 @@
 """Keyboard/renderer adapter for rose; no access to ordinary history or tools."""
+import logging
 import sys
 import time
 from contextlib import contextmanager
 from queue import Empty
 
 from . import rose, terminal_link
+
+log = logging.getLogger(__name__)
 
 
 class EchoUnavailable(RuntimeError):
@@ -21,7 +24,8 @@ def routing_status(term, receiver, command=None, timeout=1):
     term.w(command if command is not None else bytes([0x1B, 0x3A, 0x62, receiver]))
     prefix = bytes([0x1B, 0x3B, 0x63, receiver])
     reply = bytearray()
-    deadline = time.monotonic() + timeout
+    # Share the same wire/driver backlog budget as the presence monitor.
+    deadline = term.reply_deadline(timeout, now=time.monotonic())
     while time.monotonic() < deadline:
         code = term.read_byte()
         if code is None:
@@ -30,6 +34,7 @@ def routing_status(term, receiver, command=None, timeout=1):
         del reply[:-5]
         if len(reply) == 5 and reply[:4] == prefix and 0x40 <= reply[4] <= 0x4F:
             return reply[4]
+    log.warning("terminal_routing status=timeout receiver=%02x", receiver)
     raise EchoUnavailable("Terminal routing acknowledgement unavailable")
 
 
@@ -62,15 +67,21 @@ def hidden_echo(term):
         yield
     finally:
         interrupted = sys.exc_info()[0] is not None
+        original = sys.exc_info()[1]
         failure = None
         for receiver in restore:
             command = bytes([0x1B, 0x3B, 0x61 if saved[receiver] else 0x60, receiver, 0x51])
             try:
-                term.w(command)
-            except terminal_link.Unavailable as error:
+                restored = routing_status(term, receiver, command)
+                if bool(restored & 0x02) != saved[receiver]:
+                    raise EchoUnavailable("Terminal keyboard echo restoration unconfirmed")
+            except (terminal_link.Unavailable, EchoUnavailable) as error:
                 failure = error
-        if failure is not None and not interrupted:
-            raise failure
+        # A queued restoration is not yet a restored keyboard. Consume its ACK
+        # here, otherwise it can be mistaken for the next guard's OFF reply.
+        # Uncertain restoration must not fall back to local echo input.
+        if failure is not None and (not interrupted or isinstance(original, EchoUnavailable)):
+            raise terminal_link.Unavailable("echo_restore_unconfirmed") from None
 
 
 def api():

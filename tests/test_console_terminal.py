@@ -112,7 +112,7 @@ class ConsoleTests(unittest.TestCase):
         self.assertEqual(calls[1][-1]["content"], "follow up")
         visible = "\n".join(snapshots)
         self.assertIn("BOOT TEST", visible)
-        self.assertTrue(any(chat.UI["fr"]["next_page"] in screen for screen in snapshots))
+        self.assertTrue(any("Page 1/2 | SUITE" in screen for screen in snapshots))
         self.assertNotIn("Choose language", visible)
         self.assertIn("2+3", visible)
         self.assertIn("5", visible)
