@@ -62,7 +62,14 @@ Record results here after review:
 
 | Gate | Decision | Evidence / limitation |
 | --- | --- | --- |
-| G0–G8 | PENDING | No physical run of the interaction probe yet |
+| G0–G8 | PENDING | Full gate results pending; partial K1 observations below |
+
+Partial evidence, 5 November 2026: first K1 captured correct unshifted/shifted
+letters, digits, punctuation, four SS2 accented letters and all eight function
+keys (`13 43` for RÉPÉTITION). Owner confirmed visual echo. Cedilla and keypad
+`*`/`#` remain unobserved. SSH Enter did not advance the probe; timeout attempted
+recovery before CAN/REP/echo tests. No full gate is marked passed. Preserve these
+bytes; repeat only the untested stages with the fixed controlling-tty input.
 
 ## WP1 — Shared clearing with validated CAN
 

@@ -2,6 +2,7 @@
 """Isolated SSH-driven 1200/7E1 experiment; --interaction tests CAN/REP/keys.
 
 See docs/DISPLAY_PROBE.md (original WP1) and docs/INTERACTION_PROBE.md.
+Interaction controls use /dev/tty and accept CR/LF, including with sudo/tee.
 
 Never imports the application, loads .env, or changes the deployed configuration.
 """
@@ -60,6 +61,71 @@ def report_summary(result):
     lines.extend(f"RECOVERY ERROR: {error}" for error in result.get("recovery_errors", []))
     lines.append("Unknown/skipped is NOT a pass. Visual observations and raw keys decide the gates.")
     return "\n".join(lines)
+
+
+class SSHInput:
+    """Read observation controls from the controlling SSH tty, not piped stdio.
+
+    Accept CR and LF explicitly. Enable ISIG so Ctrl-C triggers recovery;
+    restore the original tty settings on every context exit.
+    """
+
+    def __init__(self, path="/dev/tty"):
+        self.path, self.fd, self.original = path, None, None
+        self.buffer = bytearray()
+        self.after_cr = False
+
+    def __enter__(self):
+        self.fd = os.open(self.path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+        try:
+            self.original = termios.tcgetattr(self.fd)
+            settings = termios.tcgetattr(self.fd)
+            settings[0] &= ~(termios.ICRNL | termios.INLCR | termios.IGNCR)
+            settings[1] |= termios.OPOST | termios.ONLCR
+            settings[3] = (settings[3] & ~(termios.ICANON | termios.ECHO)) | termios.ISIG
+            settings[6][termios.VMIN] = 0
+            settings[6][termios.VTIME] = 0
+            termios.tcsetattr(self.fd, termios.TCSANOW, settings)
+        except BaseException:
+            self.__exit__(*sys.exc_info())
+            raise
+        return self
+
+    def poll(self):
+        while select.select([self.fd], [], [], 0)[0]:
+            data = os.read(self.fd, 1)
+            if not data:
+                raise KeyboardInterrupt
+            if self.after_cr and data == b"\n":
+                self.after_cr = False
+                continue
+            self.after_cr = data == b"\r"
+            if data in (b"\r", b"\n"):
+                line = self.buffer.decode("utf-8", errors="replace")
+                self.buffer.clear()
+                os.write(self.fd, b"\n")
+                return line
+            if data == b"\x04" and not self.buffer:
+                raise KeyboardInterrupt
+            if data in (b"\x08", b"\x7f"):
+                if self.buffer:
+                    removed = self.buffer.pop()
+                    while self.buffer and removed & 0xC0 == 0x80:
+                        removed = self.buffer.pop()
+                    os.write(self.fd, b"\x08 \x08")
+            elif data[0] >= 0x20 and len(self.buffer) < 1024:
+                self.buffer.extend(data)
+                os.write(self.fd, data)
+        return None
+
+    def __exit__(self, *exc):
+        try:
+            if self.fd is not None and self.original is not None:
+                termios.tcsetattr(self.fd, termios.TCSANOW, self.original)
+        finally:
+            if self.fd is not None:
+                os.close(self.fd)
+                self.fd = None
 
 
 def check_idle(port):
@@ -252,9 +318,10 @@ class Probe:
 class InteractionProbe(Probe):
     """40-column-only, manual acceptance tests; never changes the application."""
 
-    def __init__(self, uart, report):
+    def __init__(self, uart, report, ssh=None):
         super().__init__(uart)
         self.report = Path(report)
+        self.ssh = ssh
         # Refuse collisions/unwritable destinations before any terminal mutation.
         self.report.open("x", encoding="utf-8").close()
         self.result = {"version": 1, "started_utc": datetime.now(UTC).isoformat(),
@@ -317,9 +384,10 @@ class InteractionProbe(Probe):
                 if chunk:
                     data.extend(chunk)
                     print(f"KEY RX {chunk.hex(' ')}", flush=True)
-                if select.select([sys.stdin], [], [], 0)[0]:
-                    answer = sys.stdin.readline()
-                    if not answer or answer.strip().lower() == "q":
+                answer = self.ssh.poll() if self.ssh is not None else (
+                    sys.stdin.readline() if select.select([sys.stdin], [], [], 0)[0] else None)
+                if answer is not None:
+                    if (self.ssh is None and not answer) or answer.strip().lower() == "q":
                         raise KeyboardInterrupt
                     # Drain bytes already in transit before interpreting a later
                     # protocol reply. Do not type during cursor/status queries.
@@ -331,6 +399,9 @@ class InteractionProbe(Probe):
                     return bytes(data)
             raise TimeoutError(f"Observation timeout at {label}")
         finally:
+            self.result["observations"].setdefault(label, {
+                "result": "unknown", "note": "Interrupted/timed out before SSH confirmation",
+                "keyboard_hex": data.hex(" ")})
             self.event("rx_keyboard", bytes(data))
             self.save()
 
@@ -538,7 +609,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.report and not args.interaction:
         parser.error("--report requires --interaction")
-    if not sys.stdin.isatty():
+    if not args.interaction and not sys.stdin.isatty():
         parser.error("Run from an interactive SSH terminal (ssh -t), not a pipe")
     if os.geteuid() != 0:
         parser.error("Run with sudo so fuser can detect all UART owners")
@@ -558,7 +629,10 @@ def main(argv=None):
             if args.interaction:
                 stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
                 report = args.report or f"/tmp/minitel-interaction-{stamp}-{os.getpid()}.json"
-                InteractionProbe(uart, report).run(args.restore_only)
+                # sudo/tee and some SSH clients do not expose Enter through
+                # buffered stdin as expected. Use the controlling tty directly.
+                with SSHInput() as ssh:
+                    InteractionProbe(uart, report, ssh).run(args.restore_only)
             else:
                 Probe(uart).run(args.restore_only)
     except KeyboardInterrupt:

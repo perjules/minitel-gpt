@@ -1,6 +1,10 @@
 """Offline intent/recovery checks. No UART, systemd, accounts or live APIs."""
 
+import io
 import json
+import os
+import select
+import termios
 from unittest.mock import Mock
 
 import pytest
@@ -195,6 +199,8 @@ def test_observation_timeout_is_bounded_and_saves_report(tmp_path):
     with pytest.raises(TimeoutError, match="at deadline"):
         p.observation("deadline", "Type", seconds=0)
     assert json.loads(p.report.read_text())["recovery"] == "not_attempted"
+    observed = json.loads(p.report.read_text())["observations"]["deadline"]
+    assert observed["result"] == "unknown" and "timed out" in observed["note"]
 
 
 def test_complete_offline_procedure_does_not_claim_hardware_acceptance(monkeypatch, tmp_path):
@@ -210,3 +216,103 @@ def test_complete_offline_procedure_does_not_claim_hardware_acceptance(monkeypat
     assert all(b < 128 for command in commands for b in command)
     assert not any(probe.VIDEO in c or probe.MIXED in c for c in commands)
     assert "Unknown/skipped is NOT a pass" in probe.report_summary(p.result)
+
+
+@pytest.fixture
+def ssh_pty():
+    master, slave = os.openpty()
+    try:
+        yield master, slave, os.ttyname(slave)
+    finally:
+        os.close(master)
+        os.close(slave)
+
+
+def poll_after_write(ssh, master, data):
+    os.write(master, data)
+    assert select.select([ssh.fd], [], [], 0.5)[0], "PTY input did not arrive"
+    return ssh.poll()
+
+
+@pytest.mark.parametrize("ending", [b"\r", b"\n", b"\r\n"])
+@pytest.mark.parametrize("note", [b"", b"p", b"f", b"cedille non trouvee"])
+def test_real_pty_enter_and_notes_accept_cr_lf_without_double_advance(ssh_pty, ending, note):
+    master, slave, path = ssh_pty
+    original = termios.tcgetattr(slave)
+    with probe.SSHInput(path) as ssh:
+        active = termios.tcgetattr(slave)
+        assert active[1] & termios.ONLCR
+        assert active[3] & termios.ISIG
+        assert not active[3] & termios.ICANON
+        assert poll_after_write(ssh, master, note + ending) == note.decode()
+        assert ssh.poll() is None  # CRLF is one submission, not two stages.
+        assert poll_after_write(ssh, master, b"p\r") == "p"
+    assert termios.tcgetattr(slave) == original
+
+
+def test_real_pty_reproduces_cr_stuck_in_canonical_input_and_restores_settings(ssh_pty):
+    master, slave, path = ssh_pty
+    settings = termios.tcgetattr(slave)
+    settings[0] &= ~(termios.ICRNL | termios.INLCR | termios.IGNCR)
+    settings[3] |= termios.ICANON
+    settings[6][termios.VEOL] = b"\x00"
+    settings[6][termios.VEOL2] = b"\x00"
+    termios.tcsetattr(slave, termios.TCSANOW, settings)
+    os.write(master, b"\r")
+    assert not select.select([slave], [], [], 0.05)[0]  # Old polling sees no line.
+    termios.tcflush(slave, termios.TCIFLUSH)
+    with probe.SSHInput(path) as ssh:
+        assert poll_after_write(ssh, master, b"\r") == ""
+    assert termios.tcgetattr(slave) == settings
+
+
+@pytest.mark.parametrize("data,expected", [(b"p\x7ff\r", "f"),
+                                          ("éA\b\r".encode(), "é"),
+                                          ("cédille\b\r".encode(), "cédill"),
+                                          ("é\b\r".encode(), "")])
+def test_real_pty_note_backspace(ssh_pty, data, expected):
+    master, _, path = ssh_pty
+    with probe.SSHInput(path) as ssh:
+        assert poll_after_write(ssh, master, data) == expected
+
+
+def test_real_pty_observation_uses_controlling_tty_with_redirected_stdio(ssh_pty, monkeypatch, tmp_path):
+    master, slave, path = ssh_pty
+    original = termios.tcgetattr(slave)
+    monkeypatch.setattr(probe.sys, "stdin", io.StringIO(""))
+    monkeypatch.setattr(probe.sys, "stdout", io.StringIO())  # Output capture/tee.
+    uart = Mock()
+    uart.read.return_value = b""
+    with probe.SSHInput(path) as ssh:
+        p = probe.InteractionProbe(uart, tmp_path / "report.json", ssh)
+        p.receive = Mock(return_value=b"")
+        os.write(master, b"\r")
+        assert select.select([ssh.fd], [], [], 0.5)[0]
+        assert p.observation("K1", "Already captured", judge=False, seconds=1) == b""
+        assert p.result["observations"]["K1"]["result"] == "unknown"
+    uart.write.assert_not_called()
+    assert termios.tcgetattr(slave) == original
+
+
+@pytest.mark.parametrize("data", [b"q\r", b"\x04"])
+def test_real_pty_quit_restores_tty_and_keeps_keyboard_evidence(ssh_pty, tmp_path, data):
+    master, slave, path = ssh_pty
+    original = termios.tcgetattr(slave)
+    uart = Mock()
+    uart.read.return_value = b"A"
+    with pytest.raises(KeyboardInterrupt), probe.SSHInput(path) as ssh:
+        p = probe.InteractionProbe(uart, tmp_path / "report.json", ssh)
+        os.write(master, data)
+        assert select.select([ssh.fd], [], [], 0.5)[0]
+        p.observation("K1", "Type", seconds=1)
+    assert termios.tcgetattr(slave) == original
+    saved = json.loads(p.report.read_text())
+    assert saved["observations"]["K1"]["keyboard_hex"] == "41"
+    assert "KEYS K1: 41" in probe.report_summary(saved)
+
+
+def test_ssh_open_failure_never_mutates_uart(tmp_path):
+    uart = Mock()
+    with pytest.raises(OSError), probe.SSHInput(str(tmp_path / "missing-tty")):
+        uart.write(b"must not happen")
+    uart.write.assert_not_called()

@@ -7,22 +7,23 @@ The follow-up implementation and acceptance gates are in
 
 ## Get the single script onto the Pi
 
-Start from the working `develop` deployment. The tested script is published on
-`feature/terminal-capability-probe` at commit
-`7458795ce53af8df214c16f5f845ac01f6784fd4`. Fetch that branch and extract only the
+Start from the working `develop` deployment. The script is published on
+`feature/terminal-capability-probe`. Use the current branch version, which fixes
+SSH Enter handling; the original `7458795` version can time out at K1. Fetch the
+explicit branch reference and extract only the
 script; these commands do **not** switch the checkout, pull code into its files,
 change runtime metadata or restart services:
 
 ```bash
 cd ~/minitel-gpt
 git branch --show-current
-git fetch origin feature/terminal-capability-probe &&
-git show 7458795ce53af8df214c16f5f845ac01f6784fd4:scripts/display_probe.py > /tmp/display_probe.py &&
+git fetch origin refs/heads/feature/terminal-capability-probe:refs/remotes/origin/feature/terminal-capability-probe &&
+git show refs/remotes/origin/feature/terminal-capability-probe:scripts/display_probe.py > /tmp/display_probe.py &&
 .venv/bin/python /tmp/display_probe.py --help
 ```
 
-The branch should remain `develop`, and help must list `--interaction` and
-`--report`. If fetching/extraction fails, stop and inspect that error. You may
+The branch should remain `develop`, and help must list `--interaction`, `--report`
+and the `/dev/tty` CR/LF note. If fetching/extraction fails, stop and inspect that error. You may
 instead copy the same single file with SSH/vim; it needs only the already-installed
 `pyserial` dependency. The older WP1 script does not have `--interaction`.
 
@@ -36,6 +37,10 @@ a checkout/installed-branch mismatch, first use the confirmed recovery procedure
 Use an interactive SSH terminal. The Minitel is the test subject; **advance stages
 from SSH**, never with ENVOI. Allow roughly 10 minutes, longer for photos. Each
 observation has a 180-second timeout; expiry quits and attempts recovery.
+The interaction probe reads SSH controls directly from `/dev/tty`, accepts either
+CR or LF as Enter (CRLF counts once), and restores the SSH terminal's original
+settings on exit. Notes support Backspace. This bypasses line-buffered stdin and
+does not depend on stdout being a terminal when using `sudo` and `tee`.
 
 From the normal repository directory, where `.venv/bin/python` already works:
 
@@ -147,6 +152,30 @@ The JSON contains attempted TX, raw RX, stage IDs, observations and restoration
 errors. A completed run or exit code 0 means the procedure completed, **not that
 the hardware features passed**. Empty/skipped observations stay unknown. Photos
 and raw results can be reviewed later without editing or rerunning the script.
+Interrupted/timed-out observations also retain captured keyboard bytes in the
+summary as unknown; they are not silently lost just because SSH confirmation failed.
+
+### First K1 run: SSH Enter timeout (5 November 2026)
+
+The owner confirmed the typed characters displayed correctly. Captured bytes
+established unshifted `AZ` / shifted `az`, keypad digits 0–9, the requested
+punctuation, `é à è ù`, and all eight application function keys. RÉPÉTITION
+produced `13 43`. Cedilla was not located; keypad `*`/`#` were not present in the
+capture. These are retained observations, not a complete gate pass.
+
+SSH Enter failed to advance K1 and its 180-second timeout restored page mode.
+The exact Termux/SSH cause was not established remotely. Real-PTY tests reproduce
+the old poller's inability to see CR-only input when canonical newline translation
+is disabled. The updated controlling-tty reader covers CR/LF/CRLF, redirected
+stdio, editing, quit, terminal-setting restoration and retaining aborted evidence.
+This does not imply a Minitel UART fault.
+
+For a repeat with the fixed script, the owner need not retype the captured K1
+sequence: press SSH Enter immediately, note that K1 evidence is in the previous
+run, and continue with C1/C2. If Enter still fails, try `p` plus Enter or `q` plus
+Enter, and report that behavior. Do not repeat a whole key sequence while the
+control path is unconfirmed. Keep the original report/transcript alongside the
+new results directory. Cedilla remains optional.
 
 On ordinary exit, q, Ctrl-C, SIGHUP, SIGTERM, timeout or I/O failure, the probe
 attempts each independent cleanup: original case if changed, original keyboard
