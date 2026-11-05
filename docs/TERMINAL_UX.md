@@ -368,3 +368,12 @@ tries the configured mode again. Clean close, including systemd SIGTERM, attempt
 to restore the previous native case flag and closes the UART even if restoration
 fails. Forced termination or power loss cannot restore state: power-cycle the
 Minitel if its keyboard behaves unexpectedly, then restart the service.
+
+### Compact ASCII fallback (6 November 2026)
+
+Output retains the existing standard-library accent/typographic transliteration.
+Common arrows now use ASCII equivalents (`→` becomes `->`), alongside the existing
+technical-symbol mappings and readable currency/fraction fallbacks. An unknown
+Unicode character becomes one `?` instead of a six- or ten-character code-point
+escape. Raw terminal controls remain escaped; source mail, school data, model
+responses and stored text are not rewritten. Keyboard/accent input is unchanged.

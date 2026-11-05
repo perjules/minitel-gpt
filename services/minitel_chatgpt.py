@@ -907,19 +907,20 @@ def wait_answer(t, pending, timeout, allow_retour=False):
 
 
 def safe_display(text):
-    """Keep controls out of Videotex and avoid silently losing technical symbols."""
+    """Readable ASCII output; one ? for unsupported glyphs, no input decoding."""
     symbols = {"−": "-", "µ": "u", "μ": "u", "°": "deg", "±": "+/-",
-               "≤": "<=", "≥": ">=", "≠": "!=", "×": "x", "÷": "/", "Ω": "ohm"}
+               "≤": "<=", "≥": ">=", "≠": "!=", "×": "x", "÷": "/", "Ω": "ohm",
+               "→": "->", "←": "<-", "↔": "<->", "⇒": "=>", "⇐": "<=",
+               "↑": "^", "↓": "v", "£": "GBP", "½": "1/2", "¼": "1/4", "¾": "3/4"}
     output = []
     for char in unicodedata.normalize("NFC", text):
         if char not in "\n\t" and (ord(char) < 32 or ord(char) == 127):
             output.append(f"\\x{ord(char):02x}")
         else:
             mapped = symbols.get(char, to_ascii(char))
-            # Remaining unsupported glyphs get a visible code point rather than
-            # disappearing from a number, unit or code expression.
-            output.append(mapped or (f"\\u{ord(char):04x}" if ord(char) <= 0xffff
-                                     else f"\\U{ord(char):08x}"))
+            # Keep unknown Unicode visible without filling the 39-column page
+            # with diagnostic Unicode code-point strings. Source data remains unchanged.
+            output.append(mapped or "?")
     return "".join(output)
 
 

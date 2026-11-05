@@ -233,7 +233,7 @@ class AnswerTests(unittest.TestCase):
         self.assertEqual(chat.wrap("    return 17.25"), ["    return 17.25"])
         self.assertNotIn("\x1b", chat.safe_display("17.25\x1b[2J"))
         self.assertEqual(chat.safe_display("−5 µm ± 2°C ≤ 8 Ω"), "-5 um +/- 2degC <= 8 ohm")
-        self.assertEqual(chat.safe_display("☃"), "\\u2603")
+        self.assertEqual(chat.safe_display("☃"), "?")
 
     def test_small_settings_and_explicit_rollback_do_not_change_other_adapters(self):
         self.assertEqual(engine.settings({}), ("conversations", True, 60))
