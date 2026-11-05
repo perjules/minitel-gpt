@@ -93,8 +93,10 @@ The script snapshots operating mode before requesting case changes. If no valid
 status arrives, K2–K4 are skipped without changing case. This is **inconclusive**,
 not proof of no hardware support. The baseline and other tests remain useful.
 A status bit changing is not sufficient for acceptance: the raw letter, Shift,
-symbol and keypad results must also match. Native case support belongs to the
-later parsing work package, regardless of this probe's outcome.
+symbol and keypad results must also match. The owner has since selected a global
+Python case swap for the later lowercase WP; native-mode results are informational,
+not a prerequisite. They remain part of this already-prepared diagnostic rather
+than a proposal to change production keyboard configuration.
 
 The Q1 test demonstrates paced output plus buffered keyboard reception. It does
 not validate production editor responsiveness or reproduce every USB-driver

@@ -3,6 +3,11 @@
 Prepared 5 November 2026 against `develop` commit `8154ded`.
 Implementation status: **hardware gate pending; application unchanged**.
 
+Subsequent owner decisions: use a global Python ASCII-letter case swap for the
+physical Minitel, including passwords, controlled through the admin console.
+Console/web input stays unchanged. Native keyboard-mode changes are not the chosen
+implementation. Full accented-character support is a separate last-priority task.
+
 This plan follows the owner's ordering: clear/redraw efficiency and prompt recall
 first; **all text parsing, accent handling and uppercase/lowercase changes later
 in a separate work package**. Hardware tests may cover all of them together.
@@ -42,7 +47,7 @@ contradictory or interrupted tests do not count as passes.
 | G3 basic REP | R1: exact 1/2/39-cell pairs and correct cursor positions; no rollover | Keep literal runs for ordinary text; no REP optimization |
 | G4 gray REP | R2: literal/compressed gray and black runs identical and no stale text; cursor at C40 | Keep literal input fills; G3 can still enable separately validated normal runs |
 | G5 RÉPÉTITION | K1 records `13 43`, other function keys retain their codes; E1/Q1/Q2 have no routing/caret anomalies | Defer recall key binding if key/routing unreliable; do not add a command substitute automatically |
-| G6 native lowercase | K2/K3 status and actual raw letter/Shift case agree; keypad/symbol codes unchanged; K4 restores baseline | Later parsing WP retains hardware mode; consider explicit ASCII-letter swap only after separate review |
+| G6 native lowercase (informational) | K2/K3 status/raw results and K4 restoration document firmware capability | No effect on the chosen Python swap; native mode is not a prerequisite |
 | G7 repertoire | T1 photos identify supported glyphs; K1/K2/K3 raw accented/special input captured without ambiguity | Later parsing WP supports only verified sequences; retain readable ASCII output fallback |
 | G8 REP accents | R1 eight accented cells identical and cursor advances eight cells | No multibyte-character repeat compression; unrelated REP runs may still qualify |
 
@@ -153,39 +158,78 @@ inputs excluded. Console needs a documented RÉPÉTITION binding, preserving cur
 shortcuts. Physical pass: repeated presses recover exact prompts and the original
 draft, keep gray fill/caret intact, and never auto-submit.
 
-## WP4 — Text parsing and lowercase (separate, AFTER WP1–WP3)
+## WP4A — Global Python lowercase input (separate, AFTER WP1–WP3)
 
 Explicit hold: no production changes to encoding, decoding, case, command parsing
 or password values in the probe/clearing/compression/history work. Unsupported
 earlier display optimizations can be closed as no-go without blocking this later
 WP; supported preceding work must first pass regression and physical acceptance.
 
-1. Use G6/G7 evidence to specify the exact Matra input sequences/repertoire.
-   Maintain an incremental SS2 decoder across serial reads, with a bounded wait
-   for incomplete sequences; never swallow a following function key or expose
-   accent selector bytes as ordinary letters. Unsupported/malformed input has an
-   explicit behavior. Keep protocol replies out of user text.
-2. Select lowercase behavior: verified native mode with snapshot/restore if G6
-   passed; otherwise explicitly reviewed ASCII-letter swap at the input boundary.
-   Do not implement both simultaneously. Digits, symbols, keypad and function
-   keys must retain their meaning. Keep terminal power-cycle/reconnect recovery.
-3. Preserve message/draft case. Normalize only command matching, with existing
-   command semantics. Check usernames, addresses, passwords, consent prompts,
-   calculator expressions and private editors before sharing a transformation.
-   Existing passwords/credentials must remain enterable; no silent migration.
-4. Support verified accented output through a dedicated Videotex encoder, with
+1. Apply exactly `A-Z <-> a-z` once at the lowest shared **physical-keyboard
+   character-event** boundary, normally `Term.read_key()`, before any editor,
+   buffer/history or software echo. Cover every physical input path: usernames,
+   commands, chat, composition, calculator, onboarding, confirmations and all
+   password/secret readers. No per-feature opt-outs. Shift retains opposite-case
+   behavior; preserve resulting case in drafts and normalize only command matching.
+2. Do not transform `read_byte()` or the raw UART stream. Protocol payloads,
+   function codes and SS2 selectors can contain ASCII letter bytes without being
+   typed letters. Frame these sequences, including split/incomplete input, before
+   swapping ordinary letters. Minimal framing to avoid corruption belongs here;
+   full accent decoding/editing/display remains WP4B. Do not expose selector bytes
+   as text. Digits, punctuation, symbols and function keys retain their meaning.
+3. Classify the physical transport explicitly. Curses `ConsoleSerial`, browser/
+   admin test input, API input and outbound text bypass the swap regardless of
+   the setting. Do not infer transport from letter case or baud rate. Apply no
+   native lowercase command and do not rewrite stored credentials or password
+   hashes; existing mixed-case secrets must remain enterable with the new keys.
+4. Add one Terminal/keyboard selector to the existing admin console:
+   **Lowercase by default** (Python swap; intended default when this WP ships) /
+   **Original Minitel behavior** (letters unchanged). Persist allowlisted
+   `MINITEL_INPUT_CASE=lowercase|legacy` using existing `read_env`/`write_env_key`,
+   admin authentication, CSRF protection and restart feedback. Saving applies via
+   a clearly announced terminal-service restart with success/failure feedback.
+   Hold the effective mode fixed for each running Term; never change it halfway
+   through a prompt/password. This setting does not affect browser password entry.
+5. Audit all editor and legacy fallback paths for local-echo assumptions. Displayed
+   and stored characters must agree. If echo suppression fails, do not silently
+   show hardware uppercase while storing software lowercase; define an explicit
+   recovery/fallback consistent with the selected mode. Keep bounded UART budgets.
+
+Validation: both modes at the shared boundary; unshifted/Shift letters; unchanged
+nonletters and protocol replies; exactly one swap in public/private/secret editors;
+output/history never re-swapped; old mixed-case passwords; settings persistence,
+validation, admin authentication/CSRF and confirmed/failed restart; no mid-entry
+change; console/browser/API input unchanged with either setting; reconnect keeps
+the configured Python behavior without altering the native keyboard mode.
+
+Acceptance: consistent lowercase-first physical typing including passwords,
+Shift gives uppercase, admin can restore legacy behavior, all existing features
+and recovery tests pass. G6 is not a dependency. Roll back independently from
+clearing/compression/history if needed.
+
+## WP4B — Accented and supplementary characters (last, separate)
+
+Priority: after WP4A and other accepted UX work; optional until justified. Full
+accent support must not expand the small lowercase change into a Unicode overhaul.
+
+1. Use G7 evidence for the Matra repertoire. Extend existing sequence framing
+   with bounded incremental SS2 decoding; do not swallow a following function key.
+   Define unsupported/malformed-input behavior. Preserve native shifted function
+   key/character assignments. Keep protocol replies out of user text.
+2. Support verified accented output through a dedicated Videotex encoder, with
    ASCII fallback for unsupported symbols. Decode incoming text to Python strings;
    encode output at the wire boundary. No UTF-8 bytes sent over a 7-bit UART.
-5. Count displayed cells rather than encoded bytes for wrapping, cursor positions,
+3. Count displayed cells rather than encoded bytes for wrapping, cursor positions,
    input viewports, backspace and limits. One accented letter is one editable cell.
    Keep raw controls escaped so user/model content cannot issue terminal commands.
-6. Update the emulator and test split/malformed sequences, letter/Shift case,
+4. Update the emulator and test split/malformed sequences, letter/Shift case,
    special characters and all existing feature editors. Prompt history preserves
    decoded strings only after this WP changes the representation.
 
-Separate acceptance: hardware/native or software lowercase decision documented,
-letter case intentional, verified accents round-trip, one-key correction, and all
-existing passwords/features still work. Roll back this WP independently if needed.
+Separate acceptance: verified accents round-trip, one-key correction and cell
+counting work, all existing passwords/features remain usable. Account for WP4A's
+mode once per decoded character, never on selectors or encoding. Roll back this
+WP independently; unsupported symbols keep readable ASCII fallbacks.
 
 ## Common regression and rollout gate
 
