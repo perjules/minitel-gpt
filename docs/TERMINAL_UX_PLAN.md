@@ -231,6 +231,16 @@ counting work, all existing passwords/features remain usable. Account for WP4A's
 mode once per decoded character, never on selectors or encoding. Roll back this
 WP independently; unsupported symbols keep readable ASCII fallbacks.
 
+## Additional direction — activity feedback and autonomous tasks
+
+[TERMINAL_ACTIVITY.md](TERMINAL_ACTIVITY.md) records a nearer candidate WP-A for
+brief in-character messages grounded in actual activity, plus a later WP-B for a
+concrete autonomous task's full-screen scrolling view. Provider event streaming
+can carry progress while final answer text remains buffered. This does not change
+the pending hardware gates or the order of WP1–WP3. Global lowercase stays in
+WP4A; full accents stay last in WP4B. Scheduling activity implementation is separate
+from recording the design; no runtime progress/agent work begins in this change.
+
 ## Common regression and rollout gate
 
 Before implementing, fetch/reinspect remote `develop` and concurrent changes.

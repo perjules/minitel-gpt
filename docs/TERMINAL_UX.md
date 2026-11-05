@@ -4,6 +4,10 @@ Integrated into `develop` on 5 November 2026 from `feature/terminal-ux`, after t
 owner confirmed technical operation on the Matra. The inverse input field remains
 a UX trial to assess in use. Stable `main` is unchanged.
 
+Follow-up implementation gates are in [TERMINAL_UX_PLAN.md](TERMINAL_UX_PLAN.md).
+Proposed activity messages and a future full-screen autonomous-task view are
+documented in [TERMINAL_ACTIVITY.md](TERMINAL_ACTIVITY.md); neither is implemented.
+
 ## Hardware decision and evidence (1 November 2026)
 
 The owner's Matra Minitel 1, 722 079 V / XB0006B-2, stayed in Videotex during WP1:
