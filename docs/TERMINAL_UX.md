@@ -35,7 +35,7 @@ Follow-up physical testing on 5 November confirmed normal/inverse CAN row clears
 REP runs (including gray spaces and accented cells), echo suppression/restoration,
 buffered typeahead and the R22 C3 input caret. Native lowercase also works on this
 particular original M1: AZaz becomes azAZ and restores correctly. The agreed
-later implementation remains a global Python case swap with an admin setting.
+later implementation uses the verified native mode with an admin setting.
 The [interaction evidence](INTERACTION_PROBE.md#completed-run-protocol-keyboard-and-echo-review-5-november-2026)
 closes the corresponding hardware gates; CAN clearing and REP compression are implemented; subsequent package status is recorded in the plan. Full accent parsing remains separate and last priority.
 
@@ -329,3 +329,14 @@ and cache contents do not change. Controls and accented-byte sequences are never
 passed through this encoder. The console implements REP, including sequences
 split between writes. A repeated 39-character row takes three character-data
 bytes instead of 39; regular prose retains its usual progressive rendering.
+
+### Ordinary prompt recall (5 November 2026)
+
+RÉPÉTITION (`13 43`, console Ctrl-B/F6) recalls up to 20 completed ordinary chat
+prompts, newest first, then restores the saved draft and its viewport. The user
+can edit the recalled text; only ENVOI submits. Editing/ANNULATION ends traversal,
+while paging preserves it. Entries are scoped to the active conversation in RAM,
+exclude feature/private/secret/confirmation inputs and disappear at session reset,
+logout, timeout or transport recovery. Recall never calls a provider. Eligibility
+uses the conversation's existing onboarding state without observing or modifying
+onboarding revision markers.

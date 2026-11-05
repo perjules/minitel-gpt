@@ -31,6 +31,7 @@ un terminal interactif (`ssh -t`). Ctrl-Q ou Ctrl-C quitte et restaure le termin
 | Ctrl-R, F4, Échap | RETOUR |
 | Ctrl-U, F5 | ANNULATION : effacer la saisie en cours |
 | Retour arrière | CORRECTION |
+| Ctrl-B, F6 | RÉPÉTITION : rappeler les requêtes du chat |
 
 Ces touches ont exactement le comportement de la boucle Minitel selon l'écran.
 Commencez avec **Ctrl-P / SOMMAIRE** : le démarrage apparaît en français, puis
@@ -117,3 +118,16 @@ réserve trois lignes à la saisie. SUITE/RETOUR parcourent le résultat chargé
 une commande reste saisissable sur chaque page. La saisie partielle survit au
 changement de page. PRONOTE conserve ses touches de navigation entre notes, et
 RETOUR quitte toujours les modes CALC/PRONOTE selon le contexte.
+
+## Rappel des requêtes
+
+Dans le chat ordinaire, RÉPÉTITION rappelle la dernière requête envoyée, puis les
+plus anciennes (20 maximum, en mémoire seulement). Après la plus ancienne,
+la saisie qui était en cours réapparaît. La requête rappelée reste modifiable ;
+ENVOI est toujours nécessaire. Une modification interrompt le parcours ;
+ANNULATION efface la saisie et ce parcours. SUITE/RETOUR préservent le parcours.
+
+Le rappel est désactivé dans les fonctionnalités, saisies privées et confirmations.
+Seules les requêtes de chat ordinaires ayant abouti sont conservées, sans doublons
+consécutifs. SOMMAIRE, LOGOUT, expiration et déconnexion effacent cet historique.
+Il ne faut pas confondre ce rappel local avec l'historique conversationnel stocké.

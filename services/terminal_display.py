@@ -82,6 +82,42 @@ def encode_runs(text):
     return bytes(result)
 
 
+class PromptHistory:
+    """Session-local ordinary chat prompts; recall never submits a request."""
+
+    def __init__(self):
+        self.items = []
+        self.edited()
+
+    def edited(self):
+        self.index = None
+        self.draft = ""
+
+    def clear(self):
+        self.items.clear()
+        self.edited()
+
+    def add(self, text):
+        self.edited()
+        if text and (not self.items or self.items[-1] != text):
+            self.items.append(text)
+            del self.items[:-20]
+
+    def recall(self, draft):
+        if not self.items:
+            return None
+        if self.index is None:
+            self.draft = draft
+            self.index = len(self.items) - 1
+        else:
+            self.index -= 1
+        if self.index < 0:
+            result = self.draft
+            self.edited()
+            return result
+        return self.items[self.index]
+
+
 class View:
     """Complete loaded text and display-only paging, independent of feature state."""
 
@@ -277,7 +313,7 @@ class View:
         self.term.w(b"\x11")
 
     def read(self, *, allow_empty=False, calculator_mode=False, navigation_mode=False,
-             touch=None, echo=False):
+             touch=None, echo=False, recall=False):
         """Own the editor only while receiving input; always restore echo on exit.
 
         echo=True is for the journal, whose outer password/session guard already
@@ -285,9 +321,9 @@ class View:
         """
         context = nullcontext() if echo else rose_terminal.hidden_echo(self.term)
         with context:
-            return self._read(allow_empty, calculator_mode, navigation_mode, touch)
+            return self._read(allow_empty, calculator_mode, navigation_mode, touch, recall)
 
-    def _read(self, allow_empty, calculator_mode, navigation_mode, touch):
+    def _read(self, allow_empty, calculator_mode, navigation_mode, touch, recall):
         chat = rose_terminal.api()
         self.feature_navigation = "grades" if navigation_mode else "exit" if calculator_mode else False
         self.buffer, self.pending_input = self.pending_input, []
@@ -308,6 +344,7 @@ class View:
             submitted = (kind == "fn" and code == chat.K_ENVOI) or (
                 kind == "char" and code in (chat.CR, chat.LF))
             if submitted:
+                self.term.prompt_history.edited()
                 if overflow:
                     self.buffer.clear()
                     overflow = False
@@ -323,6 +360,16 @@ class View:
                         return text, "envoi"
                 continue
             if kind == "fn":
+                if code == chat.K_REPET:
+                    if recall:
+                        text = self.term.prompt_history.recall("".join(self.buffer))
+                        if text is None:
+                            self.status("Aucune requete precedente" if self.language == "fr" else "No previous prompt")
+                        else:
+                            self.buffer = list(text)
+                            overflow = False
+                        self.input()
+                    continue
                 if code == chat.K_SOMMAIRE:
                     return None, "sommaire"
                 if code == chat.K_GUIDE:
@@ -336,6 +383,7 @@ class View:
                     self.move(1 if code == chat.K_SUITE else -1)
                     continue
                 if code == chat.K_ANNUL:
+                    self.term.prompt_history.edited()
                     self.buffer.clear()
                     overflow = False
                     self.input()
@@ -343,10 +391,12 @@ class View:
             if (kind == "fn" and code == chat.K_CORR) or (
                 kind == "char" and code in (chat.BS, 0x7F)):
                 if self.buffer:
+                    self.term.prompt_history.edited()
                     self.buffer.pop()
                     self.input()
             elif kind == "char" and 0x20 <= code <= 0x7E:
                 if len(self.buffer) < io_limits.MAX_QUESTION_CHARS and not overflow:
+                    self.term.prompt_history.edited()
                     self.buffer.append(chr(code))
                     self.input()
                 else:

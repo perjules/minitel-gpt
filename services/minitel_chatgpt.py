@@ -392,6 +392,7 @@ class Term:
     def __init__(self, transport=None):
         self.geometry = terminal_display.STANDARD
         self.view = None
+        self.prompt_history = terminal_display.PromptHistory()
         self._tx_until = 0.0
         self.link_activity = lambda: None
         if transport is not None:
@@ -466,6 +467,7 @@ class Term:
         return result
 
     def close(self):
+        self.prompt_history.clear()
         close = getattr(self.s, "close", None)
         if callable(close):
             try:
@@ -555,7 +557,7 @@ class Term:
                     code = self.read_byte()
                 if code is None:
                     continue          # SEP parasite → ignorer, ne pas bloquer
-                if code in (K_ENVOI, K_SUITE, K_SOMMAIRE, K_GUIDE, K_RETOUR, K_CORR, K_ANNUL):
+                if code in (K_ENVOI, K_SUITE, K_SOMMAIRE, K_GUIDE, K_RETOUR, K_CORR, K_ANNUL, K_REPET):
                     self.keyboard_activity()
                 return ('fn', code)
             if b == ESC:
@@ -608,6 +610,13 @@ def wrap(text, width=COLS):
 def calculator_blocked(mail, memory):
     return bool((memory is not None and memory.pending) or
                 (mail is not None and (mail.draft or mail.composition or mail.recipient_choices)))
+
+
+def prompt_recall_allowed(memory, mail, calc, school, printer, *, onboarding_active=False):
+    """Narrow ordinary-chat scope; no replay in feature or confirmation editors."""
+    return not (onboarding_active or calc.mode or school.mode or printer.approval or getattr(memory, "pending", None)
+                or (mail is not None and (mail.items or mail.selected or mail.draft
+                                          or mail.composition or mail.recipient_choices)))
 
 
 def call_answer(system_prompt, history, language, options, knowledge,
@@ -1260,11 +1269,11 @@ def terminal_memory_unlock(t, selected):
                     "DESACTIVER MEMOIRE ou SOMMAIRE pour verrouiller. Apprentissage automatique désactivé.")
 
 
-def read_question(t: Term, allow_empty=False, calculator_mode=False, navigation_mode=False):
+def read_question(t: Term, allow_empty=False, calculator_mode=False, navigation_mode=False, *, recall=False):
     if getattr(t, "view", None) is not None:
         try:
             return t.view.read(allow_empty=allow_empty, calculator_mode=calculator_mode,
-                               navigation_mode=navigation_mode)
+                               navigation_mode=navigation_mode, recall=recall)
         except rose_terminal.EchoUnavailable:
             # Older/unknown firmware: preserve public conversation with the
             # original local-echo editor. Private readers still fail closed.
@@ -1399,6 +1408,7 @@ def run(term=None):
     try:
         return run_session(t)
     finally:
+        t.prompt_history.clear()
         # Invalidate review tickets and close memory guards even on a UART error.
         for cleanup in t._session_resources:
             owner = getattr(cleanup, "__self__", None)
@@ -1438,6 +1448,7 @@ def run_session(t):
         show_guide(t, "fr")
 
     while True:  # boucle sommaire
+        t.prompt_history.clear()
         if t.view is not None:
             t.clear()  # Retire loaded output/input at every session boundary.
         # Recharger le preset à chaque retour au sommaire (prise en compte des édits)
@@ -1520,13 +1531,17 @@ def run_session(t):
             show_question_prompt(t, question_msg)
 
         queued_question = None
+        onboarding_active = greeted
         while True:  # boucle conversation
+            recall_eligible = False
             if queued_question is not None:
                 question, action = queued_question, 'envoi'
                 queued_question = None
             else:
+                recall_eligible = prompt_recall_allowed(memory, mail, calc, school_mode, printer,
+                                                        onboarding_active=onboarding_active)
                 question, action = read_question(t, calculator_mode=calc.mode or school_mode.mode,
-                                                 navigation_mode=school_mode.grade_view)
+                                                 navigation_mode=school_mode.grade_view, recall=recall_eligible)
             if action == 'envoi' and (question or '').strip().upper() == 'SOMMAIRE':
                 action = 'sommaire'
             if action == 'guide':
@@ -1811,6 +1826,8 @@ def run_session(t):
             if response is not None and response.get("turn") is not None:
                 printer.remember(answer)
 
+            if response is not None:
+                onboarding_active = bool(response.get("onboarding"))
             warning = memory.take_warning()
             if warning:
                 answer += "\n\n" + warning
@@ -1826,6 +1843,12 @@ def run_session(t):
                 memory.record("assistant", answer, channel, factual=response.get("factual"))
             elif not (response and (response.get("turn") or {}).get("private")):
                 memory.record("assistant", answer, channel, references=(response.get("turn") or {}).get("references", ()) if response else ())
+            # Only completed ordinary chat turns enter recall. Feature inputs,
+            # secrets, private records and queued document commands never do.
+            if (recall_eligible and channel == "chat" and not private_question
+                    and response and response.get("turn") and not response.get("christmas")
+                    and not response["turn"].get("private")):
+                t.prompt_history.add(question)
             mail_document = channel == "gmail" and mail is not None and bool(
                 mail.items or mail.selected or mail.draft or mail.composition or mail.recipient_choices)
             if mail_document:

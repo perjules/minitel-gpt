@@ -1,7 +1,7 @@
 # Matra M1 UX follow-up implementation plan
 
 Prepared 5 November 2026 against `develop` commit `8154ded`.
-Implementation status: **WP1–WP2 implemented; offline checks passed (1,370 tests); physical acceptance pending**.
+Implementation status: **WP1–WP3 implemented; offline checks passed; physical acceptance pending**.
 
 Final owner decision after the hardware review: use verified **native lowercase**
 for the physical Minitel, including passwords, controlled through the admin
@@ -289,3 +289,9 @@ capability passes do not replace application regression and rollout acceptance.
   identical cells/styles/cursor. A dense repeated-text page saves at least 648
   bytes; the USB backpressure fixture deliberately uses incompressible rows so
   it still exercises the original failure condition after optimization.
+
+- WP3: a session-local 20-prompt history records completed ordinary chat only,
+  excluding feature, private and confirmation contexts. RÉPÉTITION cycles newest
+  to oldest then restores the saved draft; editing exits traversal, paging keeps
+  it, ENVOI submits. Session boundaries and disconnect cleanup discard history.
+  Console Ctrl-B/F6 emits the actual `13 43` key and counts as link activity.
