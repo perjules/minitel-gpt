@@ -1,7 +1,7 @@
 # Matra M1 UX follow-up implementation plan
 
 Prepared 5 November 2026 against `develop` commit `8154ded`.
-Implementation status: **WP1–WP3 implemented; offline checks passed; physical acceptance pending**.
+Implementation status: **WP1–WP4A implemented and offline validated; physical acceptance pending**.
 
 Final owner decision after the hardware review: use verified **native lowercase**
 for the physical Minitel, including passwords, controlled through the admin
@@ -14,7 +14,7 @@ This plan follows the owner's ordering: clear/redraw efficiency and prompt recal
 first; **all text parsing, accent handling and uppercase/lowercase changes later
 in a separate work package**. Hardware tests may cover all of them together.
 
-## Constraints and existing behavior
+## Constraints and pre-implementation baseline
 
 - Plain Matra Minitel 1, 40 x 24 usable cells, 1200 baud 7E1; no assumed 1B/ANSI,
   80-column or mosaic capability. Keep the current 39-column safe writing width.
@@ -24,7 +24,7 @@ in a separate work package**. Hardware tests may cover all of them together.
   fixed editor, shared content transition and visible-character clear threshold.
 - Heading row 1, content 2–19, navigation 20, status 21, input 22–24. Input is
   inverse foreground 2, nominally 70% gray. Do not change these visuals here.
-- Above 100 visible answer characters, current transition sends FF and rebuilds
+- Before these packages, above 100 visible answer characters the transition sent FF and rebuilt
   the frame. At/below 100 it erases right-to-left, bottom-to-top. Loaded pages,
   partial input and feature context survive paging.
 - `Term` owns the UART and serial queue/reply budgets; workers never draw.
@@ -49,7 +49,7 @@ contradictory or interrupted tests do not count as passes.
 | G3 basic REP | R1: exact 1/2/39-cell pairs and correct cursor positions; no rollover | Keep literal runs for ordinary text; no REP optimization |
 | G4 gray REP | R2: literal/compressed gray and black runs identical and no stale text; cursor at C40 | Keep literal input fills; G3 can still enable separately validated normal runs |
 | G5 RÉPÉTITION | K1 records `13 43`, other function keys retain their codes; E1/Q1/Q2 have no routing/caret anomalies | Defer recall key binding if key/routing unreliable; do not add a command substitute automatically |
-| G6 native lowercase (informational) | K2/K3 status/raw results and K4 restoration document firmware capability | Retain original behavior and report failure if native mode cannot be confirmed |
+| G6 native lowercase | K2/K3 status/raw results and K4 restoration document firmware capability | Retain original behavior and report failure if native mode cannot be confirmed |
 | G7 repertoire | T1 photos identify supported glyphs; K1/K2/K3 raw accented/special input captured without ambiguity | Later parsing WP supports only verified sequences; retain readable ASCII output fallback |
 | G8 REP accents | R1 eight accented cells identical and cursor advances eight cells | No multibyte-character repeat compression; unrelated REP runs may still qualify |
 
@@ -68,7 +68,7 @@ Record results here after review:
 | G1/G2 | GO | C1/C2/C3 photos show correct normal/gray clearing and redraw; all six CAN cursor checks pass, including bottom and empty rows |
 | G3/G4/G8 | GO | R1/R2 photos show identical literal/compressed runs, uniform gray and no stale text; all five REP cursor checks pass, including eight accented cells |
 | G5 | GO for implementation | RÉPÉTITION is `13 43`; all eight function codes captured; E1 echo absent, Q1 receives complete ordered ABC123 + ENVOI without visible output contamination, Q2 cursor exactly R22 C3 |
-| G6 | SUPPORTED; informational | Native mode changes AZaz to azAZ, status `40` → `48` → `40`; original case restored. Native mode selected; no Python case swap |
+| G6 | SUPPORTED; selected for WP4A | Native mode changes AZaz to azAZ, status `40` → `48` → `40`; original case restored. Native mode selected; no Python case swap |
 | G7 | VERIFIED SUBSET | T1 output repertoire confirmed; input captures case, digits, `*`/`#`, punctuation and é/à/è/ù. Cedilla input remains untested; full parsing stays deferred |
 
 Partial evidence, 5 November 2026: first K1 captured correct unshifted/shifted
@@ -266,11 +266,35 @@ heading/attribute polish and mosaic experiments are out of scope.
 
 ## Resume checklist
 
-Hardware review is complete: G0–G5 and G8 allow WP1–WP3 implementation in order.
-Fetch/reinspect remote `develop` before production edits, then validate each WP
-offline and physically as described above. Native lowercase support is used by the agreed native/admin approach in WP4A. Cedilla input remains untested
-for WP4B and does not block clearing, compression or prompt recall. Hardware
-capability passes do not replace application regression and rollout acceptance.
+WP1–WP4A are implemented on `feature/terminal-capability-probe`, with separate
+commits and offline checks. No push or promotion to `develop`/`main` is implied.
+WP4B (accents) remains explicitly deferred. Activity/scrolling work in
+TERMINAL_ACTIVITY.md remains a separate future scope.
+
+After publication/deployment is explicitly requested, physical application
+acceptance is the remaining gate:
+
+1. Ordinary chat: enter a short prompt, verify input clears before waiting status,
+   answer clears bottom-to-top, then new text builds without tails or frame flash.
+   Repeat a dense answer followed by a short one.
+2. Load a multi-page answer; SUITE then RETOUR/PRECEDENT repeatedly with an unsent
+   long draft. Verify page counts, complete content, gray fill and input caret.
+3. Send three ordinary prompts; RÉPÉTITION cycles newest to oldest then the saved
+   draft. Edit/correct/clear, page while recalling, submit once. SOMMAIRE/LOGOUT
+   must clear recall; feature/private/password/confirmation input must not recall.
+4. Exercise MAIL list/read/reply/review, PRONOTE results/grades and journal
+   unlock/read/edit, plus CALC, boot and maintenance. Check existing feature keys,
+   context, review gates and hidden input. No accidental sends or lost drafts.
+5. With native lowercase enabled, test unshifted letters, Shift, digits/symbols,
+   and existing mixed-case passwords. In Maintenance select original behavior,
+   verify restart feedback and opposite default case; switch back. Console typing
+   retains its original case in either mode. No accented-input acceptance required.
+6. Switch the terminal off/on and reconnect; verify configured mode, input caret,
+   echo and fresh recall state. Review `terminal_keyboard` warnings if setup or
+   restoration is unconfirmed. A forced kill requires visual recovery review.
+
+Record actual outcomes here before promotion. Hardware capability passes and
+offline tests do not count as physical application acceptance.
 
 ## Implementation record
 
@@ -295,3 +319,26 @@ capability passes do not replace application regression and rollout acceptance.
   to oldest then restores the saved draft; editing exits traversal, paging keeps
   it, ENVOI submits. Session boundaries and disconnect cleanup discard history.
   Console Ctrl-B/F6 emits the actual `13 43` key and counts as link activity.
+
+- WP4A: native case configuration runs after connection/resume, verified through
+  operating-mode replies. Physical input is global, including passwords; no
+  software swap or accent changes. Maintenance saves the allowlisted setting
+  with authentication/CSRF and explicit restart feedback. Early bytes are bounded
+  and preserved; replies stay out of user input. Clean shutdown restores the
+  prior mode where possible. Unsupported/unconfirmed setup attempts original
+  behavior and logs the confirmed or uncertain result.
+
+## Final offline validation (5 November 2026)
+
+- `uv sync --locked --all-extras`: environment synchronized without dependency changes.
+- Full suite: **1,405 tests and 400 subtests passed**; Ruff and requirement-export
+  checks passed. Local Markdown targets/anchors and `git diff --check` passed.
+- Synthetic dense repeated-text frame: 374 bytes with REP versus 1,129 literal
+  bytes (755 saved). Its submission/clearing transition uses 257 bytes without
+  FF, including status/navigation updates; 18 CAN row clears account for 180 bytes.
+  These are wire-byte measurements, not a physical CRT latency measurement.
+- Separate commits: WP1 CAN, WP2 REP, WP3 recall, WP4A native case/admin.
+  No dependencies, accent decoder, stored credentials or private data changed.
+- Physical application acceptance: **pending** using the resume checklist above.
+  Initial hardware capabilities passed; this does not assert that the combined
+  application branch has already been exercised on the Matra.

@@ -39,8 +39,8 @@ Commencez avec **Ctrl-P / SOMMAIRE** : le démarrage apparaît en français, pui
 ensuite à une conversation vide avec le même nom et la même langue. **LOGOUT**
 puis Entrée permet de changer de nom, sans rejouer le démarrage. RETOUR quitte la
 console CALC ou interrompt son spectacle; dans PRONOTE, il quitte le mode ou
-interrompt la consultation; pendant une saisie ordinaire il efface
-un caractère. Tapez les commandes applicatives (`MAIL`, `CALC`, `ANNULER`, etc.)
+interrompt la consultation. Dans le lecteur paginé, RETOUR revient à la page
+précédente ; CORRECTION efface un caractère. Tapez les commandes applicatives (`MAIL`, `CALC`, `ANNULER`, etc.)
 puis Entrée. La saisie accepte les caractères ASCII comme la boucle actuelle.
 
 ## Ce qui est partagé

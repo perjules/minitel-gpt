@@ -97,8 +97,9 @@ Run its offline checks with:
 uv run --locked --all-extras pytest tests/test_display_probe.py tests/test_interaction_probe.py
 ```
 
-Production parsing and rendering remain unchanged until the corresponding gates
-are reviewed.
+The 5 November hardware review passed the applicable gates. Production CAN, REP,
+recall and native lowercase have separate tests and await physical application
+acceptance; accent parsing remains unchanged.
 
 ## Fixed 40-column frame
 
@@ -111,6 +112,22 @@ rendered rows rather than count whole-page UART substrings. Focused tests live i
 The fixed-frame suite also includes `tests/test_terminal_serial_timing.py`, whose
 1200-baud virtual transport delays screen delivery and protocol replies. Its
 bounded USB-batch variant also exercises write backpressure during PRECEDENT,
-finite write budgets, partial-output failure and full-clear paging. Console
+finite write budgets, partial-output failure and CAN paging. Console
 checks and immediate-ACK UART fakes alone cannot detect output-backlog deadline
 failures on the physical Matra.
+
+## Validated Matra UX follow-up
+
+Focused offline checks (no live terminal or provider calls):
+
+```bash
+uv run --locked --all-extras pytest tests/test_terminal_display.py tests/test_terminal_documents.py tests/test_terminal_serial_timing.py tests/test_terminal_rep.py tests/test_terminal_recall.py tests/test_terminal_keyboard.py tests/test_console_terminal.py
+```
+
+These cover normal/inverse CAN, blank-before-redraw transitions, REP cell/style
+parity and wire savings, actual USB backpressure, ordinary-chat recall and session
+isolation, native case acknowledgement/fallback/cleanup, mixed-case hidden
+password entry, console bypass and authenticated admin persistence/restarts.
+The physical acceptance procedure is in
+[TERMINAL_UX_PLAN.md](TERMINAL_UX_PLAN.md#resume-checklist). No accent codec or
+activity/scrolling behavior is added by these packages.

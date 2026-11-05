@@ -9,12 +9,14 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
 import textwrap
 import threading
 import time
 import unicodedata
+from collections import deque
 from pathlib import Path
 from queue import Empty, Queue
 
@@ -385,6 +387,10 @@ def build_title(title_art=None):
 
 
 # ── Serial helpers ───────────────────────────────────────────────────────
+KEYBOARD_STATUS = b"\x1b\x39\x72"
+KEYBOARD_LOWER = b"\x1b\x3a\x69\x45"
+KEYBOARD_UPPER = b"\x1b\x3a\x6a\x45"
+
 class Term:
     geometry = terminal_display.STANDARD
     view = None
@@ -402,14 +408,76 @@ class Term:
                              parity="E", stopbits=1, timeout=0.1, write_timeout=2)
             time.sleep(0.3)
         self._write_slack = getattr(self.s, "write_timeout", None)
+        self.physical = isinstance(self.s, serial.SerialBase)
+        self._input_bytes = deque()
+        self._requested_input_case = os.getenv("MINITEL_INPUT_CASE", "lowercase")
+        self._keyboard_original = None
+        self._keyboard_changed = False
+        self.input_case = "unconfirmed" if self.physical else "console"
         self._presence_enabled = isinstance(self.s, serial.SerialBase)
         self._presence_due = float("inf")
         self._presence_deadline = None
         self._presence_seen = False
         self._presence_misses = 0
 
+    def keyboard_mode_status(self, command):
+        """Consume a bounded mode reply, preserving other bytes as early input.
+
+        Read the UART directly here: saved input must not be consumed again by
+        a subsequent mode exchange. Never clear the UART or transform key bytes.
+        """
+        self.w(command)
+        deadline = self.reply_deadline(1)
+        reply = bytearray()
+        while time.monotonic() < deadline:
+            byte = self.io(self.s.read, 1)
+            if not byte:
+                time.sleep(.01)
+                continue
+            reply.extend(byte)
+            if len(reply) + len(self._input_bytes) > io_limits.MAX_QUESTION_CHARS + 64:
+                raise terminal_link.Unavailable("keyboard_typeahead_overflow")
+            if len(reply) >= 4 and reply[-4:-1] == b"\x1b\x3a\x73" and 0x40 <= reply[-1] <= 0x7F:
+                self._input_bytes.extend(reply[:-4])
+                return reply[-1]
+        self._input_bytes.extend(reply)
+        return None
+
+    def configure_keyboard(self):
+        if not self.physical:
+            return
+        requested = self._requested_input_case
+        if requested not in {"lowercase", "legacy"}:
+            log.warning("terminal_keyboard invalid_configuration; requesting original behavior")
+            requested = "legacy"
+        status = self.keyboard_mode_status(KEYBOARD_STATUS)
+        if status is not None:
+            self._keyboard_original = bool(status & 8)
+            self._keyboard_changed = True  # Before sending: partial writes can change the terminal.
+            status = self.keyboard_mode_status(KEYBOARD_LOWER if requested == "lowercase" else KEYBOARD_UPPER)
+            if status is not None and bool(status & 8) == (requested == "lowercase"):
+                self.input_case = requested
+                log.info("terminal_keyboard mode=%s confirmed", requested)
+                return
+        # No software case swap. Attempt the original mode if native setup is
+        # unsupported or uncertain, and describe only what was acknowledged.
+        status = self.keyboard_mode_status(KEYBOARD_UPPER)
+        self.input_case = "legacy" if status is not None and not status & 8 else "unconfirmed"
+        log.warning("terminal_keyboard requested=%s fallback=%s", requested, self.input_case)
+
+    def restore_keyboard(self):
+        if self._keyboard_changed and self._keyboard_original is not None:
+            status = self.keyboard_mode_status(KEYBOARD_LOWER if self._keyboard_original else KEYBOARD_UPPER)
+            if status is None or bool(status & 8) != self._keyboard_original:
+                log.warning("terminal_keyboard restoration=unconfirmed; power-cycle if keyboard behaves oddly")
+            else:
+                self._keyboard_changed = False
+
     def start_presence(self):
-        # Begin only after the first SOMMAIRE, never disturb the power-on screen.
+        # SOMMAIRE proves the terminal is awake; do not configure a powered-off
+        # terminal when the service first opens its USB adapter.
+        if self.physical:
+            self.configure_keyboard()
         self._presence_deadline = None
         self._presence_misses = 0
         self._presence_due = time.monotonic()
@@ -468,6 +536,11 @@ class Term:
 
     def close(self):
         self.prompt_history.clear()
+        try:
+            self.restore_keyboard()
+        except terminal_link.Unavailable:
+            log.warning("terminal_keyboard restoration=unavailable")
+        self._input_bytes.clear()
         close = getattr(self.s, "close", None)
         if callable(close):
             try:
@@ -535,6 +608,8 @@ class Term:
         self.w(" " * ((self.geometry.columns - len(text)) // 2)); self.w(text); self.w(bytes([CR, LF]))
 
     def read_byte(self):
+        if self._input_bytes:
+            return self._input_bytes.popleft()
         b = self.io(self.s.read, 1)
         if not b:
             time.sleep(0.01)  # Also yield if a driver returns empty immediately.
@@ -1435,6 +1510,8 @@ def run_session(t):
 
     if not mainframe_update.take_resume():
         wait_connection(t)
+    else:
+        t.start_presence()  # Deployment resume also restores the configured keyboard.
     t.clear()
     t.center(UI["fr"]["boot_wait"])
     update_available = deployment.available(Path(__file__).resolve().parents[1])
@@ -1903,5 +1980,17 @@ def run_session(t):
             else:
                 memory.close()
 
+def main():
+    def stop(_signum, _frame):
+        raise KeyboardInterrupt
+    previous = signal.signal(signal.SIGTERM, stop)
+    try:
+        terminal_link.serve(Term, run)
+    except KeyboardInterrupt:
+        pass  # SIGTERM/Ctrl-C already ran session and terminal cleanup.
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
 if __name__ == "__main__":
-    terminal_link.serve(Term, run)
+    main()

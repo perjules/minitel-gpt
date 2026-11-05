@@ -419,6 +419,11 @@ def llm_provider():
     p = read_env().get("LLM_PROVIDER", os.getenv("LLM_PROVIDER", "mistral")).strip().lower()
     return p if p in ("mistral", "claude", "linkup") else "mistral"
 
+def terminal_input_case():
+    mode = read_env().get("MINITEL_INPUT_CASE", os.getenv("MINITEL_INPUT_CASE", "lowercase"))
+    return mode if mode in {"lowercase", "legacy"} else "legacy"
+
+
 def is_real_key(k):
     """Heuristique : une vraie clé API fait au moins 10 caractères et n'est pas
     un simple texte de substitution (les "..." de config/env.example, jamais
@@ -1032,6 +1037,20 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
   </div>{% endfor %}</div>
 </section>
 <section class="panel {{'active' if section=='maintenance'}}" id=maintenance>
+  <div class=block><h2>Terminal / clavier</h2>
+    <form method=POST action=/save-terminal onsubmit="return confirm('Appliquer ce réglage et redémarrer le service Minitel ? La conversation sera interrompue.')">
+      <input type=hidden name=csrf value="{{csrf_token()}}">
+      <label for=inputCase>Casse du clavier physique</label>
+      <select id=inputCase name=input_case>
+        <option value=lowercase {{'selected' if input_case=='lowercase'}}>Minuscules par défaut</option>
+        <option value=legacy {{'selected' if input_case=='legacy'}}>Comportement Minitel d’origine</option>
+      </select>
+      <p class=sub>S’applique à toutes les saisies du Minitel, mots de passe compris.
+        Majuscule donne la casse opposée. Console et navigateur inchangés.
+        La configuration du clavier est vérifiée au démarrage ; consulter le journal en cas d’échec.</p>
+      <button class="btn btn-p">Enregistrer et redémarrer le service</button>
+    </form>
+  </div>
   <div class=block>
     <h2>Système</h2>
     <p class=sub>Dernière demande de redémarrage de cette session : {{restart_status}}</p>
@@ -1389,6 +1408,7 @@ def index():
                 "wifi": system_health.wifi(), "tailscale": system_health.tailscale(),
                 "temperature": system_health.temperature()},
         deployment=system_health.deployment(DEPLOYMENT_STATUS), runtime_branch=runtime_branch(),
+        input_case=terminal_input_case(),
         restart_status=session.get("restart_status", "aucune"),
         update_status=session.get("update_status", "non vérifiées dans cette session"),
         title_fonts=TITLE_FONTS, title_art_max=TITLE_ART_MAX_WORDS,
@@ -1793,6 +1813,17 @@ def delete_knowledge():
     else:
         session["flash"] = "Fichier introuvable."; session["flash_ok"] = False
     return redirect(url_for("index", section="ai", preset=key))
+
+@app.route("/save-terminal", methods=["POST"])
+@require_login
+def save_terminal():
+    mode = request.form.get("input_case", "")
+    if mode not in {"lowercase", "legacy"}:
+        return jsonify(ok=False, error="Mode clavier invalide"), 400
+    write_env_key("MINITEL_INPUT_CASE", mode)
+    saved_feedback("Configuration du clavier enregistrée.", restart_required=True)
+    return redirect(url_for("index", section="maintenance"))
+
 
 @app.route("/restart", methods=["POST"])
 @require_login

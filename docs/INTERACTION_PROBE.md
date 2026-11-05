@@ -122,10 +122,9 @@ The script snapshots operating mode before requesting case changes. If no valid
 status arrives, K2–K4 are skipped without changing case. This is **inconclusive**,
 not proof of no hardware support. The baseline and other tests remain useful.
 A status bit changing is not sufficient for acceptance: the raw letter, Shift,
-symbol and keypad results must also match. The owner has since selected a global
-Python case swap for the later lowercase WP; native-mode results are informational,
-not a prerequisite. They remain part of this already-prepared diagnostic rather
-than a proposal to change production keyboard configuration.
+symbol and keypad results must also match. Before the full results the owner preferred a Python swap. After the test
+confirmed native support, the owner selected **native lowercase** for WP4A.
+The diagnostic itself remains isolated from production configuration.
 
 The Q1 test demonstrates paced output plus buffered keyboard reception. It does
 not validate production editor responsiveness or reproduce every USB-driver
@@ -242,8 +241,8 @@ sequence supports buffered reception, but the report does not timestamp each
 keypress against each transmitted row. Production editor concurrency, bounds
 and responsiveness still need their planned tests.
 
-G0–G5 and G8 are satisfied for the planned implementation; G6 documents native
-support without changing the chosen Python case swap. G7 is limited to the
+G0–G5 and G8 are satisfied for the planned implementation; G6 confirms the
+native lowercase mode subsequently selected by the owner. G7 is limited to the
 verified repertoire. No repeat probe run is needed. Accented input remains a
 separate last-priority work package; no production behavior changes in this review.
 

@@ -352,8 +352,7 @@ class ContextTests(unittest.TestCase):
                 calc=self.state,
             )
             self.assertTrue(entered.wait(1))
-            term = object.__new__(terminal.Term)
-            term.s = FakeSerial(fn(terminal.K_SOMMAIRE))
+            term = terminal.Term(FakeSerial(fn(terminal.K_SOMMAIRE)))
             self.assertEqual(
                 terminal.wait_answer(term, pending, 60, allow_retour=True),
                 (None, "sommaire"),
@@ -430,8 +429,7 @@ class PlaybackTests(unittest.TestCase):
             (True, b"12" + fn(terminal.K_RETOUR), "RETOUR"),
             (False, b"12" + fn(terminal.K_RETOUR) + fn(terminal.K_ENVOI), "1"),
         ):
-            term = object.__new__(terminal.Term)
-            term.s = FakeSerial(keys)
+            term = terminal.Term(FakeSerial(keys))
             self.assertEqual(
                 terminal.read_question(term, calculator_mode=mode), (expected, "envoi")
             )
