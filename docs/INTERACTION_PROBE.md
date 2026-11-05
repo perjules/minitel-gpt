@@ -7,13 +7,29 @@ The follow-up implementation and acceptance gates are in
 
 ## Get the single script onto the Pi
 
-Use the updated `scripts/display_probe.py` from the dedicated
-`feature/terminal-capability-probe` branch. This work is committed locally, not
-automatically pushed. Until the branch is published, download/copy the supplied
-script and paste its complete contents into `/tmp/display_probe.py` using SSH/vim.
-It is self-contained except for the already-installed `pyserial` dependency.
-Do not replace a deployed release or switch the running application branch to run
-this diagnostic. The older WP1 script does not have `--interaction`.
+Start from the working `develop` deployment. The tested script is published on
+`feature/terminal-capability-probe` at commit
+`7458795ce53af8df214c16f5f845ac01f6784fd4`. Fetch that branch and extract only the
+script; these commands do **not** switch the checkout, pull code into its files,
+change runtime metadata or restart services:
+
+```bash
+cd ~/minitel-gpt
+git branch --show-current
+git fetch origin feature/terminal-capability-probe &&
+git show 7458795ce53af8df214c16f5f845ac01f6784fd4:scripts/display_probe.py > /tmp/display_probe.py &&
+.venv/bin/python /tmp/display_probe.py --help
+```
+
+The branch should remain `develop`, and help must list `--interaction` and
+`--report`. If fetching/extraction fails, stop and inspect that error. You may
+instead copy the same single file with SSH/vim; it needs only the already-installed
+`pyserial` dependency. The older WP1 script does not have `--interaction`.
+
+Do not deploy the probe branch, change the production `.venv`, run an installer or
+switch the application's branch for this diagnostic. If deployment already reports
+a checkout/installed-branch mismatch, first use the confirmed recovery procedure in
+[RUNTIME.md](RUNTIME.md#recovering-a-checkoutinstalled-branch-mismatch).
 
 ## Safe SSH procedure
 
@@ -29,9 +45,17 @@ sudo systemctl stop minitel-chatgpt.service
 sudo systemctl is-active minitel-chatgpt.service
 sudo fuser /dev/ttyUSB0
 .venv/bin/python /tmp/display_probe.py --help
-probe_report="/tmp/minitel-interaction-$(date +%Y%m%d-%H%M%S).json"
+```
+
+After confirming the service is inactive and no process owns the port, create a
+new results directory under the user's home so evidence survives reboot. Output
+may be piped to `tee`; **stdin must remain the interactive SSH terminal**:
+
+```bash
+probe_results=$(mktemp -d "$HOME/minitel-interaction-XXXXXX")
+probe_report="$probe_results/report.json"
 sudo .venv/bin/python /tmp/display_probe.py \
-  --interaction --port /dev/ttyUSB0 --report "$probe_report"
+  --interaction --port /dev/ttyUSB0 --report "$probe_report" | tee "$probe_results/ssh.log"
 ```
 
 `is-active` should print `inactive` (its nonzero exit status is normal).
@@ -107,11 +131,17 @@ backpressure condition. Those remain explicit application acceptance tests.
 At completion, paste the block headed `MINITEL INTERACTION REPORT v1` into the
 development conversation, and attach the C2, R1, R2 and T1 photos. The final block
 contains manual observations, raw keyboard bytes and independent cursor checks.
-If it is lost, recover the full log with:
+If it is lost, the full SSH transcript and JSON remain available:
 
 ```bash
+cat "$probe_results/ssh.log"
 sudo cat "$probe_report"
 ```
+
+After an SSH reconnect, use `ls -dt ~/minitel-interaction-*` to locate the directory;
+shell variables do not survive a new session. The script itself is in `/tmp` and
+must be extracted again after reboot if another run is needed. Use a new results
+directory for each run: the probe refuses to overwrite an existing JSON report.
 
 The JSON contains attempted TX, raw RX, stage IDs, observations and restoration
 errors. A completed run or exit code 0 means the procedure completed, **not that
