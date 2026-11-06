@@ -1,7 +1,7 @@
 # HACK AIRZONE demonstration — 7–8 November 2026
 
 Temporary opt-in read-only function for ordinary Mistral **Conversations** chat,
-on the existing Pi 3 A+ and original Minitel SD. No Airzone service is installed.
+on the existing Pi 3 A+ and original Minitel SD. `HACK AIRZONE` installs no service.
 The separate Airzone checkout supplies `diagnostics.py`; Minitel never imports
 its adapter or exposes its write methods. No SSH/Tailscale transport is needed.
 Natural-language tool calls require Mistral Conversations. The explicit terminal
@@ -22,9 +22,10 @@ git merge-base --is-ancestor 35d1bf23f13d029445adbcb6e6a33eef06581e07 HEAD
 /usr/bin/python3 diagnostics.py state --mock
 ```
 
-The standalone CLI requires Python 3.10+ and the standard library only. Do **not**
-run Airzone `install.sh`, install its dashboard dependencies, or start `aizone`
-on this card. No credentials need to be transferred between cards.
+The standalone CLI requires Python 3.10+ and the standard library only. Diagnostics
+need no dashboard installation. Optional `CONNECT AIRZONE` commissioning below
+uses an already installed Aizone service on this same card. Julian has authorized
+this cohabitation; SD migration is his separate operation.
 
 Use the existing Minitel admin branch selector to choose `feature/airzone-demo`,
 review its commit, then activate it. Alternatively, from a clean installed checkout:
@@ -264,20 +265,22 @@ of `BILAN FACTUEL` is an excellent ceremonial cover sheet. If normalization fail
 the Airzone thread may additionally request a private `diagnostics.py state --raw`
 capture from its runbook; normal Minitel chat never enables that flag.
 
-After the demo, shut down and remove the original credential-bearing Minitel SD.
-Boot the separate Airzone SD, commission its own house Wi-Fi/Tailscale identity,
-apply the verified gateway and room mapping to its own configuration, and follow
-Airzone's `docs/WEEKEND_RUNBOOK.md` to enable the permanent read-only dashboard
-(`allow_commands:false`, `zone_controls:{}`). Verify SSH/HTTPS from mobile data
-and after reboot. Do not install that service or copy credentials onto/from the
-Minitel card. Settings writes and polling benchmarks remain separate, explicitly
-operated Airzone tasks; `HACK AIRZONE` never enables or runs them.
+Both applications can run on the current card. Its configuration/service stay on
+that card; a fresh card needs its own installation and network setup. This feature
+does not clone, copy credentials, scrub services or migrate either application.
+Verify SSH/HTTPS from mobile data and after reboot before leaving the Pi.
+Settings writes and polling benchmarks remain separate Airzone tasks.
 
 ## Disable or roll back
 
+For optional dashboard activation from the same terminal, see
+[CONNECT AIRZONE](AIRZONE_CONNECT.md). It needs one-time protected-helper setup
+and the separately installed Airzone service; diagnostic-only use remains unchanged.
+
 Set `AIRZONE_DEMO_ENABLED=0` in `.env`, then restart `minitel-chatgpt` and `admin-ui`.
-That is sufficient to remove all Airzone chat capability. No daemon to stop,
-credentials to revoke, or Airzone service/configuration to remove on this card.
+That removes Airzone chat/terminal entry points. It does not stop a separately
+installed Aizone dashboard. To stop it explicitly, use
+`sudo systemctl disable --now aizone.service`. The installations remain independent.
 
 For code rollback use the existing admin branch selector to return to `develop`,
 or the existing retained-release rollback:

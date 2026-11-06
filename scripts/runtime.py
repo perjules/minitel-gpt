@@ -30,10 +30,13 @@ ROOT_FILES = {
     "gmail_credential_helper.py": "scripts/gmail_credential_helper.py",
     "gmail_auth.py": "services/gmail_auth.py",
     "journal_reader.py": "scripts/journal_reader.py",
+    "airzone_connect.py": "scripts/airzone_connect.py",
+    "airzone_diagnostic.py": "services/airzone_demo.py",
 }
 SYSTEM_FILES = {
     "journald-minitel-gpt.conf": "/etc/systemd/journald@minitel-gpt.conf.d/60-minitel-gpt.conf",
     "minitel-gpt-journal-sudoers": "/etc/sudoers.d/minitel-gpt-journal",
+    "minitel-airzone-sudoers": "/etc/sudoers.d/minitel-airzone",
     "minitel-housekeeping.service": "/etc/systemd/system/minitel-housekeeping.service",
     "minitel-housekeeping.timer": "/etc/systemd/system/minitel-housekeeping.timer",
 }
@@ -218,9 +221,10 @@ class Runtime:
             self.system_path("/usr/local/sbin/minitel-runtime"): "runtime.py",
             self.system_path("/usr/local/libexec/minitel-gmail-credential"): "gmail_credential_helper.py",
             self.system_path("/usr/local/libexec/minitel-journal"): "journal_reader.py",
+            self.system_path("/usr/local/libexec/minitel-airzone-connect"): "airzone_connect.py",
         }
         for path, script in paths.items():
-            if script == "journal_reader.py" and not (self.root / "current/root" / script).exists():
+            if script in {"journal_reader.py", "airzone_connect.py"} and not (self.root / "current/root" / script).exists():
                 path.unlink(missing_ok=True)  # Compatibility with retained pre-journal releases.
                 continue
             content = (
@@ -236,7 +240,7 @@ class Runtime:
             if not source.exists():
                 destination.unlink(missing_ok=True)
                 continue
-            if name == "minitel-gpt-journal-sudoers":
+            if name.endswith("sudoers"):
                 self.command(["visudo", "-c", "-f", source])
             atomic_file(destination, source.read_bytes(),
                         0o440 if name.endswith("sudoers") else 0o644)
@@ -338,7 +342,8 @@ PrivateMounts=yes
                   for service in SERVICES[:2] for name in ("gmail", "pronote")]
         paths += [self.system_path("/usr/local/sbin/minitel-runtime"),
                   self.system_path("/usr/local/libexec/minitel-gmail-credential"),
-                  self.system_path("/usr/local/libexec/minitel-journal")]
+                  self.system_path("/usr/local/libexec/minitel-journal"),
+                  self.system_path("/usr/local/libexec/minitel-airzone-connect")]
         paths += [self.system_path(relative) for relative in SYSTEM_FILES.values()]
         saved = {path: (path.read_bytes(), path.stat().st_mode & 0o777) if path.exists() else None for path in paths}
         previous_pointer = (self.root / "current").readlink() if (self.root / "current").is_symlink() else None

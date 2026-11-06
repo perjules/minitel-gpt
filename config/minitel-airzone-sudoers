@@ -1,0 +1,2 @@
+# Fixed operation, no arbitrary commands/paths; target arrives as bounded JSON stdin.
+minitel ALL=(root) NOPASSWD: /usr/local/libexec/minitel-airzone-connect "", /usr/local/libexec/minitel-airzone-connect rollback

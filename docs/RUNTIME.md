@@ -157,6 +157,14 @@ Admin buttons call fixed, root-owned commands allowed by sudoers. They queue a
 separate systemd job with a short delay so the HTTP response can finish; queued
 does not mean successfully applied. The job is independent of the admin process.
 
+On the Airzone demonstration branch, the runtime also installs a root-owned
+`minitel-airzone-connect` helper and fixed sudoers rule. It can commission an
+already installed Airzone dashboard in read-only real mode, or restore its saved
+config/mode; it cannot run arbitrary commands, Git, packages or checkout code.
+It checks the installed branch itself. First rollout needs the new runtime
+installer once; terminal `MAJ` in older releases does not know these protected
+assets. See [AIRZONE_CONNECT.md](AIRZONE_CONNECT.md). The admin console is unchanged.
+
 ```bash
 sudo /usr/local/sbin/minitel-runtime update
 sudo /usr/local/sbin/minitel-runtime rollback

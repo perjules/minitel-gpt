@@ -46,7 +46,7 @@ def source():
     return current
 
 
-def patch_candidate(current):
+def verified_state(current):
     """Only a completed receipt belonging to this exact, uncancelled stream."""
     identifier = getattr(current, "airzone_run_id", None)
     if not isinstance(identifier, str) or getattr(current, "cancelled", True) is not False:
@@ -66,10 +66,15 @@ def patch_candidate(current):
             result = diagnostic.validate(json.dumps(last["result"]).encode(), last["exit_code"],
                                          "state", gateway, report["demo"], target["port"], target["system_id"])
             if result["ok"]:
-                return gateway, report["demo"]
+                return result
         except (OSError, ValueError, TypeError, KeyError, IndexError, config_store.StorageFailure):
             continue
     return None
+
+
+def patch_candidate(current):
+    result = verified_state(current)
+    return (result["target"]["host"], result["demo"]) if result else None
 
 
 def offer_patch(term, current, language="fr"):

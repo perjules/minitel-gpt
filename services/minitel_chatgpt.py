@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 
 try:  # Support both systemd's direct script and package imports in tests.
     from . import (
+        airzone_connect,
         airzone_demo,
         airzone_hack,
         answer_diagnostics,
@@ -53,6 +54,7 @@ except ImportError:
     # Direct systemd entry point: keep one identity for exception/session classes.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from services import (
+        airzone_connect,
         airzone_demo,
         airzone_hack,
         answer_diagnostics,
@@ -1729,14 +1731,25 @@ def run_session(t):
                     break
                 continue
 
-            if recall_eligible and airzone_demo.enabled() and airzone_demo.hack_command(question):
+            if (recall_eligible and airzone_demo.enabled()
+                    and (airzone_demo.hack_command(question) or airzone_connect.command(question))):
                 if pending is not None and pending[0].is_alive():
                     show_response(t, "Requête précédente en cours. Réessayez bientôt.", language)
                     continue
                 source = airzone_hack.source()
                 result = stream_sources.show(t, source, language)
                 if result == "done":
-                    result = airzone_hack.offer_patch(t, source, language)
+                    if airzone_connect.command(question):
+                        pending, result = airzone_connect.confirm(t, source)
+                        if pending is not None:
+                            t._pending = pending
+                            connected, result = wait_answer(t, pending, 220)
+                            if connected is not None:
+                                result = show_response(t, connected['display'], language)
+                            elif result not in {'sommaire', 'guide'}:
+                                result = show_response(t, 'Connexion non confirmée. Vérifiez le service par SSH.', language)
+                    else:
+                        result = airzone_hack.offer_patch(t, source, language)
                 if result == "guide":
                     show_guide(t, language)
                 if result != "done":

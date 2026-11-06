@@ -40,7 +40,8 @@ def release(manager, name, extras=()):
     source = Path(__file__).resolve().parents[1]
     for asset in runtime.SYSTEM_FILES:
         (path / "root" / asset).write_bytes((source / "config" / asset).read_bytes())
-    (path / "root/journal_reader.py").write_bytes((source / "scripts/journal_reader.py").read_bytes())
+    for filename, relative in runtime.ROOT_FILES.items():
+        (path / "root" / filename).write_bytes((source / relative).read_bytes())
     return {"release": str(path), "commit": name, "extras": list(extras), "python": ""}
 
 
@@ -98,6 +99,8 @@ def test_preparation_copies_protected_code_and_checks_optional_imports(manager):
     candidate = manager.prepare(source, ["gmail", "printer"], "new")
     protected = Path(candidate["release"]) / "root"
     assert (protected / "wifi_manager.py").read_bytes() == (source / "services/wifi_manager.py").read_bytes()
+    assert (protected / "airzone_connect.py").read_bytes() == (source / "scripts/airzone_connect.py").read_bytes()
+    assert (protected / "airzone_diagnostic.py").read_bytes() == (source / "services/airzone_demo.py").read_bytes()
     probe = manager.command.call_args.args[0]
     assert probe[1:3] == ["-I", "-c"]
     assert "cryptography" in probe[-1] and "PIL" in probe[-1]
@@ -367,6 +370,7 @@ def test_failed_activation_restores_journal_policy_sudoers_and_helper(manager):
     manager.activate(before)
     paths = [manager.system_path(path) for path in runtime.SYSTEM_FILES.values()]
     paths.append(manager.system_path("/usr/local/libexec/minitel-journal"))
+    paths.append(manager.system_path("/usr/local/libexec/minitel-airzone-connect"))
     for path in paths:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("original")
@@ -383,10 +387,11 @@ def test_rollback_to_pre_journal_release_removes_new_integration(manager):
     manager.activate(new)
     manager.wrappers()
     manager.units()
-    for name in (*runtime.SYSTEM_FILES, "journal_reader.py"):
+    for name in (*runtime.SYSTEM_FILES, "journal_reader.py", "airzone_connect.py", "airzone_diagnostic.py"):
         (Path(old["release"]) / "root" / name).unlink()
     manager.switch(old, {"active": new}, branch="develop")
     assert not manager.system_path("/usr/local/libexec/minitel-journal").exists()
+    assert not manager.system_path("/usr/local/libexec/minitel-airzone-connect").exists()
     assert all(not manager.system_path(path).exists() for path in runtime.SYSTEM_FILES.values())
 
 
