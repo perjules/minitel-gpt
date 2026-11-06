@@ -225,7 +225,8 @@ toutes les paraphrases. RETOUR et le mot d'arrêt restent les sorties garanties.
   fournisseur. La politique de rétention future n'est pas arrêtée.
 - Historique limité à 24 messages / 8 000 caractères, saisie à 800 caractères,
   génération à 180 tokens et réponse à 700 caractères. Rendu sûr sur 39 colonnes,
-  au plus 20 lignes ; une réponse trop longue est explicitement abrégée.
+  les réponses actives utilisent désormais le lecteur paginé partagé (voir ci-dessous) ;
+  seuls la porte, les erreurs et le résumé de facture gardent leur affichage borné.
 - Mot de passe exclu des payloads, historiques, journaux et impression. L'écho
   console est supprimé. Sur UART, les aiguillages clavier→écran et clavier→modem
   sont interrogés puis coupés avec acquittement avant la demande de mot de passe.
@@ -363,3 +364,33 @@ réponses effectivement obtenues, sans transformer la séance en recherche de
 contournement. Les limites empiriques et la rédaction finale restent à régler
 à partir de ces résultats. Sur Minitel : écho, accents/translittération,
 touches, annulation pendant requête, débit réel et rythme de la facture.
+
+## Affichage partagé (6 novembre 2026)
+
+L’accueil après connexion, le catalogue et la conversation utilisent le même
+cadre 40 colonnes que le chat : titre centré, champ de saisie gris fixe, effacement
+CAN de bas en haut et compression REP. Avant une requête, la saisie est effacée,
+l’attente est indiquée et l’ancienne réponse disparaît avant la nouvelle.
+Les réponses longues sont chargées complètement et paginées sans nouvel appel.
+Le mot d’arrêt reste visible en ligne de statut, même en saisie longue ou pendant
+l’attente. La facture défilante et la porte de mot de passe restent distinctes.
+
+Les touches privées gardent leur sens : RETOUR / ANNULATION quittent, SOMMAIRE
+revient au chat, GUIDE ouvre l’aide, SUITE avance dans la réponse. `PRECEDENT`
+puis ENVOI revient à la page précédente ; `SUITE` / `SUIVANT` saisis restent locaux.
+Dans le catalogue, SUITE termine d’abord les pages d’une biographie longue, puis
+passe aux deux personnes suivantes. La limite de 800 caractères est conservée.
+Le rappel RÉPÉTITION reste désactivé et aucun contenu Rose ne rejoint l’historique
+public, la mémoire ou l’impression. Le cadre privé est retiré au retour au chat.
+
+L’écho matériel est désactivé pendant la saisie visible gérée par Python et
+pendant l’attente, puis ses routes exactes sont restaurées. Un échec confirmé
+empêche d’ouvrir la saisie et abandonne le résultat du travail en cours, qui reste
+suivi jusqu’à sa fin. Les personnalités, tarifs, facture et règles de session ne
+changent pas. L’atelier scripté avec journal conserve son mode de transcription.
+
+Vérification physique : catalogue, saisie/correction de plusieurs lignes, réponse
+longue et SUITE, mot d’arrêt depuis chaque page, RETOUR/ANNULATION/SOMMAIRE,
+attente, retour au chat et facture défilante. Le mot d’arrêt doit rester visible,
+le curseur dans la saisie et aucune ancienne réponse privée ne doit réapparaître.
+Tests hors matériel : `tests/test_rose_display.py`, avec les suites Rose et écho.

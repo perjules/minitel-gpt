@@ -185,8 +185,8 @@ class TerminalModeTests(unittest.TestCase):
 
         def answer(history, *args, **kwargs):
             seen.append([dict(t) for t in history])
-            self.assertIs(kwargs.get("pronote"), backend)
             private = history[-1]["content"] == "Notes de Alex"
+            self.assertIs(kwargs.get("pronote"), backend if private else None)
             return {"status": "ordinary", "text": "PRIVATE RECORD" if private else "Public answer",
                     "chunks": [], "references": [], "private": private}
 
@@ -311,5 +311,5 @@ class TerminalModeTests(unittest.TestCase):
                                                               "description": "Été : x ≤ 3 ; Ω"}]}, "homework", full=True)
         lines = chat.wrap(chat.safe_display(source))
         self.assertTrue(all(len(line) <= 39 for line in lines))
-        self.assertIn("Mathematiques", "\n".join(lines))
+        self.assertIn("Mathématiques", "\n".join(lines))
         self.assertNotIn("?", "\n".join(lines))

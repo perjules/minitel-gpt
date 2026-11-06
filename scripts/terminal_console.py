@@ -43,7 +43,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Live 40x24 Minitel console; real APIs, memory and email actions.",
         epilog="Enter=ENVOI; Ctrl-N/F3=SUITE; Ctrl-P/F2=SOMMAIRE; "
-               "Ctrl-G/F1=GUIDE; Ctrl-R/F4/Esc=RETOUR; Ctrl-Q/Ctrl-C=quit. "
+               "Ctrl-G/F1=GUIDE; Ctrl-R/F4/Esc=RETOUR; Ctrl-B/F6=REPETITION; Ctrl-Q/Ctrl-C=quit. "
                "Uses the checkout's .env and existing credentials; no UART access.",
     )
     parser.add_argument(

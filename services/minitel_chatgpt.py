@@ -9,12 +9,14 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
 import textwrap
 import threading
 import time
 import unicodedata
+from collections import deque
 from pathlib import Path
 from queue import Empty, Queue
 
@@ -23,11 +25,13 @@ from dotenv import load_dotenv
 
 try:  # Support both systemd's direct script and package imports in tests.
     from . import (
+        answer_diagnostics,
         calculator,
         christmas_list,
         deployment,
         gmail_mail,
         io_limits,
+        llm_streaming,
         mainframe_update,
         memory_session,
         mistral_answers,
@@ -35,19 +39,25 @@ try:  # Support both systemd's direct script and package imports in tests.
         pronote,
         pronote_answers,
         pronote_mode,
+        stream_sources,
+        terminal_diagnostics,
         terminal_display,
         terminal_link,
+        terminal_scrolling,
         user_services,
+        videotex,
     )
 except ImportError:
     # Direct systemd entry point: keep one identity for exception/session classes.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from services import (
+        answer_diagnostics,
         calculator,
         christmas_list,
         deployment,
         gmail_mail,
         io_limits,
+        llm_streaming,
         mainframe_update,
         memory_session,
         mistral_answers,
@@ -55,9 +65,13 @@ except ImportError:
         pronote,
         pronote_answers,
         pronote_mode,
+        stream_sources,
+        terminal_diagnostics,
         terminal_display,
         terminal_link,
+        terminal_scrolling,
         user_services,
+        videotex,
     )
 
 try:
@@ -385,6 +399,10 @@ def build_title(title_art=None):
 
 
 # ── Serial helpers ───────────────────────────────────────────────────────
+KEYBOARD_STATUS = b"\x1b\x39\x72"
+KEYBOARD_LOWER = b"\x1b\x3a\x69\x45"
+KEYBOARD_UPPER = b"\x1b\x3a\x6a\x45"
+
 class Term:
     geometry = terminal_display.STANDARD
     view = None
@@ -392,6 +410,7 @@ class Term:
     def __init__(self, transport=None):
         self.geometry = terminal_display.STANDARD
         self.view = None
+        self.prompt_history = terminal_display.PromptHistory()
         self._tx_until = 0.0
         self.link_activity = lambda: None
         if transport is not None:
@@ -401,14 +420,77 @@ class Term:
                              parity="E", stopbits=1, timeout=0.1, write_timeout=2)
             time.sleep(0.3)
         self._write_slack = getattr(self.s, "write_timeout", None)
+        self.physical = isinstance(self.s, serial.SerialBase)
+        self._input_bytes = deque()
+        self._ss2 = bytearray()
+        self._requested_input_case = os.getenv("MINITEL_INPUT_CASE", "lowercase")
+        self._keyboard_original = None
+        self._keyboard_changed = False
+        self.input_case = "unconfirmed" if self.physical else "console"
         self._presence_enabled = isinstance(self.s, serial.SerialBase)
         self._presence_due = float("inf")
         self._presence_deadline = None
         self._presence_seen = False
         self._presence_misses = 0
 
+    def keyboard_mode_status(self, command):
+        """Consume a bounded mode reply, preserving other bytes as early input.
+
+        Read the UART directly here: saved input must not be consumed again by
+        a subsequent mode exchange. Never clear the UART or transform key bytes.
+        """
+        self.w(command)
+        deadline = self.reply_deadline(1)
+        reply = bytearray()
+        while time.monotonic() < deadline:
+            byte = self.io(self.s.read, 1)
+            if not byte:
+                time.sleep(.01)
+                continue
+            reply.extend(byte)
+            if len(reply) + len(self._input_bytes) > io_limits.MAX_QUESTION_CHARS + 64:
+                raise terminal_link.Unavailable("keyboard_typeahead_overflow")
+            if len(reply) >= 4 and reply[-4:-1] == b"\x1b\x3a\x73" and 0x40 <= reply[-1] <= 0x7F:
+                self._input_bytes.extend(reply[:-4])
+                return reply[-1]
+        self._input_bytes.extend(reply)
+        return None
+
+    def configure_keyboard(self):
+        if not self.physical:
+            return
+        requested = self._requested_input_case
+        if requested not in {"lowercase", "legacy"}:
+            log.warning("terminal_keyboard invalid_configuration; requesting original behavior")
+            requested = "legacy"
+        status = self.keyboard_mode_status(KEYBOARD_STATUS)
+        if status is not None:
+            self._keyboard_original = bool(status & 8)
+            self._keyboard_changed = True  # Before sending: partial writes can change the terminal.
+            status = self.keyboard_mode_status(KEYBOARD_LOWER if requested == "lowercase" else KEYBOARD_UPPER)
+            if status is not None and bool(status & 8) == (requested == "lowercase"):
+                self.input_case = requested
+                log.info("terminal_keyboard mode=%s confirmed", requested)
+                return
+        # No software case swap. Attempt the original mode if native setup is
+        # unsupported or uncertain, and describe only what was acknowledged.
+        status = self.keyboard_mode_status(KEYBOARD_UPPER)
+        self.input_case = "legacy" if status is not None and not status & 8 else "unconfirmed"
+        log.warning("terminal_keyboard requested=%s fallback=%s", requested, self.input_case)
+
+    def restore_keyboard(self):
+        if self._keyboard_changed and self._keyboard_original is not None:
+            status = self.keyboard_mode_status(KEYBOARD_LOWER if self._keyboard_original else KEYBOARD_UPPER)
+            if status is None or bool(status & 8) != self._keyboard_original:
+                log.warning("terminal_keyboard restoration=unconfirmed; power-cycle if keyboard behaves oddly")
+            else:
+                self._keyboard_changed = False
+
     def start_presence(self):
-        # Begin only after the first SOMMAIRE, never disturb the power-on screen.
+        # SOMMAIRE proves the terminal is awake; do not configure a powered-off
+        # terminal when the service first opens its USB adapter.
+        if self.physical:
+            self.configure_keyboard()
         self._presence_deadline = None
         self._presence_misses = 0
         self._presence_due = time.monotonic()
@@ -466,6 +548,13 @@ class Term:
         return result
 
     def close(self):
+        self.prompt_history.clear()
+        try:
+            self.restore_keyboard()
+        except terminal_link.Unavailable:
+            log.warning("terminal_keyboard restoration=unavailable")
+        self._input_bytes.clear()
+        self._ss2.clear()
         close = getattr(self.s, "close", None)
         if callable(close):
             try:
@@ -475,7 +564,8 @@ class Term:
 
     def w(self, data):
         if isinstance(data, str):
-            data = to_ascii(data).encode("ascii", errors="replace")
+            data = videotex.encode("".join(char if char in videotex.GLYPHS else to_ascii(char)
+                                         for char in unicodedata.normalize("NFC", data)))
         baud = getattr(self.s, "baudrate", None)
         started = time.monotonic() if isinstance(baud, int) and baud > 0 else None
         slack = getattr(self, "_write_slack", None)
@@ -514,6 +604,7 @@ class Term:
             self.center(text)
 
     def clear(self):
+        self._ss2.clear()
         self.view = None
         self.w(bytes([FF, RS]))
         time.sleep(0.2)
@@ -533,6 +624,8 @@ class Term:
         self.w(" " * ((self.geometry.columns - len(text)) // 2)); self.w(text); self.w(bytes([CR, LF]))
 
     def read_byte(self):
+        if self._input_bytes:
+            return self._input_bytes.popleft()
         b = self.io(self.s.read, 1)
         if not b:
             time.sleep(0.01)  # Also yield if a driver returns empty immediately.
@@ -548,6 +641,7 @@ class Term:
             if b is None:
                 continue
             if b == SEP:
+                self._ss2.clear()
                 # Mode Videotex (Minitel 1) : SEP + code touche
                 code = self.read_byte()
                 t2 = time.monotonic() + 0.5
@@ -555,7 +649,7 @@ class Term:
                     code = self.read_byte()
                 if code is None:
                     continue          # SEP parasite → ignorer, ne pas bloquer
-                if code in (K_ENVOI, K_SUITE, K_SOMMAIRE, K_GUIDE, K_RETOUR, K_CORR, K_ANNUL):
+                if code in (K_ENVOI, K_SUITE, K_SOMMAIRE, K_GUIDE, K_RETOUR, K_CORR, K_ANNUL, K_REPET):
                     self.keyboard_activity()
                 return ('fn', code)
             if b == ESC:
@@ -585,13 +679,35 @@ class Term:
                     while code is None and time.monotonic() < t3:
                         code = self.read_byte()
                     if code in SS3_MAP:
+                        self._ss2.clear()
                         self.keyboard_activity()
                         return ('fn', SS3_MAP[code])
                 continue              # autre séquence ESC → ignorer
+            if b == videotex.SS2:
+                self._ss2[:] = bytes([b])
+                continue
+            if self._ss2:
+                if b < 0x20 or b == 0x7F:
+                    self._ss2.clear()  # Execute controls without swallowing an exit.
+                else:
+                    self._ss2.append(b)
+                    if len(self._ss2) == 2 and b in videotex.ACCENTS:
+                        continue  # A dead accent may precede its base by seconds.
+                    char = videotex.decode(self._ss2)
+                    self._ss2.clear()
+                    self.keyboard_activity()
+                    return "char", ord(char)
             if b in (CR, LF, BS, 0x7F) or 0x20 <= b <= 0x7E:
                 self.keyboard_activity()
             return ('char', b)
         return ('timeout', None)
+
+    def poll_key(self):
+        """Check keys without an empty serial/curses read delaying each row."""
+        self.poll_presence()
+        if not self._input_bytes and self.io(getattr, self.s, "in_waiting", None) == 0:
+            return "timeout", None
+        return self.read_key(.001)
 
 
 def wrap(text, width=COLS):
@@ -608,6 +724,13 @@ def wrap(text, width=COLS):
 def calculator_blocked(mail, memory):
     return bool((memory is not None and memory.pending) or
                 (mail is not None and (mail.draft or mail.composition or mail.recipient_choices)))
+
+
+def prompt_recall_allowed(memory, mail, calc, school, printer, *, onboarding_active=False):
+    """Narrow ordinary-chat scope; no replay in feature or confirmation editors."""
+    return not (onboarding_active or calc.mode or school.mode or printer.approval or getattr(memory, "pending", None)
+                or (mail is not None and (mail.items or mail.selected or mail.draft
+                                          or mail.composition or mail.recipient_choices)))
 
 
 def call_answer(system_prompt, history, language, options, knowledge,
@@ -649,9 +772,9 @@ def call_answer(system_prompt, history, language, options, knowledge,
         school = user_services.ProfileSchool(school, memory.user, memory.registry)
         if not explicit_memory and not note_request and '@' not in question and school.denied(question):
             return {'display':'PRONOTE: aucun accès attribué à ce profil.', 'turn':None}
-    school_enabled = school is not None and bool(school.tools())
-    school_request = (school_enabled and not explicit_memory and not note_request
-                      and pronote_answers.school_record_request(question, school.config().get("children", {})))
+    school_request = (school is not None and not explicit_memory and not note_request
+                      and pronote_answers.school_tool_request(question, school.config().get("children", {}))
+                      and bool(school.tools()))
     recipient_address = (mail is not None and mail.composition
                          and not mail.composition.get("instruction_needed")
                          and re.fullmatch(r"[^\s<>@]+@[^\s<>@]+", question.strip()))
@@ -691,7 +814,7 @@ def call_answer(system_prompt, history, language, options, knowledge,
     if PROVIDER == "mistral" and api == "conversations":
         result = mistral_answers.answer(history, language, MISTRAL_KEY,
                                         MISTRAL_MODEL, web_search, timeout, knowledge,
-                                        **({"pronote": school} if school_enabled else {}),
+                                        **({"pronote": school} if school_request else {}),
                                         **({"session_context": session_context} if session_context else {}))
         if memory is not None:
             memory.active()
@@ -783,12 +906,12 @@ def retour_requested(kind, code, typed):
     if (kind == 'fn' and code == K_CORR) or (kind == 'char' and code in (BS, 0x7F)):
         if typed:
             typed.pop()
-    elif kind == 'char' and 0x20 <= code <= 0x7E and len(typed) < 40:
+    elif kind == 'char' and videotex.input_character(code) and len(typed) < 40:
         typed.append(chr(code))
     return False
 
 
-def wait_answer(t, pending, timeout, allow_retour=False):
+def wait_answer(t, pending, timeout, allow_retour=False, *, language=None):
     """Reset stops local waiting; provider work/billing may continue."""
     _, output, started = pending
     deadline = started + timeout
@@ -806,36 +929,32 @@ def wait_answer(t, pending, timeout, allow_retour=False):
         if error:
             # Fixed diagnostic codes only; never log provider bodies or arbitrary
             # exception messages containing questions, tokens or school records.
-            reason = {
-                "Sources without observed search execution": "unverified_references",
-                "Unexpected web search in private request": "private_web_output",
-                "Expected one final assistant entry": "ambiguous_final",
-                "Empty factual answer": "empty_answer",
-                "Local tool call limit": "local_tool_limit",
-            }.get(str(error), "unclassified")
-            status = getattr(getattr(error, "response", None), "status_code", None)
+            reason = answer_diagnostics.code(error)
+            status = answer_diagnostics.http_status(error)
             log.warning("answer status=api_error error=%s code=%s http_status=%s",
                         type(error).__name__, reason, status if type(status) is int else "-")
-            return None, 'error'
+            return ({"display": answer_diagnostics.notice(error, language), "turn": None}
+                    if language is not None else None), 'error'
         return result, 'done'
     log.warning("answer status=deadline elapsed=%.2f", time.monotonic() - started)
     return None, 'deadline'
 
 
 def safe_display(text):
-    """Keep controls out of Videotex and avoid silently losing technical symbols."""
+    """Readable ASCII output; one ? for unsupported glyphs, no input decoding."""
     symbols = {"−": "-", "µ": "u", "μ": "u", "°": "deg", "±": "+/-",
-               "≤": "<=", "≥": ">=", "≠": "!=", "×": "x", "÷": "/", "Ω": "ohm"}
+               "≤": "<=", "≥": ">=", "≠": "!=", "×": "x", "÷": "/", "Ω": "ohm",
+               "→": "->", "←": "<-", "↔": "<->", "⇒": "=>", "⇐": "<=",
+               "↑": "^", "↓": "v", "£": "GBP", "½": "1/2", "¼": "1/4", "¾": "3/4"}
     output = []
     for char in unicodedata.normalize("NFC", text):
         if char not in "\n\t" and (ord(char) < 32 or ord(char) == 127):
             output.append(f"\\x{ord(char):02x}")
         else:
-            mapped = symbols.get(char, to_ascii(char))
-            # Remaining unsupported glyphs get a visible code point rather than
-            # disappearing from a number, unit or code expression.
-            output.append(mapped or (f"\\u{ord(char):04x}" if ord(char) <= 0xffff
-                                     else f"\\U{ord(char):08x}"))
+            mapped = char if char in videotex.GLYPHS else symbols.get(char, to_ascii(char))
+            # Keep unknown Unicode visible without filling the 39-column page
+            # with diagnostic Unicode code-point strings. Source data remains unchanged.
+            output.append(mapped or "?")
     return "".join(output)
 
 
@@ -1216,7 +1335,7 @@ def read_memory_password(t):
         if kind == "fn" and code == K_CORR or kind == "char" and code in (BS, 0x7F):
             if buffer:
                 buffer.pop()
-        elif kind == "char" and 0x20 <= code <= 0x7E:
+        elif kind == "char" and videotex.input_character(code):
             if len(buffer) < 2000 and not overflow:
                 buffer.append(chr(code))
             else:
@@ -1260,11 +1379,11 @@ def terminal_memory_unlock(t, selected):
                     "DESACTIVER MEMOIRE ou SOMMAIRE pour verrouiller. Apprentissage automatique désactivé.")
 
 
-def read_question(t: Term, allow_empty=False, calculator_mode=False, navigation_mode=False):
+def read_question(t: Term, allow_empty=False, calculator_mode=False, navigation_mode=False, *, recall=False):
     if getattr(t, "view", None) is not None:
         try:
             return t.view.read(allow_empty=allow_empty, calculator_mode=calculator_mode,
-                               navigation_mode=navigation_mode)
+                               navigation_mode=navigation_mode, recall=recall)
         except rose_terminal.EchoUnavailable:
             # Older/unknown firmware: preserve public conversation with the
             # original local-echo editor. Private readers still fail closed.
@@ -1322,7 +1441,7 @@ def read_question_legacy(t: Term, allow_empty=False, calculator_mode=False, navi
             if buf:
                 buf.pop()
                 t.w(bytes([BS, 0x20, BS]))
-        elif 0x20 <= c <= 0x7E:
+        elif videotex.input_character(c):
             if len(buf) < io_limits.MAX_QUESTION_CHARS and not overflow:
                 buf.append(chr(c))
             else:
@@ -1399,6 +1518,7 @@ def run(term=None):
     try:
         return run_session(t)
     finally:
+        t.prompt_history.clear()
         # Invalidate review tickets and close memory guards even on a UART error.
         for cleanup in t._session_resources:
             owner = getattr(cleanup, "__self__", None)
@@ -1425,6 +1545,8 @@ def run_session(t):
 
     if not mainframe_update.take_resume():
         wait_connection(t)
+    else:
+        t.start_presence()  # Deployment resume also restores the configured keyboard.
     t.clear()
     t.center(UI["fr"]["boot_wait"])
     update_available = deployment.available(Path(__file__).resolve().parents[1])
@@ -1438,6 +1560,7 @@ def run_session(t):
         show_guide(t, "fr")
 
     while True:  # boucle sommaire
+        t.prompt_history.clear()
         if t.view is not None:
             t.clear()  # Retire loaded output/input at every session boundary.
         # Recharger le preset à chaque retour au sommaire (prise en compte des édits)
@@ -1520,13 +1643,17 @@ def run_session(t):
             show_question_prompt(t, question_msg)
 
         queued_question = None
+        onboarding_active = greeted
         while True:  # boucle conversation
+            recall_eligible = False
             if queued_question is not None:
                 question, action = queued_question, 'envoi'
                 queued_question = None
             else:
+                recall_eligible = prompt_recall_allowed(memory, mail, calc, school_mode, printer,
+                                                        onboarding_active=onboarding_active)
                 question, action = read_question(t, calculator_mode=calc.mode or school_mode.mode,
-                                                 navigation_mode=school_mode.grade_view)
+                                                 navigation_mode=school_mode.grade_view, recall=recall_eligible)
             if action == 'envoi' and (question or '').strip().upper() == 'SOMMAIRE':
                 action = 'sommaire'
             if action == 'guide':
@@ -1546,6 +1673,57 @@ def run_session(t):
                 t.line('Profil modifié. Reconnectez-vous.')
                 username = language = None
                 break
+
+            # Deterministic local tool: use the ordinary answer display path,
+            # but never send the fixture to a model, memory, history or printer.
+            if recall_eligible and terminal_diagnostics.unicode_command(question):
+                diagnostic = terminal_diagnostics.test_unicode()
+                show_response(t, diagnostic["display"], language)
+                t.view.status("TEST UNICODE - local, sans API")
+                continue
+
+            if recall_eligible and terminal_diagnostics.scroll_command(question):
+                diagnostic = terminal_diagnostics.test_scroll()
+                result = terminal_scrolling.show(t, diagnostic["display"], language)
+                if result == "guide":
+                    show_guide(t, language)
+                if result != "done":
+                    action = result
+                    break
+                continue
+
+            stream_test = recall_eligible and terminal_diagnostics.stream_command(question)
+            stream_request = llm_streaming.command(question) if recall_eligible else None
+            if stream_test or stream_request is not None:
+                if pending is not None and pending[0].is_alive():
+                    show_response(t, "Requête précédente en cours. Réessayez bientôt.", language)
+                    continue
+                if stream_test:
+                    source = stream_sources.ProcessSource(
+                        [sys.executable, "-u", "-m", "services.terminal_diagnostics", "--stream-demo"],
+                        cwd=Path(__file__).resolve().parents[1])
+                elif not stream_request["prompt"]:
+                    show_response(t, "STREAM votre question\nSTREAM WEB votre recherche\nTEST STREAM : moniteur local", language)
+                    continue
+                elif PROVIDER != "mistral" or not MISTRAL_KEY or MISTRAL_KEY == "...":
+                    show_response(t, "Flux API indisponible : Mistral doit être configuré.", language)
+                    continue
+                elif stream_request["web"] and (options[0] != "conversations" or not options[1]):
+                    show_response(t, "Recherche web en flux désactivée dans la configuration.", language)
+                    continue
+                else:
+                    # Isolated public prompt: no personal history, recall, local
+                    # tools, memory writes or retry of a submitted paid request.
+                    source = llm_streaming.mistral(
+                        [{"role": "user", "content": stream_request["prompt"]}], language,
+                        MISTRAL_KEY, MISTRAL_MODEL, api=options[0], web_search=stream_request["web"])
+                result = stream_sources.show(t, source, language)
+                if result == "guide":
+                    show_guide(t, language)
+                if result != "done":
+                    action = result
+                    break
+                continue
 
             memory_control = memory_session.household_command(question)
             if memory_control:
@@ -1790,7 +1968,7 @@ def run_session(t):
                 optional["calc"] = calc
                 pending = start_answer(system_prompt, candidate, language, options, knowledge, **optional)
                 t._pending = pending
-                response, action = wait_answer(t, pending, options[2], allow_retour=calculator_request)
+                response, action = wait_answer(t, pending, options[2], allow_retour=calculator_request, language=language)
                 if action == 'guide':
                     show_guide(t, language)
                     break
@@ -1811,6 +1989,8 @@ def run_session(t):
             if response is not None and response.get("turn") is not None:
                 printer.remember(answer)
 
+            if response is not None:
+                onboarding_active = bool(response.get("onboarding"))
             warning = memory.take_warning()
             if warning:
                 answer += "\n\n" + warning
@@ -1826,6 +2006,12 @@ def run_session(t):
                 memory.record("assistant", answer, channel, factual=response.get("factual"))
             elif not (response and (response.get("turn") or {}).get("private")):
                 memory.record("assistant", answer, channel, references=(response.get("turn") or {}).get("references", ()) if response else ())
+            # Only completed ordinary chat turns enter recall. Feature inputs,
+            # secrets, private records and queued document commands never do.
+            if (recall_eligible and channel == "chat" and not private_question
+                    and response and response.get("turn") and not response.get("christmas")
+                    and not response["turn"].get("private")):
+                t.prompt_history.add(question)
             mail_document = channel == "gmail" and mail is not None and bool(
                 mail.items or mail.selected or mail.draft or mail.composition or mail.recipient_choices)
             if mail_document:
@@ -1843,7 +2029,9 @@ def run_session(t):
                     t, answer, language, title="3615 IA / NOEL" if response.get("christmas") else "3615 IA / MEMOIRE")
             else:
                 result = (show_calculator_scene(t, response["scene"], language)
-                          if response and response.get("scene") else show_response(t, safe_display(answer), language))
+                          if response and response.get("scene") else
+                          terminal_scrolling.show(t, answer, language) if response and response.get("scrolling") else
+                          show_response(t, safe_display(answer), language))
             if response and response.get('scene') and result == 'done':
                 show_response(t, safe_display(answer), language)
             if response and response.get('scene') and result != 'done':
@@ -1880,5 +2068,17 @@ def run_session(t):
             else:
                 memory.close()
 
+def main():
+    def stop(_signum, _frame):
+        raise KeyboardInterrupt
+    previous = signal.signal(signal.SIGTERM, stop)
+    try:
+        terminal_link.serve(Term, run)
+    except KeyboardInterrupt:
+        pass  # SIGTERM/Ctrl-C already ran session and terminal cleanup.
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
 if __name__ == "__main__":
-    terminal_link.serve(Term, run)
+    main()

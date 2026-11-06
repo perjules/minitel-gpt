@@ -546,8 +546,8 @@ class MemoryInterfaces(unittest.TestCase):
         ):
             chat.run()
         visible = screen_text(uart.output)
-        self.assertIn("memoire de Alice", visible)
-        self.assertIn("Aucun element dans memoire de Bob", visible)
+        self.assertIn("mémoire de Alice", visible)
+        self.assertIn("Aucun élément dans mémoire de Bob", visible)
         public.assert_not_called()
         restored = sessions.MemorySession("Alice")
         self.addCleanup(restored.close)

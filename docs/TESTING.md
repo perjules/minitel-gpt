@@ -87,6 +87,20 @@ procedure, recovery and observations needed before any geometry change. Focused
 offline checks: `uv run --locked --all-extras pytest tests/test_display_probe.py`.
 The diagnostic is never run against hardware by the automated suite.
 
+The separate `--interaction` mode tests CAN line clearing, REP compression, raw
+keys/accents, candidate lowercase mode, echo and buffered input during redraws.
+See [INTERACTION_PROBE.md](INTERACTION_PROBE.md) for the single-script Pi procedure
+and recovery, and [TERMINAL_UX_PLAN.md](TERMINAL_UX_PLAN.md) for hardware gates.
+Run its offline checks with:
+
+```bash
+uv run --locked --all-extras pytest tests/test_display_probe.py tests/test_interaction_probe.py
+```
+
+The 5 November hardware review passed the applicable gates. Production CAN, REP,
+recall and native lowercase have separate tests and await physical application
+acceptance; accent parsing remains unchanged.
+
 ## Fixed 40-column frame
 
 [TERMINAL_UX.md](TERMINAL_UX.md) records the WP1 hardware findings, frame layout,
@@ -98,6 +112,60 @@ rendered rows rather than count whole-page UART substrings. Focused tests live i
 The fixed-frame suite also includes `tests/test_terminal_serial_timing.py`, whose
 1200-baud virtual transport delays screen delivery and protocol replies. Its
 bounded USB-batch variant also exercises write backpressure during PRECEDENT,
-finite write budgets, partial-output failure and full-clear paging. Console
+finite write budgets, partial-output failure and CAN paging. Console
 checks and immediate-ACK UART fakes alone cannot detect output-backlog deadline
 failures on the physical Matra.
+
+## Validated Matra UX follow-up
+
+Focused offline checks (no live terminal or provider calls):
+
+```bash
+uv run --locked --all-extras pytest tests/test_terminal_display.py tests/test_terminal_documents.py tests/test_terminal_serial_timing.py tests/test_terminal_rep.py tests/test_terminal_recall.py tests/test_terminal_keyboard.py tests/test_console_terminal.py
+```
+
+These cover normal/inverse CAN, blank-before-redraw transitions, REP cell/style
+parity and wire savings, actual USB backpressure, ordinary-chat recall and session
+isolation, native case acknowledgement/fallback/cleanup, mixed-case hidden
+password entry, console bypass and authenticated admin persistence/restarts.
+The physical acceptance procedure is in
+[TERMINAL_UX_PLAN.md](TERMINAL_UX_PLAN.md#resume-checklist). No accent codec or
+activity/scrolling behavior was added by those original packages. Later French
+G2 and scrolling checks are documented below.
+
+Rose's fixed-frame adapter has focused checks in `tests/test_rose_display.py`:
+visible gray input, CAN transitions, long replies, pinned stop word, local paging,
+private exit keys, echo restoration/failure, bounded input and retiring private
+frames before ordinary chat. `tests/test_terminal_ascii.py` checks readable symbol
+fallbacks and unchanged source text through email/school document views.
+
+`tests/test_terminal_diagnostics.py` verifies the local `TEST UNICODE` tool,
+JSON text with escaped/literal Unicode, the real one-page answer viewer, ordinary
+French accents versus isolated combining marks, and exclusion from API requests,
+conversation history, memory and prompt recall. The SSH module entry point only
+prints its source fixture; it does not open the serial port.
+
+`tests/test_terminal_scrolling.py` covers the explicit result flag and local
+TEST SCROLL command, native rouleau, EOF without a key, static/partial-stream
+stop semantics, indefinite quiet streams, split chunks/accents, source and serial
+failures, Ctrl-C cleanup, echo gating, direct last-page restoration, normal
+paging/editing afterward, nonblocking console keys, and bounded 1200/7E1 backlog
+with presence probes. It uses synthetic text/queues and fake UARTs only. Physical
+acceptance remains separate in [TERMINAL_SCROLLING.md](TERMINAL_SCROLLING.md).
+
+`tests/test_videotex_text.py` covers native French G2: split/dead accents across
+polling timeouts, protocol replies, immediate function exits, unknown sequences,
+shared/private readers, no secret echo, uppercase fallback, encoded byte budgets,
+console key round trips and white-on-gray C2 zone preservation through editing,
+CAN and paging. Historical byte-stripping test helpers now decode SS2 rather
+than treating its selector B as visible text. No live UART/API is used.
+
+
+## Owned streaming sources
+
+Tests test_stream_sources.py and test_stream_lifecycle.py cover process pipes/UTF-8,
+TERM/KILL and descendants, quiet/blocked sources, fragmented SSE, Mistral final
+validation/citations, hidden reasoning exclusion, partial/failure paths and terminal
+recovery. HTTP integration uses only a synthetic loopback server, never a real
+provider. Source/stream commands bypass ordinary history, memory and local tools.
+See [STREAM_SOURCES.md](STREAM_SOURCES.md) for physical checks.

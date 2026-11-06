@@ -162,7 +162,7 @@ class AnswerTests(unittest.TestCase):
         first = engine.parse_response(fixture())
         followup = ordinary([{"type": "text", "text": "The previously quoted price "}, first["chunks"][1]])
         responses = []
-        for data in (ordinary("Public"), fixture(), followup, followup, ordinary("Public"), ordinary("Other answer")):
+        for data in (fixture(), followup, ordinary("Other answer")):
             response = Mock()
             response.json.return_value = data
             responses.append(response)
@@ -175,7 +175,7 @@ class AnswerTests(unittest.TestCase):
                 self.assertFalse(engine.notice(result["status"], "fr"))
                 history = engine.bound_history(candidate + [{"role": "assistant", "content": result["text"],
                                                              "chunks": result["chunks"], "references": result["references"]}])
-        self.assertEqual(post.call_count, 6)
+        self.assertEqual(post.call_count, 3)
         self.assertEqual(history[-1]["content"], "Other answer")
         backend.execute.assert_not_called()
 
@@ -233,7 +233,7 @@ class AnswerTests(unittest.TestCase):
         self.assertEqual(chat.wrap("    return 17.25"), ["    return 17.25"])
         self.assertNotIn("\x1b", chat.safe_display("17.25\x1b[2J"))
         self.assertEqual(chat.safe_display("−5 µm ± 2°C ≤ 8 Ω"), "-5 um +/- 2degC <= 8 ohm")
-        self.assertEqual(chat.safe_display("☃"), "\\u2603")
+        self.assertEqual(chat.safe_display("☃"), "?")
 
     def test_small_settings_and_explicit_rollback_do_not_change_other_adapters(self):
         self.assertEqual(engine.settings({}), ("conversations", True, 60))

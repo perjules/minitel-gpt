@@ -133,7 +133,7 @@ def test_school_planner_and_public_fallback_preserve_session_identity(monkeypatc
     result = pronote_answers.answer([{"role": "user", "content": "Explain light"}], "en", "synthetic-key",
                                     "synthetic-model", False, 30, "", backend,
                                     session_context="Selected user: Charlie. No memory write tool.")
-    assert result["text"] == "Public answer." and request.call_count == 2
+    assert result["text"] == "Public answer." and request.call_count == 1
     for call in request.call_args_list:
         assert "Selected user: Charlie" in call.kwargs["json"]["instructions"]
     backend.execute.assert_not_called()

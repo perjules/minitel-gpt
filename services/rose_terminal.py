@@ -5,7 +5,7 @@ import time
 from contextlib import contextmanager
 from queue import Empty
 
-from . import rose, terminal_link
+from . import rose, terminal_link, videotex
 
 log = logging.getLogger(__name__)
 
@@ -94,11 +94,20 @@ def api():
     return minitel_chatgpt
 
 
-def display(term, text):
+def display(term, text, *, framed=False, safeword=""):
     chat = api()
+    if framed:
+        from .terminal_display import View
+        view = View(term, text, "fr", title="3615 rose")
+        view.feature_navigation = "exit"
+        view.input_limit = rose.MAX_INPUT
+        if safeword:
+            view.input_notice = "Mot d'arret : " + chat.safe_display(safeword)
+            view.notice = view.input_notice
+        return view.install()
     term.clear()
     term.w(chat.FG_WHITE)
-    # Bounded screen: no pagination can hide the safeword or swallow exits.
+    # Gate, errors and bill summaries stay bounded; live replies use the frame.
     rows = chat.wrap(chat.safe_display(text))
     if len(rows) > 20:
         rows = rows[:19] + ["[Réponse abrégée]"]
@@ -107,10 +116,28 @@ def display(term, text):
 
 
 def read_field(term, secret=False, safeword="", paging=False):
+    view = None if secret else getattr(term, "view", None)
+    if view is None:
+        return _read_field(term, secret, safeword, paging)
+    # Reuse the shared frame/editor drawing but keep Rose's exit, input-limit,
+    # catalogue and stop-word semantics out of the ordinary chat reader.
+    with hidden_echo(term):
+        return _read_field(term, secret, safeword, paging, view)
+
+
+def _read_field(term, secret, safeword, paging, view=None):
     chat = api()
     buf = []
     overflow = False
-    term.w("> " if not secret else "")
+    if view is None:
+        term.w("> " if not secret else "")
+    else:
+        view.buffer = buf
+        view.pending_input.clear()
+        view.feature_navigation = "catalogue" if paging else "exit"
+        view.input_notice = "Mot d'arret : " + chat.safe_display(safeword) if safeword else None
+        view.draw()
+        term.w(b"\x11")
     while True:
         kind, code = term.read_key(chat.IDLE_TIMEOUT)
         if kind == "timeout":
@@ -120,12 +147,18 @@ def read_field(term, secret=False, safeword="", paging=False):
                 return None, "sommaire" if code == chat.K_SOMMAIRE else "retour"
             if not secret and code == chat.K_GUIDE:
                 return None, "help"
-            if paging and code == chat.K_SUITE:
-                return None, "next"
+            if code == chat.K_SUITE:
+                if paging and (view is None or view.page == len(view.pages) - 1):
+                    return None, "next"
+                if view is not None:
+                    view.move(1)
+                continue
             if code == chat.K_CORR:
                 if buf:
                     buf.pop()
-                    if not secret:
+                    if view is not None:
+                        view.input()
+                    elif not secret:
                         term.w(b"\x08 \x08")
                 continue
         if (kind == "fn" and code == chat.K_ENVOI) or (kind == "char" and code in (chat.CR, chat.LF)):
@@ -137,14 +170,21 @@ def read_field(term, secret=False, safeword="", paging=False):
                     return None, rose.normalized(text).lower()
                 return text, "submit"
             reason = rose.stop_reason(text, safeword)
+            if view is not None and not paging and reason is None and rose.normalized(text) in (
+                    "SUITE", "SUIVANT", "PRECEDENT"):
+                buf.clear()
+                view.move(-1 if rose.normalized(text) == "PRECEDENT" else 1)
+                continue
             return text, reason or "submit"
         if kind == "char":
             if code in (chat.BS, 0x7F):
                 if buf:
                     buf.pop()
-                    if not secret:
+                    if view is not None:
+                        view.input()
+                    elif not secret:
                         term.w(b"\x08 \x08")
-            elif 0x20 <= code <= 0x7E:
+            elif videotex.input_character(code):
                 if not overflow:
                     buf.append(chr(code))
                 if len(buf) > (128 if secret else rose.MAX_INPUT):
@@ -152,6 +192,11 @@ def read_field(term, secret=False, safeword="", paging=False):
                     # ordinary conversation after rejecting an oversized field.
                     buf.clear()
                     overflow = True
+                if view is not None:
+                    if overflow:
+                        view.input_notice = ("Trop long. Arret : " + safeword if safeword else
+                                             "Message trop long. ENVOI / RETOUR")
+                    view.input()
 
 
 def gate(term):
@@ -186,7 +231,7 @@ def welcome(term):
         "Votre choix, puis ENVOI.", "RETOUR : quitter.",
     ])
     while True:
-        display(term, text)
+        display(term, text, framed=True)
         choice, action = read_field(term)
         if action == "help":
             continue
@@ -212,7 +257,7 @@ def roster(term, gender, test=False):
         title = "Messieurs" if gender == "homme" else "Mesdemoiselles"
         text = f"3615 rose - {title}\nCatalogue {page + 1}/{pages}\n\n"
         text += "\n\n".join(p["name"] + "\n" + p["bio"] for p in people[page*2:page*2+2])
-        display(term, text)
+        display(term, text, framed=True)
         term.line("SUITE / nom puis ENVOI / RETOUR")
         name, action = read_field(term, paging=True)
         if action == "next":
@@ -232,8 +277,17 @@ def roster(term, gender, test=False):
 
 
 def wait(term, job, safeword, timeout):
-    """Read exits during the request; discard all other typeahead on completion."""
-    term._pending = job.pending()
+    """Read exits with echo suppressed; private typeahead never spills on output."""
+    term._pending = job.pending()  # Track the worker even if echo setup fails.
+    try:
+        with hidden_echo(term):
+            return _wait(term, job, safeword, timeout)
+    except (EchoUnavailable, terminal_link.Unavailable):
+        job.cancel()
+        raise
+
+
+def _wait(term, job, safeword, timeout):
     chat = api()
     typed = []
     while time.monotonic() < job.started + timeout:
@@ -251,7 +305,7 @@ def wait(term, job, safeword, timeout):
         elif (kind == "fn" and code == chat.K_CORR) or (kind == "char" and code in (chat.BS, 0x7F)):
             if typed:
                 typed.pop()
-        elif kind == "char" and 0x20 <= code <= 0x7E and len(typed) < rose.MAX_INPUT:
+        elif kind == "char" and videotex.input_character(code) and len(typed) < rose.MAX_INPUT:
             typed.append(chr(code))
         # Finish a begun command before displaying the reply; do not turn a
         # partially typed safeword into a new conversational submission.
@@ -314,7 +368,13 @@ def run(term, alias, model, timeout=30, row_delay=0.32, test=False):
         term.s.hint = "Entree ENVOI | ^N SUITE | ^P SOMMAIRE | ^G AIDE | ^R RETOUR | ^Q fermer"
     try:
         return _run(term, alias, model, timeout, row_delay, test=test)
+    except EchoUnavailable:
+        display(term, "Saisie indisponible. Reconnectez-vous.")
+        return "retour", getattr(term, "_pending", None)
     finally:
+        view = getattr(term, "view", None)
+        if view is not None and view.title == "3615 rose":
+            term.clear()  # Never leave private pages/input attached to ordinary chat.
         if isinstance(previous_hint, str):
             term.s.hint = previous_hint
 
@@ -371,12 +431,18 @@ def _run(term, alias, model, timeout=30, row_delay=0.32, test=False):
     reason = "retour"
     try:
         display(term, "3615 rose\nService de conversation adulte fictive.\n\n"
-                "RETOUR / SOMMAIRE : quitter.\nMot d'arrêt : " + session.safeword)
+                "RETOUR / SOMMAIRE : quitter.\nMot d'arrêt : " + session.safeword,
+                framed=True, safeword=session.safeword)
         text = None
         while session.active:
             if session.job and session.job.thread.is_alive():
-                display(term, "Requête précédente en cours. Patientez ou quittez.")
+                display(term, "Requête précédente en cours. Patientez ou quittez.",
+                        framed=True, safeword=session.safeword)
             else:
+                if term.view is not None:
+                    waiting = "Attente... Arret : " + session.safeword
+                    term.view.input_notice = waiting
+                    term.view.busy(waiting)
                 job = session.start(model, text)
                 reply, action = wait(term, job, session.safeword, timeout)
                 if action not in ("done", "deadline"):
@@ -386,15 +452,17 @@ def _run(term, alias, model, timeout=30, row_delay=0.32, test=False):
                     reason = "moderation"
                     break
                 if reply and reply.status == "done":
-                    display(term, session.receive(reply, text))
+                    display(term, session.receive(reply, text), framed=True, safeword=session.safeword)
                 else:
                     display(term, "Mot d'arrêt : " + session.safeword +
-                            "\n\nService momentanément indisponible.\nRéessayez ou RETOUR.")
+                            "\n\nService momentanément indisponible.\nRéessayez ou RETOUR.",
+                            framed=True, safeword=session.safeword)
             while True:
                 text, action = read_field(term, safeword=session.safeword)
                 if action == "help" or (action == "submit" and rose.normalized(text) == "AIDE"):
                     display(term, "Mot d'arrêt : " + session.safeword +
-                            "\n\nRETOUR / SOMMAIRE : quitter.\nLe mot d'arrêt quitte immédiatement.\nFrançais uniquement.")
+                            "\n\nRETOUR / SOMMAIRE : quitter.\nLe mot d'arrêt quitte immédiatement.\nFrançais uniquement.",
+                            framed=True, safeword=session.safeword)
                     continue
                 if action == "submit" and not text.strip():
                     continue

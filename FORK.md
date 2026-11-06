@@ -62,6 +62,14 @@ a new routing framework or a refactor of working features. Future capabilities
 remain subject to their own scope and validation; this section defines design
 guidance and adds no runtime functionality.
 
+Short requests and concise answers remain the default. A short instruction may
+eventually initiate substantial autonomous work using remote models/tools, with
+the Pi coordinating bounded execution and returning a concise report. Brief
+progress should reflect actual activity; a future long-task view may use full-screen
+scrolling before restoring normal chat. These are planned directions, not current
+capabilities; see [terminal activity design](docs/TERMINAL_ACTIVITY.md). No general
+agent framework is needed before a concrete task justifies it.
+
 ## Initial scope
 
 The default birthday/1980s personality is replaced with this character through

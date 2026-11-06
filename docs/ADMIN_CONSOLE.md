@@ -108,6 +108,13 @@ Blocs système, logiciel (`#software`), journaux (`#logs`), stockage (`#storage`
 Journaux Terminal / Administration / Wi-Fi / Déploiement, 40/100/200 lignes,
 actualisation manuelle. Rapport `/diagnostics.txt` : versions, états et mesures,
 sans contenu des conversations, clé API ou configuration privée.
+Le champ `recent_answer_errors` reprend au plus 20 erreurs des 200 dernières
+lignes du journal Terminal. Il reconstruit uniquement des catégories fixes,
+statuts HTTP, étapes public/school et chemins de champs de validation autorisés ;
+aucune ligne brute ni prose du fournisseur n'est exportée. Les refus HTTP,
+délais, erreurs réseau et réponses inexploitables ont aussi un message distinct
+sur le terminal. L'absence d'erreurs dans ce rapport ne prouve pas leur absence
+au-delà de cette fenêtre de journal.
 
 La vérification Git reste explicite, datée et propre à la session du navigateur.
 L’historique proposé est borné. Une vérification échouée retire la liste périmée.

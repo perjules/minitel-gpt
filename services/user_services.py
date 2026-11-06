@@ -106,7 +106,7 @@ class ProfileSchool:
         if not config.get("enabled"):
             return False
         allowed = self.config()["children"]
-        if not pronote_answers.school_record_request(question, config["children"]):
+        if not pronote_answers.school_tool_request(question, config["children"]):
             return False
         folded = persistent_memory.normalized(question)
         return not allowed or any(

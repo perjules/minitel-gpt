@@ -223,7 +223,7 @@ def test_hardware_echo_password_hidden_normal_input_once_and_routes_restored(
     assert action == "sommaire" and serial.routes == routes
     assert all(copies == 0 for _, copies in serial.echo)
     assert b"SYNTHETIC_PW_q7" not in serial.output
-    assert serial.output.endswith(b"Journal verrouille.\r\n")
+    assert serial.output.endswith("Journal verrouill\x19Be.\r\n".encode("ascii"))
     # Incremental cursor writes form one visible input and a separate preview;
     # raw UART substring counts no longer represent rendered text.
     assert any("> TEXTE : PRIVATE NOTE" in frame for frame in frames)
@@ -255,7 +255,7 @@ def test_private_reader_timeout_clears_password_and_screen(tmp_path, monkeypatch
     monkeypatch.setattr(term, "read_key", idle)
     assert journal_terminal.run(term, user, registry)[0] == "retour"
     assert instances[0].key is None
-    assert serial.output.endswith(b"Journal verrouille.\r\n")
+    assert serial.output.endswith("Journal verrouill\x19Be.\r\n".encode("ascii"))
 
 
 def test_late_terminal_model_result_is_abandoned_on_navigation(tmp_path, monkeypatch):

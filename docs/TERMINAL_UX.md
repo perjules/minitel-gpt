@@ -4,6 +4,10 @@ Integrated into `develop` on 5 November 2026 from `feature/terminal-ux`, after t
 owner confirmed technical operation on the Matra. The inverse input field remains
 a UX trial to assess in use. Stable `main` is unchanged.
 
+Follow-up implementation gates are in [TERMINAL_UX_PLAN.md](TERMINAL_UX_PLAN.md).
+Proposed activity messages and a future full-screen autonomous-task view are
+documented in [TERMINAL_ACTIVITY.md](TERMINAL_ACTIVITY.md); neither is implemented.
+
 ## Hardware decision and evidence (1 November 2026)
 
 The owner's Matra Minitel 1, 722 079 V / XB0006B-2, stayed in Videotex during WP1:
@@ -27,6 +31,16 @@ and an experimental inverse input area. Readability does not depend on
 distinguishing colors or dim text. The probe and
 STUM references remain in [DISPLAY_PROBE.md](DISPLAY_PROBE.md).
 
+Follow-up physical testing on 5 November confirmed normal/inverse CAN row clears,
+REP runs (including gray spaces and accented cells), echo suppression/restoration,
+buffered typeahead and the R22 C3 input caret. Native lowercase also works on this
+particular original M1: AZaz becomes azAZ and restores correctly. The selected
+implementation uses the verified native mode with an admin setting.
+The [interaction evidence](INTERACTION_PROBE.md#completed-run-protocol-keyboard-and-echo-review-5-november-2026)
+closes the corresponding hardware gates. CAN clearing, REP compression, prompt
+recall and native lowercase are implemented; physical application acceptance is
+pending. Accent parsing remains unchanged and deferred.
+
 ## Screen layout
 
 Service row 00 is left alone. Physical column 40 is reserved to avoid automatic
@@ -38,7 +52,7 @@ wrap and bottom-right rollover; text lines have up to 39 characters.
 | 02–19 | 18 rows of loaded content |
 | 20 | Page number and contextual function-key navigation |
 | 21 | Ready/waiting/status/length notice |
-| 22–24 | Fixed inverse input area: white rectangle, black prompt/text |
+| 22–24 | Fixed input area: gray rectangle, white user text |
 
 `services/terminal_display.py` defines a small immutable geometry and one loaded
 `View`: complete text/pages, current page, draft input, displayed-page set and
@@ -49,7 +63,7 @@ remain compatibility aliases for the standard geometry.
 View rendering uses the Matra-validated `US row column` addresses and standard
 Videotex attributes. Editing sends changed spans. Every new result and real page
 change clears the previous visible content before drawing the next page, using
-reverse erasure for sparse pages or a full-screen clear above the threshold.
+validated bottom-to-top CAN row clears while retaining the frame.
 The same loaded view, draft input and review/context state survive that clear.
 Existing session resets and full-screen theatre/password workflows are retained.
 No dependencies, database schema, model prompts or service configuration change.
@@ -63,7 +77,7 @@ No dependencies, database schema, model prompts or service configuration change.
   textual page shortcuts. They never leave the reader to invoke a model/service.
 - Partially typed input survives paging. **CORRECTION** and Backspace remove one
   character; **ANNULATION** clears the complete draft, including hidden portions.
-- Input still accepts up to **2,000 ASCII characters**. After roughly 114 typed
+- Input still accepts up to **2,000 characters** (ASCII plus supported French G2). After 110 typed
   characters the three-row viewport moves to a fresh segment, with the total
   length shown in the status row. Backspace can return to the previous segment.
   No part of the stored command is truncated or auto-submitted. An oversized
@@ -189,42 +203,31 @@ clarified that the wipe should run **right to left, bottom to top**. Email/local
 results also need the same transition; the earlier wipe was attached only to API
 waiting, leaving document replacement and paging to overwrite old text in place.
 
-`FULL_CLEAR_THRESHOLD = 100` in `services/terminal_display.py` is the single
-adjustment point. Count the lengths of the currently displayed answer rows after
-removing trailing padding; internal spaces count, input/frame text and unseen
-pages do not. At **100 characters or fewer**, erase each occupied row right to
-left, visiting lower rows first. Skip already blank rows and trailing padding.
-Cursor positioning plus `BS SPACE BS` erases cells without writing in column 40
-or crossing a row boundary. The heading remains visible.
+Following the 5 November hardware validation, occupied rows clear with cursor
+positioning, explicit attributes and CAN (`18`), visiting lower rows first.
+CAN erases the entire row tail at once and leaves the cursor in place. This
+supersedes the earlier right-to-left `BS SPACE BS` animation and 100-character
+full-screen threshold. A normal row clear now uses 12 bytes including an explicit background reset;
+all 18 content rows take 216 bytes, approximately 1.8 seconds of UART time, excluding other frame updates.
+The heading remains visible regardless of answer length. FF is reserved for
+initial setup or an uncertain screen cache.
 
-Above 100 characters, send `FF` and rebuild the heading, navigation/status and
-input region. `FF` is one control byte; the frame itself still needs transmission.
-This avoids an approximately eighteen-second reverse erase of a full answer at
-1200 baud, 7E1. A full clear does not discard loaded pages, visited-page review,
-selected feature context or a partial input draft. It does not invoke a service.
+On submission, clear submitted input first, retain `> `, update the centered
+waiting indicator, then clear old content. Input clearing retains the gray
+attributes through physical C40 without ever printing there. The API response
+is queued after the wipe; a new view inherits the blank cache. There is no added
+animation sleep or serial flush.
 
-On submission, erase the submitted prompt in reverse order first, retain `> `,
-write the centered waiting indicator, and clear the old content by the chosen
-method. Navigation reads `Requete en cours...` while processing, rather than
-showing the previous result's page count. The API response is queued after the
-wipe; a new view inherits the blank cache and does not erase the field twice.
-Serial backpressure can block individual writes, but there is no added animation
-sleep or serial flush.
+Email list/read/reply, journal, PRONOTE, replacement results and both page
+directions use the same transition. Drafts, loaded results, feature context and
+review state remain intact. First/last-page boundary keys do not clear content.
+New text is drawn top-to-bottom onto blank cells. Private checks bracket the
+transition; the caret is hidden until the editor is ready at the input region.
 
-Local result replacement, including email list/read/reply and PRONOTE grade
-changes, uses this same content transition even without an API wait. Paging also
-uses it, restoring the input buffer/viewport after a full clear; first/last-page
-boundary keys cause no wipe. New answer text is drawn top to bottom onto blank
-cells. Review acknowledgements happen only when actual content pages are drawn,
-never while rebuilding the empty frame. The cursor is hidden during transitions
-and returned to the input region when the reader is ready.
-
-Tests inspect erasure byte by byte in descending row/column order, threshold
-boundaries, visible-page-only counting, shorter answers sharing an old prefix,
-local document replacement, long input across full-clear paging, private expiry
-and review checks. Paced tests cover both loaded-page directions and a fast API
-response arriving before the erase reaches the hardware. The console models BS
-and FF; its lack of baud pacing still makes physical review necessary.
+Tests inspect blank-before-replacement ordering, bottom-to-top clears, partial
+row and bottom-row behavior, normal/inverse attributes, uncertain-cache recovery,
+shorter answers, long drafts, review checks and serial backpressure. The console
+models CAN as well as BS and FF; physical acceptance remains necessary.
 
 ### Write-side backpressure after PRECEDENT (4 November 2026)
 
@@ -263,17 +266,35 @@ The owner found inverse video effective as an accent but too heavy for the
 top-level heading. Row 1 now centers `*** title ***` in normal video. Long titles
 are shortened to leave room for all three stars on each side.
 
-The three input rows are filled with inverse white spaces across the existing
+The three input rows are filled with inverse spaces across the existing
 39 usable columns, including blank rows. Typed characters, backspace, viewport
 updates and ANNULATION keep that inverse style. Reverse submission erasure also
-uses inverse spaces so it cannot punch black holes in the white field. Full
-clears rebuild the entire white input region; content, heading, status and
+uses the same shade of inverse spaces so it cannot punch holes in the field. Full
+clears rebuild the entire input region; content, heading, status and
 navigation stay in normal video. Column 40 remains the unused rollover margin.
 Private password screens retain their separate hidden-input behavior.
 
-This is a physical presentation trial, not a confirmed readability improvement.
-Check the idle white field, black typed text and cursor visibility on the Matra,
+The owner confirmed the inverse input works well, but found its initial white
+background too bright. Check the gray field, white typed text and cursor visibility on the Matra,
 then compare short/long input, submission and both paging directions.
+
+### Softer input background (5 November 2026)
+
+`INPUT_FOREGROUND = 2` selects the Videotex green code. On a monochrome CRT this
+is a gray level, documented by [STUM 1B](https://jbellue.github.io/stum1b/) as
+nominally 70% luminance, versus white's 100%; actual luminance depends on the tube.
+Inverse video swaps the foreground and background pixels, so the input becomes
+black text on gray while ordinary content remains white on black. This was the
+5 November design; the 6 November follow-up below adds white ink using a
+background-zone delimiter while retaining that same gray paper.
+
+The row cache now includes foreground color as well as text/inversion; a color
+change therefore repaints even identical text. Reverse erasure preserves the
+cached color, and full clears restore all three input rows at the selected level.
+The constant is the single adjustment point if the Matra needs further dimming;
+Videotex color numbers are not ordered by brightness (magenta code 5 is nominally
+60%, cyan code 6 is 80%). Console gray-level rendering is approximate; assess
+comfort on the physical screen.
 
 ## WP6 physical acceptance — owner to run after the branch is made available
 
@@ -301,3 +322,152 @@ an outgoing draft before any deliberate send. No deployment/push is automatic.
 Return a photo of a multi-page answer with partially typed input, plus any
 observed duplication, typing lag, flicker, wrong key meaning or stale content.
 Keep stable `main` unchanged until these checks pass.
+
+### Repeated-run wire encoding (5 November 2026)
+
+The fixed viewer compresses printable ASCII runs of four or more cells with REP,
+including spaces in the gray input field. REP counts additional copies, at most
+63 per sequence; shorter runs remain literal. Logical text, paging, review state
+and cache contents do not change. Controls and accented-byte sequences are never
+passed through this encoder. The console implements REP, including sequences
+split between writes. A repeated 39-character row takes three character-data
+bytes instead of 39; regular prose retains its usual progressive rendering.
+
+### Ordinary prompt recall (5 November 2026)
+
+RÉPÉTITION (`13 43`, console Ctrl-B/F6) recalls up to 20 completed ordinary chat
+prompts, newest first, then restores the saved draft and its viewport. The user
+can edit the recalled text; only ENVOI submits. Editing/ANNULATION ends traversal,
+while paging preserves it. Entries are scoped to the active conversation in RAM,
+exclude feature/private/secret/confirmation inputs and disappear at session reset,
+logout, timeout or transport recovery. Recall never calls a provider. Eligibility
+uses the conversation's existing onboarding state without observing or modifying
+onboarding revision markers.
+
+### Native keyboard case (5 November 2026)
+
+Maintenance → Terminal / clavier selects **Minuscules par défaut** (default) or
+**Comportement Minitel d’origine**. Saving persists
+`MINITEL_INPUT_CASE=lowercase|legacy` and restarts the terminal service, interrupting
+the current session. The browser reports save and restart results separately.
+Console/browser/API input, stored credentials and the accent parser are unchanged.
+Passwords typed on the physical Minitel use the same case mode as all other input;
+Shift supplies the opposite case, so existing mixed-case passwords remain usable.
+
+On the first SOMMAIRE or deployment resume, a physical `serial.SerialBase`
+transport snapshots `ESC 39 72` status, requests lowercase `ESC 3A 69 45` or
+original mode `ESC 3A 6A 45`, and verifies status bit `08`. This avoids attempting
+configuration while the Minitel is off. Settings are captured when Term opens,
+not reloaded mid-entry. Replies are consumed internally and early nonreply input
+is retained with a bound; the existing serial backlog budget applies. No Python
+letter swapping or SS2 change is involved.
+
+If configuration is unsupported or unconfirmed, the service attempts original
+mode and logs whether that fallback was confirmed (`terminal_keyboard`). It
+never claims lowercase succeeded on a missing acknowledgement. A new connection
+tries the configured mode again. Clean close, including systemd SIGTERM, attempts
+to restore the previous native case flag and closes the UART even if restoration
+fails. Forced termination or power loss cannot restore state: power-cycle the
+Minitel if its keyboard behaves unexpectedly, then restart the service.
+
+### Compact ASCII fallback (6 November 2026)
+
+Output preserves the native French repertoire described below; other typography
+retains standard-library transliteration and explicit fallbacks.
+Common arrows now use ASCII equivalents (`→` becomes `->`), alongside the existing
+technical-symbol mappings and readable currency/fraction fallbacks. An unknown
+Unicode character becomes one `?` instead of a six- or ten-character code-point
+escape. Raw terminal controls remain escaped; source mail, school data, model
+responses and stored text are not rewritten. French input decoding is covered by
+the subsequent SS2 fix below.
+
+### Rose uses the shared frame (6 November 2026)
+
+Rose's catalogue and live conversation now use the same View drawing, CAN clears,
+REP encoding and gray input region. Its existing private reader keeps its own
+800-character bound, stop-word and exit behavior; it does not use public prompt
+recall. Stop-word status stays pinned during long input, paging and waiting.
+Hardware echo is suppressed while editing or waiting and restored exactly on
+exit. Private frames are detached before ordinary chat resumes; the secret gate,
+animated bill and scripted transcript workshop retain their dedicated paths.
+See [ROSE.md](ROSE.md#affichage-partagé-6-novembre-2026) for keys and physical checks.
+
+### Local TEST UNICODE diagnostic (6 November 2026)
+
+In ordinary Minitel chat, type `test Unicode` then ENVOI (case-insensitive).
+This calls the local `services.terminal_diagnostics.test_unicode()` tool and feeds
+its Unicode `display` result into the same `show_response` / View path as an AI
+answer. No model, web search, raw UART writes, memory, prompt recall or printing
+are involved. The exact command is intercepted only in ordinary chat, so it does
+not override feature composition, password or confirmation input. The tool's
+source page can also be printed in SSH, without opening the serial port:
+
+```bash
+.venv/bin/python -m services.terminal_diagnostics
+```
+
+The fixture occupies all 18 content rows in the current Videotex viewer. It covers
+ASCII, French lowercase/capitals, decomposed accents, isolated combining marks,
+ligatures, arrows, mathematics, currencies, fractions, punctuation, unusual
+spaces, other Latin letters/scripts, emoji, box drawing and a literal JSON escape.
+A normal next prompt works without leaving the page. Photograph the numbered rows;
+this tests current conversion, not native Videotex glyph support.
+
+Expected current distinctions:
+
+- `02 FR` and `04 NFD`: supported French letters now retain native accents.
+  `03 CAPS` falls back to unaccented capitals, which this generation can display.
+- `05 ISOLES`: the four marks lack base letters and currently become `?`.
+- `07 FLECHES`: arrows use their readable ASCII equivalents.
+- Unknown characters use `?`; compound emoji can occupy several code points.
+- `17 LITTERAL` deliberately contains the six literal characters `\u00e9`.
+  A parsed JSON escape `"\u00e9"` instead becomes the same Python `é` as a
+  literal Unicode JSON string, before display conversion.
+
+Accent handling predates these packages: upstream commit
+[6da626b](https://github.com/perjules/minitel-gpt/commit/6da626b2d028598b754e8a3374f9bd990e3bb3e5)
+introduced `NFKD` + ASCII transliteration (`é` → `e`). This was also the
+feature branch behavior when the diagnostic was added. The hardware probe
+displayed native accents by explicitly sending SS2 sequences (`19 42 65` for é).
+After the owner reported the accent-key selector appearing as B, the following
+fix added a native French subset. Code history does not establish every earlier
+deployed path or invalidate the owner’s observation of accented text.
+
+### French G2 and white input text (6 November 2026)
+
+The native subset in `services/videotex.py` handles French lowercase accented
+vowels/cedilla plus œ/Œ and £. It is a bounded G2 codec, not general Unicode support.
+Supported characters survive `safe_display`, are counted as one screen/editor
+cell and become two- or three-byte SS2 sequences on the seven-bit link. REP still
+compresses ASCII runs only; it does not split native glyph sequences. Other
+characters keep readable transliteration or `?`. Uppercase accented output is
+unavailable on this terminal generation and falls back to plain capitals;
+ä/ö/ü depend on the terminal’s VGP variant and may display as their base vowel.
+No stored messages, existing passwords or provider responses are rewritten.
+
+Keyboard SS2 is decoded incrementally at `Term.read_key`, before every normal or
+private reader. A dead accent (`19 42`, for example) remains pending until its
+base arrives, including across short polling timeouts. Recognized protocol replies
+can interleave; function keys cancel the pending accent without being swallowed.
+Unknown sequences use one placeholder rather than leaking selector letters.
+Clear/close discards pending accent state. Each correction removes one decoded
+character; secret readers still output no text. Native lowercase remains the
+firmware mode; no Python case swap is introduced. The console uses the same codec.
+
+White input ink uses the inverse character attribute with foreground 2 and
+background 7. Inversion makes the visible paper remain gray 2 and the ink white 7.
+STUM background attributes are zone-based: an explicit space delimiter is required.
+C2 is kept as that delimiter on each input row, so all user text remains in
+C3–C39 (37 cells/row); C1 holds the prompt/blank. The viewport holds 110 characters
+plus its cursor and the initial caret stays R22 C3. CAN preserves the delimiter;
+C40 is cleared without being printed. The first gray CAN fill precedes the white
+zone setup to avoid a bright initialization flash. The console models background
+zones and uses white-on-dark-gray color pairs where supported.
+
+Protocol reference: [STUM, Videotex character and attribute encoding](https://jbellue.github.io/stum1b/),
+sections “Codage des lettres accentuées”, “Codage des attributs définis par zone”
+and CAN/US behavior. Offline coverage includes delayed/split SS2, exits, private
+readers, seven-bit encoding, cell counts, USB backpressure, C2 zone preservation,
+editing and paging. Physical acceptance remains pending: check white text on gray,
+spaces/backspace/long drafts, Shift-RETOUR then a vowel, `TEST UNICODE` rows 02–05,
+and hidden input. No claim of physical validation is made by the emulator tests.

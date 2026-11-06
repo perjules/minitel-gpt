@@ -1,5 +1,9 @@
 # WP1: isolated compact-display experiment
 
+For the later 40-column CAN/REP/keyboard experiment use `--interaction` and follow
+[INTERACTION_PROBE.md](INTERACTION_PROBE.md). That mode does not retry 80 columns;
+the original WP1 procedure below is retained for reference.
+
 This is a physical test, not an application setting. Only
 `scripts/display_probe.py` opens the UART. It imports neither the application nor
 its configuration, makes no network/API calls and does not change the deployed
