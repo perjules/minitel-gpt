@@ -264,6 +264,16 @@ class ConsoleSerial:
         # Output is synchronous; nothing remains queued after an interruption.
         pass
 
+    @property
+    def in_waiting(self):
+        if not self.pending:
+            self.window.timeout(0)
+            try:
+                self.read(0)  # Queue one available key without consuming it.
+            finally:
+                self.window.timeout(100)
+        return len(self.pending)
+
     def set_local_echo(self, enabled):
         self.local_echo = bool(enabled)
 

@@ -9,6 +9,16 @@ def unicode_command(text):
     return " ".join(text.split()).casefold() == "test unicode"
 
 
+def scroll_command(text):
+    return " ".join(text.split()).casefold() == "test scroll"
+
+
+def test_scroll():
+    """Three loaded pages; no inference, persistence or external operation."""
+    return {"display": "\n".join(f"Journal {number:02d} : été au central MF-83." for number in range(1, 55)),
+            "scrolling": True, "turn": None}
+
+
 def test_unicode():
     """A local tool result using the same display payload as an AI answer."""
     lines = [

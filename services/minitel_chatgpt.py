@@ -40,6 +40,7 @@ try:  # Support both systemd's direct script and package imports in tests.
         terminal_diagnostics,
         terminal_display,
         terminal_link,
+        terminal_scrolling,
         user_services,
         videotex,
     )
@@ -62,6 +63,7 @@ except ImportError:
         terminal_diagnostics,
         terminal_display,
         terminal_link,
+        terminal_scrolling,
         user_services,
         videotex,
     )
@@ -693,6 +695,13 @@ class Term:
                 self.keyboard_activity()
             return ('char', b)
         return ('timeout', None)
+
+    def poll_key(self):
+        """Check keys without an empty serial/curses read delaying each row."""
+        self.poll_presence()
+        if not self._input_bytes and self.io(getattr, self.s, "in_waiting", None) == 0:
+            return "timeout", None
+        return self.read_key(.001)
 
 
 def wrap(text, width=COLS):
@@ -1672,6 +1681,16 @@ def run_session(t):
                 t.view.status("TEST UNICODE - local, sans API")
                 continue
 
+            if recall_eligible and terminal_diagnostics.scroll_command(question):
+                diagnostic = terminal_diagnostics.test_scroll()
+                result = terminal_scrolling.show(t, diagnostic["display"], language)
+                if result == "guide":
+                    show_guide(t, language)
+                if result != "done":
+                    action = result
+                    break
+                continue
+
             memory_control = memory_session.household_command(question)
             if memory_control:
                 if memory_control == "lock":
@@ -1976,7 +1995,9 @@ def run_session(t):
                     t, answer, language, title="3615 IA / NOEL" if response.get("christmas") else "3615 IA / MEMOIRE")
             else:
                 result = (show_calculator_scene(t, response["scene"], language)
-                          if response and response.get("scene") else show_response(t, safe_display(answer), language))
+                          if response and response.get("scene") else
+                          terminal_scrolling.show(t, answer, language) if response and response.get("scrolling") else
+                          show_response(t, safe_display(answer), language))
             if response and response.get('scene') and result == 'done':
                 show_response(t, safe_display(answer), language)
             if response and response.get('scene') and result != 'done':
