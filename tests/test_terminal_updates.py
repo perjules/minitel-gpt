@@ -1,6 +1,8 @@
 """Offline update preflight, theatrical boundaries and physical confirmation."""
 import json
 import subprocess
+import sys
+from pathlib import Path
 from queue import Queue
 from unittest.mock import Mock, patch
 
@@ -33,6 +35,17 @@ def test_real_local_remote_preview_uses_installed_branch_and_preserves_checkout(
     runtime.write_text(json.dumps({"branch": "develop", "active": {"commit": head}}))
     state.write_text('{"phase":"ready"}')
     assert deployment.available(checkout, runtime) is False
+    # A production .venv symlink is untracked with a directory-only ignore rule.
+    # It must not obstruct MAJ or be removed as a repair step.
+    (checkout / '.venv').symlink_to(tmp_path / 'installed-venv')
+    assert deployment.preview(checkout, runtime, state)['behind'] == 0
+    # The admin comparison can succeed while the stricter terminal preflight
+    # correctly refuses a checkout/runtime mismatch. "ready" is not that check.
+    runtime.write_text(json.dumps({'branch': 'develop', 'active': {'commit': 'a' * 40}}))
+    assert deployment.check_update(lambda *args: (0, git(checkout, *args), ''), 'develop')['ok']
+    assert deployment.preview(checkout, runtime, state) == {'ok': False, 'reason': 'head_mismatch'}
+    assert (checkout / '.venv').is_symlink()
+    runtime.write_text(json.dumps({'branch': 'develop', 'active': {'commit': head}}))
     (remote / "test.txt").write_text("second")
     git(remote, "commit", "-am", "Better messages")
     assert deployment.available(checkout, runtime) is True
@@ -77,8 +90,68 @@ def test_failed_preflight_never_returns_changes_to_the_model(tmp_path, monkeypat
     monkeypatch.setattr(deployment, "git", run)
     result = deployment.preview(tmp_path, runtime, status)
     assert result["ok"] is False and "log" not in result
+    assert result['reason'] == {'missing': 'runtime_state', 'branch': 'branch_mismatch',
+                                'head': 'head_mismatch', 'dirty': 'dirty', 'fetch': 'fetch',
+                                'diverged': 'diverged', 'busy': 'busy'}[failure]
     if failure in ("missing", "busy"):
         run.assert_not_called()
+
+
+@pytest.mark.parametrize('stage,reason', [('branch', 'branch_read'), ('head', 'head_read'),
+                                        ('status', 'status_read'), ('comparison', 'comparison'),
+                                        ('history', 'history'), ('target', 'target_read'),
+                                        ('ancestry', 'ancestry_read')])
+def test_preflight_reports_git_failure_stage_without_exposing_stderr(tmp_path, monkeypatch, stage, reason):
+    head = 'a' * 40
+    runtime, status = tmp_path / 'runtime.json', tmp_path / 'status.json'
+    runtime.write_text(json.dumps({'branch': 'develop', 'active': {'commit': head}}))
+    status.write_text('{"phase":"ready"}')
+    stages = {'branch': ('branch', '--show-current'), 'head': ('rev-parse', 'HEAD'),
+              'status': ('status', '--porcelain', '--untracked-files=no'),
+              'comparison': ('rev-list', '--count', 'HEAD..origin/develop'),
+              'history': ('log', '-20', '--format=%H%x00%s', 'HEAD..origin/develop'),
+              'target': ('rev-parse', 'origin/develop'),
+              'ancestry': ('merge-base', '--is-ancestor', 'HEAD', head)}
+    def git(project, *args, **kwargs):
+        if args == stages[stage]:
+            return 128, '', 'https://synthetic-secret@example.invalid/private.git'
+        return 0, ('develop' if args[0] == 'branch' else head if args[0] == 'rev-parse' else
+                   '0' if args[0] == 'rev-list' else ''), ''
+    monkeypatch.setattr(deployment, 'git', git)
+    result = deployment.preview(tmp_path, runtime, status)
+    assert result == {'ok': False, 'reason': reason}
+    assert 'secret' not in deployment.preflight_notice(result)
+
+
+def test_unreadable_runtime_produces_safe_actionable_failure(tmp_path, monkeypatch):
+    runtime = tmp_path / 'runtime.json'
+    monkeypatch.setattr(type(runtime), 'read_text', Mock(side_effect=PermissionError('synthetic secret path')))
+    result = deployment.preview(tmp_path, runtime, tmp_path / 'status.json')
+    assert result == {'ok': False, 'reason': 'runtime_state'}
+
+
+@pytest.mark.parametrize('language', ['fr', 'en'])
+def test_failure_notice_and_log_are_fixed_and_never_use_model(monkeypatch, caplog, language):
+    monkeypatch.setattr(deployment, 'preview', Mock(return_value={'ok': False, 'reason': 'head_mismatch'}))
+    model = Mock(side_effect=AssertionError('No theatre for failed verification'))
+    monkeypatch.setattr(chat, 'prepare_update_text', model)
+    worker, output, _ = chat.start_update_request(language)
+    worker.join(1)
+    result, error = output.get_nowait()
+    assert error is None and 'Code' in result['display'] and 'head_mismatch' in result['display']
+    assert 'reason=head_mismatch' in caplog.text
+    model.assert_not_called()
+    assert 'synthetic-secret' not in deployment.preflight_notice({'reason': 'synthetic-secret'}, language)
+
+
+def test_extracted_preflight_cli_needs_no_checkout_imports_or_installation(tmp_path):
+    source = Path(deployment.__file__).read_text().replace(
+        'Path("/var/lib/minitel-gpt/runtime.json")', f'Path({str(tmp_path / "absent-runtime.json")!r})')
+    probe = tmp_path / 'probe.py'
+    probe.write_text(source)
+    run = subprocess.run([sys.executable, '-I', str(probe), str(tmp_path)],
+                         capture_output=True, text=True, check=True, timeout=5)
+    assert json.loads(run.stdout) == {'ok': False, 'reason': 'runtime_state'}
 
 
 def test_git_timeout_kills_transport_group(monkeypatch, tmp_path):

@@ -10,6 +10,38 @@ RUNTIME_STATE = Path("/var/lib/minitel-gpt/runtime.json")
 DEPLOYMENT_STATUS = Path("/var/lib/minitel-gpt/deployment.json")
 BUSY = {"queued", "preparing", "activating"}
 
+# Fixed diagnostics only: raw Git stderr can contain credential-bearing URLs.
+PREFLIGHT_REASONS = {
+    "runtime_state": ("Installation illisible ou incomplète.", "Installation state unreadable or incomplete."),
+    "busy": ("Une maintenance est déjà en cours.", "Maintenance is already in progress."),
+    "branch_read": ("Lecture de la branche impossible.", "Cannot read checkout branch."),
+    "branch_mismatch": ("Branche différente de l'installation.", "Checkout and installed branches differ."),
+    "head_read": ("Lecture de la révision impossible.", "Cannot read checkout revision."),
+    "head_mismatch": ("Code et runtime ne correspondent pas.", "Checkout and installed revisions differ."),
+    "status_read": ("État des fichiers inaccessible.", "Cannot check tracked files."),
+    "dirty": ("Fichiers suivis modifiés. Vérifiez SSH.", "Tracked files modified. Check via SSH."),
+    "fetch": ("Accès distant Git impossible ou expiré.", "Git remote access failed or timed out."),
+    "comparison": ("Comparaison des révisions impossible.", "Cannot compare revisions."),
+    "history": ("Historique des révisions inaccessible.", "Cannot read revision history."),
+    "history_format": ("Historique des révisions illisible.", "Invalid revision history."),
+    "history_changed": ("Historique modifié. Relancez MAJ.", "History changed. Run MAJ again."),
+    "target_read": ("Révision distante introuvable.", "Cannot read remote revision."),
+    "ancestry_read": ("Vérification de l'historique impossible.", "Cannot verify revision ancestry."),
+    "diverged": ("Historique local divergent. Vérifiez SSH.", "Local history diverged. Check via SSH."),
+}
+
+
+def preflight_notice(result, language="fr"):
+    """Explain a refused check without rendering arbitrary data as terminal text."""
+    reason = result.get("reason")
+    if result.get("busy"):
+        reason = "busy"
+    lines = PREFLIGHT_REASONS.get(reason)
+    if lines is None:
+        return ("Vérification indisponible.\nConsultez Maintenance dans la console." if language != "en" else
+                "Update check unavailable.\nSee Maintenance in the admin console.")
+    return lines[language == "en"] + ("\nCode : " if language != "en" else "\nCode: ") + reason
+
 
 def git(project, *args, timeout=60):
     """Bound Git and its transport children; never run a shell."""
@@ -36,23 +68,23 @@ def check_update(run, branch, *, subjects_only=False):
     """Compare against the installed branch; all writes remain in the helper."""
     rc, _, err = run("fetch", "origin", branch)
     if rc:
-        return {"ok": False, "msg": "Échec de la vérification (Internet ?) : " + err}
+        return {"ok": False, "reason": "fetch", "msg": "Échec de la vérification (Internet ?) : " + err}
     rc, behind, _ = run("rev-list", "--count", f"HEAD..origin/{branch}")
     if rc or not behind.isdigit():
-        return {"ok": False, "msg": "Comparaison des versions indisponible ; réessayer la vérification."}
+        return {"ok": False, "reason": "comparison", "msg": "Comparaison des versions indisponible ; réessayer la vérification."}
     rc, changes, _ = run("log", "-20", "--format=%H%x00%s" if subjects_only else "--format=%h  %s",
                          f"HEAD..origin/{branch}")
     if rc:
-        return {"ok": False, "msg": "Liste des mises à jour indisponible ; réessayer la vérification."}
+        return {"ok": False, "reason": "history", "msg": "Liste des mises à jour indisponible ; réessayer la vérification."}
     if subjects_only:
         commits = []
         for line in changes.splitlines():
             identifier, separator, subject = line.partition("\0")
             if not separator or not re.fullmatch(r"[0-9a-f]{40}", identifier):
-                return {"ok": False, "msg": "Liste des mises à jour illisible."}
+                return {"ok": False, "reason": "history_format", "msg": "Liste des mises à jour illisible."}
             commits.append({"id": identifier, "subject": subject})
         if len(commits) != min(int(behind), 20):
-            return {"ok": False, "msg": "La liste a changé ; réessayez la vérification."}
+            return {"ok": False, "reason": "history_changed", "msg": "La liste a changé ; réessayez la vérification."}
         return {"ok": True, "behind": int(behind), "commits": commits,
                 "log": "\n".join(c["subject"] for c in commits)[:1600]}
     return {"ok": True, "behind": int(behind), "log": changes[:1600]}
@@ -91,27 +123,29 @@ def preview(project, runtime=RUNTIME_STATE, deployment=DEPLOYMENT_STATUS):
     head = active.get("commit") if isinstance(active, dict) else None
     if (not isinstance(branch, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", branch)
             or not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head)):
-        return {"ok": False}
+        return {"ok": False, "reason": "runtime_state"}
     if status(deployment).get("phase") in BUSY:
-        return {"ok": False, "busy": True}
+        return {"ok": False, "busy": True, "reason": "busy"}
 
     def run(*args):
         return git(project, *args, timeout=60 if args[0] == "fetch" else 5)
 
-    for args, expected in ((('branch', '--show-current'), branch),
-                           (('rev-parse', 'HEAD'), head),
-                           (('status', '--porcelain', '--untracked-files=no'), '')):
+    for args, expected, failure, mismatch in (
+            (('branch', '--show-current'), branch, 'branch_read', 'branch_mismatch'),
+            (('rev-parse', 'HEAD'), head, 'head_read', 'head_mismatch'),
+            (('status', '--porcelain', '--untracked-files=no'), '', 'status_read', 'dirty')):
         rc, value, _ = run(*args)
         if rc or value != expected:
-            return {"ok": False}
+            return {"ok": False, "reason": failure if rc else mismatch}
     result = check_update(run, branch, subjects_only=True)
     if not result["ok"]:
-        return {"ok": False}  # Raw Git diagnostics never reach the theatrical model.
+        return {"ok": False, "reason": result["reason"]}  # Never forward raw Git diagnostics.
     rc, target, _ = run("rev-parse", f"origin/{branch}")
     if rc or not re.fullmatch(r"[0-9a-f]{40}", target):
-        return {"ok": False}
-    if run("merge-base", "--is-ancestor", "HEAD", target)[0]:
-        return {"ok": False}
+        return {"ok": False, "reason": "target_read"}
+    rc = run("merge-base", "--is-ancestor", "HEAD", target)[0]
+    if rc:
+        return {"ok": False, "reason": "diverged" if rc == 1 else "ancestry_read"}
     return {**result, "branch": branch, "head": head, "target": target}
 
 
@@ -146,3 +180,12 @@ def unchanged(project, preview, runtime=RUNTIME_STATE, deployment=DEPLOYMENT_STA
         if rc or value != expected:
             return False
     return True
+
+
+if __name__ == "__main__":
+    # Can be extracted with git show and run before changing the live checkout.
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Check terminal MAJ prerequisites; never deploy.")
+    parser.add_argument("project", type=Path)
+    print(json.dumps(preview(parser.parse_args().project), ensure_ascii=True, indent=2))

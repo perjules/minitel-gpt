@@ -39,6 +39,51 @@ independent of feature flags. Only this exact installed/checked-out branch enabl
 the hook. Pending Minitel deployment follows only on success; errors point to SSH.
 With no Minitel commits, no restart is needed. See [AIRZONE_DEMO.md](AIRZONE_DEMO.md).
 
+### When MAJ refuses verification
+
+Terminal MAJ now displays a fixed reason code, also logged as
+`terminal_update status=preflight_failed reason=...`. The admin's displayed version
+is the checkout revision; its update comparison does not establish that this
+matches `runtime.json`'s active commit. A previous deployment marked `ready` is
+not a new terminal preflight result. The two screens can therefore disagree.
+
+- `head_mismatch` / `branch_mismatch`: installed metadata and checkout differ.
+  Inspect both first; deliberately reconcile using the checkout's runtime installer
+  on the intended branch. Never edit runtime.json or reset away local data.
+- `runtime_state`: installation state is absent, malformed or unreadable.
+- `branch_read`, `head_read`, `status_read`, `target_read`, `ancestry_read`: a local
+  Git read failed. Inspect permissions/ownership as the minitel service user.
+- `fetch`: remote access failed/timed out; check Git authentication/networking in
+  the service context, which can differ from an interactive SSH session.
+- `dirty` / `diverged`: preserve and review tracked edits/local history via SSH.
+- `comparison`, `history`, `history_format`, `history_changed`: comparison/log
+  failure or concurrent history change; rerun and inspect if it persists.
+
+The installer-created untracked `.venv` symlink is excluded from the tracked-file
+check and must not be deleted to repair MAJ. Failed checks cannot offer or queue
+updates, launch theatrical text generation or expose raw Git stderr/URLs on the
+terminal. This patch adds diagnostics; it does not bypass any deployment guard.
+
+To diagnose an older installed revision without changing checkout/runtime state,
+extract this stdlib-only module to a temporary file and run it as the ordinary
+minitel user. Its only network mutation is the existing bounded Git fetch; it
+never installs, deploys, resets, changes branch, or reads .env/credential contents:
+
+```bash
+cd /home/minitel/minitel-gpt
+git fetch origin feature/airzone-demo
+maj_probe=$(mktemp /tmp/minitel-maj.XXXXXX.py)
+git show origin/feature/airzone-demo:services/deployment.py > "$maj_probe"
+/usr/bin/python3 "$maj_probe" /home/minitel/minitel-gpt
+rm -- "$maj_probe"
+```
+
+The JSON failure reason identifies the first failed prerequisite. Successful
+verification in SSH with continued failure on the Minitel points to service-context
+differences; it does not prove terminal verification is working. Inspect the
+minitel-chatgpt journal and effective service environment next. Do not paste the
+contents of .env, credentials or the full process environment into a diagnostic.
+
 On first startup (after SOMMAIRE), one separate Git-only check fetches the installed
 branch and tests for pending fast-forward changes. Fetch has a three-second limit;
 each local Git check has a one-second limit. A known update appends **MISES A JOUR

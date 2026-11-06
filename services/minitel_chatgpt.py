@@ -1160,9 +1160,12 @@ def start_update_request(language, preview=None):
         try:
             if preview is None:
                 checked = deployment.preview(Path(__file__).resolve().parents[1])
-                words = mainframe_update.TEXT[language]
                 rows = (prepare_update_text(checked, language) if checked["ok"] else
-                        [words["busy"] if checked.get("busy") else words["unavailable"]])
+                        [deployment.preflight_notice(checked, language)])
+                if not checked["ok"]:
+                    reason = checked.get("reason", "unknown")
+                    log.warning("terminal_update status=preflight_failed reason=%s",
+                                reason if reason in deployment.PREFLIGHT_REASONS else "unknown")
                 if checked["ok"] and checked.get("branch") == airzone_hack.UPDATE_BRANCH:
                     rows.append("Module Airzone : synchronisation incluse.")
                 result = {"display": "\n".join(rows), "preview": checked}
