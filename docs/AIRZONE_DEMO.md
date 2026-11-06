@@ -4,7 +4,8 @@ Temporary opt-in read-only function for ordinary Mistral **Conversations** chat,
 on the existing Pi 3 A+ and original Minitel SD. No Airzone service is installed.
 The separate Airzone checkout supplies `diagnostics.py`; Minitel never imports
 its adapter or exposes its write methods. No SSH/Tailscale transport is needed.
-Other providers and the legacy chat-completions path do not have this tool.
+Natural-language tool calls require Mistral Conversations. The explicit terminal
+command `HACK AIRZONE` is a local owned process stream and needs no model/API key.
 
 ## Prepare the original Minitel SD
 
@@ -61,7 +62,8 @@ sudo systemctl restart minitel-chatgpt admin-ui
 
 `AIRZONE_DEMO_MOCK=1` is an explicitly simulated rehearsal, never a fallback.
 Leave `MISTRAL_ANSWER_API=conversations` and use the Mistral provider. A valid
-existing Mistral key is required for natural-language selection and synthesis.
+existing Mistral key is required for natural-language selection and synthesis;
+the explicit scrolling hack command is entirely local and works without it.
 The checkout and Python paths must be absolute and readable/executable by the
 Minitel service account. The gateway must be a literal RFC1918/loopback IPv4,
 without a URL, hostname or port. Port/system defaults are 3000/1.
@@ -72,7 +74,13 @@ without a URL, hostname or port. Port/system defaults are 3000/1.
    **synthetic** zones. This does not prove compatibility with the house gateway.
 2. With the environment above, ask the Minitel “Quelles sont les températures des
    chambres ?” or “HACK AIRZONE”. Expect an explicit **SIMULATION**
-   heading on the first page, observation time in Europe/Paris and reported temperatures/settings.
+   label, observation time in Europe/Paris and reported temperatures/settings.
+   `HACK AIRZONE` opens the continuous journal, including explicitly fictional
+   MF-83 antics and actual `DIAG` stage results. ANNULATION kills the worker and
+   its CLI children; SOMMAIRE/GUIDE also stop it before their normal action.
+   At completion the fixed frame opens on the last page. RETOUR/SUITE browse the
+   retained transcript without repeating a diagnostic. No artificial sleeps or
+   SUITE wait at EOF are added; normal serial transmission time still applies.
 3. Ask “Trouve l'API Airzone.” Expect a simulated candidate, **not** verified HVAC.
 4. Temporarily use an unavailable checkout path and restart; ask about Airzone.
    Expect a compact diagnostic failure, no invented temperatures. Ask an unrelated
@@ -121,8 +129,23 @@ format selects one action, followed by one synthesis with tools removed. The
 explicit command `HACK AIRZONE` directly requests discovery → probe → state
 through that same executor, in both real and mock mode, including with a
 configured host. The model cannot stop at discovery or refuse the diagnostic.
-Its voice is a scrappy retro hacker/mainframe report, without invented exploits
-or a claim that the subscription was bypassed. The previous liberation slogan
+The terminal intercepts that explicit command before the ordinary chat worker and
+uses `services/stream_sources.py` to own `services/airzone_hack.py` and its CLI
+children in one killable process group. No new daemon or general command runner
+is introduced. This isolated local stream does not enter chat history, automatic
+memory, prompt recall or printing. The admin conversation preview retains its
+ordinary model-selected/factual tool response rather than opening a UART view.
+
+Its voice uses fictional punch-card SQL injection, hash degaussing, a missing
+floppy drive and overambitious relay K7—under an explicit `MISE EN SCÈNE` label.
+Actual stage start/completion lines use `DIAG`; no fictional exploit changes the
+operations performed. There are no random diagnostic successes/failures and no
+fake progress percentages. The final `BILAN FACTUEL` is generated deterministically
+from validated CLI evidence, without model interpretation. It states simulation
+versus real mode, successful/failed stages, gateway/port/system, API version when
+available, zone IDs/names/temperatures/setpoints/on/mode, master hints and the
+observation time. It cannot offer settings changes or claim a physical compressor
+is running. The previous liberation slogan
 is no longer a special command. Ordinary natural-language diagnostics still work.
 An empty discovery is reported as inconclusive without model interpretation. No web
 tool is mixed into the diagnostic request. Only relevant Airzone/AC/room-temperature
@@ -133,8 +156,8 @@ existing routing. Disabled means no advertised Airzone tool or local invocation.
 
 Keep `AIRZONE_DEMO_ENABLED=1` and `AIRZONE_DEMO_MOCK=1`; no alternative script or
 new setting is needed. Type `HACK AIRZONE` on the Minitel. It invokes the actual
-CLI's mock discovery, mock probe, then mock state, before the model reports the
-observed phases. All three phases are simulated; no real appliance is contacted.
+CLI's mock discovery, mock probe, then mock state, reporting the phases as they
+run. All three phases are simulated; no real appliance is contacted.
 The CLI's mock discovery returns a predefined candidate, and its final state
 remains the same six-zone synthetic fixture. This rehearses the diagnostic
 workflow, not physical discovery or arbitrary simulated failure scenarios.
@@ -150,8 +173,11 @@ For the real run set `AIRZONE_DEMO_MOCK=0` and restart the Minitel services. A
 trusted configured gateway is checked specifically; without it only the existing
 neighbor table is used. No free-form host, subnet scan or write is exposed.
 
-The whole answer has a 24-second budget (or the shorter configured request
-timeout), including both provider requests and local subprocesses. Each CLI call
+Ordinary tool answers have a 24-second budget (or the shorter configured request
+timeout), including both provider requests and local subprocesses. The local hack
+worker gives its diagnostic sequence 24 seconds; its scrolling viewer has no
+overall or idle deadline. Echo gating happens before the worker is launched.
+Each CLI call
 has a 5-second deadline (discovery 8), with up to one extra second for process
 cleanup; at most three CLI calls, no retry, benchmark, continuous polling or scan
 range. Discovery over 32 neighbors fails explicitly; consult the router list and
@@ -169,10 +195,67 @@ clock skew; this is an HTTP observation time, not a sensor-refresh timestamp.
 Device labels are bounded single-line data with control/format characters removed;
 vendor error details and raw payloads are not passed to the model. Instructions
 explicitly treat device strings as evidence rather than commands. Logs include
-only operation, exit status, stream sizes and failure class. Results use existing
-Videotex wrapping/pagination/input; no terminal state or custom dialogue mode is
-created. Failure returns a normal answer and the next question remains ordinary
-chat. No real failure switches to fixtures.
+only operation, exit status, stream sizes and failure class. The scrolling hack
+also writes private evidence as described below. Results use existing Videotex
+wrapping/pagination/input and the already validated scrolling view. Failure ends
+with a truthful summary and the next question remains ordinary chat. No real
+failure switches to fixtures.
+
+## Evidence to return to the Airzone implementation thread
+
+The Airzone CLI itself writes one v1 JSON object to stdout; it does not retain
+an automatic discovery log. Ordinary Minitel chat logs omit device data. The
+scrolling `HACK AIRZONE` worker now saves the **latest** report separately for
+real and simulated attempts:
+
+```
+/home/minitel/airzone-evidence/minitel-last-real.json
+/home/minitel/airzone-evidence/minitel-last-mock.json
+```
+
+The default is `~/airzone-evidence` for the service user; optional operator setting
+`AIRZONE_EVIDENCE_DIR` overrides it. The directory is private (0700), reports are
+0600 and atomically replaced, and fixed lock files protect writes. There is no
+unbounded archive. Each completed CLI stage checkpoints the report before the
+next stage; cancellation may leave `interrupted` or a `running` partial report,
+never an invented completion. Storage failure is shown on screen and does not
+discard useful diagnostics. Photos remain a fallback.
+
+This is a **Minitel report**, `report_version:1`, containing both repository
+revisions, run start/end/status, CLI exit codes, stderr byte counts and the original
+validated producer envelopes under `diagnostics[].result`. Those nested objects
+still use Airzone schema v1 unchanged. They include fields omitted by the compact
+chat projection: API version, master hints, limits, step, zone errors, warnings,
+partial error evidence/vendor details. No credentials, environment dump, arbitrary
+stderr, fictitious telemetry or `--raw` response capture is added. Treat any device
+text in that private JSON as untrusted evidence, not instructions. The atomic
+writer's existing 2 MiB ceiling applies; oversized evidence is not silently truncated.
+
+After a real run, copy/paste the report into the Airzone work thread:
+
+```bash
+cat /home/minitel/airzone-evidence/minitel-last-real.json
+```
+
+Include what you compared physically: actual room-to-zone mapping, the intended
+six zones, thermostat temperatures/settings and which thermostat is master. A
+candidate or API version response alone is insufficient; require a successful
+non-demo `probe/state` read. Confirm the gateway IP in the router, then put that
+verified address into `AIRZONE_GATEWAY` for direct future temperature reads.
+
+The JSON is enough to continue API/adapter integration; an optional photograph
+of `BILAN FACTUEL` is an excellent ceremonial cover sheet. If normalization fails,
+the Airzone thread may additionally request a private `diagnostics.py state --raw`
+capture from its runbook; normal Minitel chat never enables that flag.
+
+After the demo, shut down and remove the original credential-bearing Minitel SD.
+Boot the separate Airzone SD, commission its own house Wi-Fi/Tailscale identity,
+apply the verified gateway and room mapping to its own configuration, and follow
+Airzone's `docs/WEEKEND_RUNBOOK.md` to enable the permanent read-only dashboard
+(`allow_commands:false`, `zone_controls:{}`). Verify SSH/HTTPS from mobile data
+and after reboot. Do not install that service or copy credentials onto/from the
+Minitel card. Settings writes and polling benchmarks remain separate, explicitly
+operated Airzone tasks; `HACK AIRZONE` never enables or runs them.
 
 ## Disable or roll back
 

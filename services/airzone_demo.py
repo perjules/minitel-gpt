@@ -76,10 +76,10 @@ def clean(value, limit=80):
     return "".join(c for c in value if not unicodedata.category(c).startswith("C"))[:limit]
 
 
-def capture(argv, timeout):
+def capture(argv, timeout, *, owned_group=False):
     """Drain both pipes without unbounded communicate() buffers or shell execution."""
     with subprocess.Popen(argv, shell=False, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE, start_new_session=True) as process:
+                          stderr=subprocess.PIPE, start_new_session=not owned_group) as process:
         streams = {process.stdout: bytearray(), process.stderr: bytearray()}
         end = time.monotonic() + timeout
         try:
@@ -108,7 +108,10 @@ def capture(argv, timeout):
         finally:
             # Also retire a diagnostic's neighbor-table child on failure/timeout.
             try:
-                os.killpg(process.pid, signal.SIGKILL)
+                if owned_group:
+                    process.kill()  # The scrolling owner retires the complete worker group.
+                else:
+                    os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
 
@@ -228,8 +231,10 @@ def validate(stdout, returncode, operation, expected_host, mock, port, system_id
 
 
 class Backend:
-    def __init__(self, env=None):
+    def __init__(self, env=None, *, progress=None, owned_group=False):
         env = os.environ if env is None else env
+        self.progress, self.owned_group = progress, owned_group
+        self.evidence = []
         self.enabled = enabled(env)
         self.checkout = Path(env.get("AIRZONE_CHECKOUT", str(Path.home() / "airzone"))).expanduser()
         self.python = env.get("AIRZONE_PYTHON", "/usr/bin/python3")
@@ -245,6 +250,8 @@ class Backend:
             self.gateway = host(self.gateway)
 
     def run(self, operation, gateway, deadline):
+        if self.progress:
+            self.progress(operation, None)
         remaining = deadline - time.monotonic()
         limit = min(8 if operation == "discover" else 5, remaining - 1)
         if limit < .1:
@@ -260,10 +267,17 @@ class Backend:
             argv += ["--mock"]
             if operation == "discover" and not gateway:
                 argv += ["--host", "127.0.0.1"]
-        code, stdout, stderr = capture(argv, min(remaining, limit + 1))
+        code, stdout, stderr = capture(argv, min(remaining, limit + 1),
+                                       **({"owned_group": True} if self.owned_group else {}))
         log.info("airzone operation=%s exit=%d stdout_bytes=%d stderr_bytes=%d", operation, code, len(stdout), len(stderr))
         expected = None if operation == "discover" else gateway or ("127.0.0.1" if self.mock else None)
-        return validate(stdout, code, operation, expected, self.mock, self.port, self.system_id)
+        result = validate(stdout, code, operation, expected, self.mock, self.port, self.system_id)
+        if self.progress:
+            # Private evidence keeps original v1 fields, including API version,
+            # master hints/limits and vendor errors; never interpret them as code.
+            self.evidence.append({"exit_code": code, "stderr_bytes": len(stderr), "result": json.loads(stdout)})
+            self.progress(operation, result)
+        return result
 
     def execute(self, name, arguments, *, deadline, full_diagnostic=False):
         if not self.enabled:

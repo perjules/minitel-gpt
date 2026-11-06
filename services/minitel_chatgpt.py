@@ -25,6 +25,8 @@ from dotenv import load_dotenv
 
 try:  # Support both systemd's direct script and package imports in tests.
     from . import (
+        airzone_demo,
+        airzone_hack,
         answer_diagnostics,
         calculator,
         christmas_list,
@@ -51,6 +53,8 @@ except ImportError:
     # Direct systemd entry point: keep one identity for exception/session classes.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from services import (
+        airzone_demo,
+        airzone_hack,
         answer_diagnostics,
         calculator,
         christmas_list,
@@ -1685,6 +1689,18 @@ def run_session(t):
             if recall_eligible and terminal_diagnostics.scroll_command(question):
                 diagnostic = terminal_diagnostics.test_scroll()
                 result = terminal_scrolling.show(t, diagnostic["display"], language)
+                if result == "guide":
+                    show_guide(t, language)
+                if result != "done":
+                    action = result
+                    break
+                continue
+
+            if recall_eligible and airzone_demo.enabled() and airzone_demo.hack_command(question):
+                if pending is not None and pending[0].is_alive():
+                    show_response(t, "Requête précédente en cours. Réessayez bientôt.", language)
+                    continue
+                result = stream_sources.show(t, airzone_hack.source(), language)
                 if result == "guide":
                     show_guide(t, language)
                 if result != "done":
