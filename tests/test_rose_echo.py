@@ -103,7 +103,7 @@ def test_selection_exit_reentry_and_ordinary_input_keep_one_echo(hardware):
     model = Mock()
     assert rose.run(term, "", model) == ("retour", None)
     model.ready.assert_not_called()  # Left the character list before a model call.
-    assert serial.echo == [(c, 0) for c in "fixture"] + [("F", 1)]
+    assert serial.echo == [(c, 0) for c in "fixture"] + [("F", 0)]
     assert serial.routes == before
     serial.keys.extend(submitted("ABC"))
     assert chat.read_question(term) == ("ABC", "envoi")
@@ -113,7 +113,7 @@ def test_selection_exit_reentry_and_ordinary_input_keep_one_echo(hardware):
     assert rose.gate(term)[0]
     assert rose.welcome(term) == ("femme", "submit")
     assert rose.roster(term, "femme") == ("Jacqueline", "submit")
-    assert serial.echo[-len("FJacqueline"):] == [(c, 1) for c in "FJacqueline"]
+    assert serial.echo[-len("FJacqueline"):] == [(c, 0) for c in "FJacqueline"]
     assert serial.routes == before
 
 

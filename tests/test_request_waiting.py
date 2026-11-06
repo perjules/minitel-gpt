@@ -40,8 +40,7 @@ class WaitingTests(unittest.TestCase):
         with patch.object(chat, "call_answer", side_effect=blocked):
             pending = chat.start_answer("", history, "en", ("conversations", True, 60), "")
             self.assertTrue(entered.wait(1))
-            term = object.__new__(chat.Term)
-            term.s = FakeSerial(fn(chat.K_SOMMAIRE))
+            term = chat.Term(FakeSerial(fn(chat.K_SOMMAIRE)))
             self.assertEqual(chat.wait_answer(term, pending, 60), (None, "sommaire"))
             self.assertTrue(pending[0].is_alive())
             release.set()

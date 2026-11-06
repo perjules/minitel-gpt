@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from services import minitel_chatgpt as chat
+from services import videotex
 
 
 class EndOfInput(Exception):
@@ -112,28 +113,51 @@ def fn(code):
     return bytes([chat.SEP, code])
 
 
+def display_units(data):
+    """Decode native glyphs as one cell while retaining controls for test models."""
+    result = []
+    index = 0
+    while index < len(data):
+        if data[index] == videotex.SS2 and index + 1 < len(data):
+            length = 3 if data[index + 1] in videotex.ACCENTS else 2
+            result.append(videotex.decode(data[index:index + length]))
+            index += length
+        else:
+            result.append(data[index])
+            index += 1
+    return result
+
+
 def screen_text(data):
-    """Strip colour/cursor controls, retaining line breaks and visible text."""
-    visible = bytearray()
-    skip = 0
-    escape = False
-    for code in data:
-        if skip:
-            skip -= 1
-        elif escape:
-            skip = code - 0x38 if code in (0x39, 0x3A, 0x3B) else 0
-            escape = False
-        elif code == 0x1F:
-            skip = 2
-        elif code == chat.ESC:
-            escape = True
-        elif code in (chat.CR, chat.LF) or 0x20 <= code <= 0x7E:
+    """Visible transmission transcript, including native glyphs and REP runs."""
+    visible = []
+    units = display_units(data)
+    index = 0
+    last = " "
+    while index < len(units):
+        code = units[index]
+        index += 1
+        if isinstance(code, str):
+            last = code
             visible.append(code)
-    return visible.decode("ascii")
+        elif code == chat.ESC and index < len(units):
+            command = units[index]
+            index += 1 + (command - 0x38 if command in (0x39, 0x3A, 0x3B) else 0)
+        elif code == 0x1F:
+            index += 2
+        elif code == 0x12 and index < len(units):
+            visible.append(last * max(0, units[index] - 0x40))
+            index += 1
+        elif code in (chat.CR, chat.LF) or 0x20 <= code <= 0x7E:
+            visible.append(chr(code))
+            if code >= 0x20:
+                last = chr(code)
+    return "".join(visible)
 
 
 def render_videotex(data):
     """Small screen model: page/rouleau mode, FF/RS, CR/LF and column wrap."""
+    data = display_units(data)
     screen = [""] * 24
     row = column = 0
     scrolling = False
@@ -152,7 +176,14 @@ def render_videotex(data):
     while index < len(data):
         code = data[index]
         index += 1
-        if code == 0x1B:
+        if isinstance(code, str):
+            current = screen[row].ljust(column + 1)
+            screen[row] = current[:column] + code + current[column + 1:]
+            column += 1
+            if column == 40:
+                column = 0
+                down()
+        elif code == 0x1B:
             command = data[index]
             index += 1
             if command == 0x3A:

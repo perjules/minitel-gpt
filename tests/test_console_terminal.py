@@ -62,7 +62,7 @@ class ConsoleTests(unittest.TestCase):
             with self.assertRaises(KeyboardInterrupt):
                 key_bytes(key)
         self.assertEqual(key_bytes(curses.KEY_UP), b"")
-        self.assertEqual(key_bytes("é"), b"")
+        self.assertEqual(key_bytes("é"), b"\x19\x42e")
 
     def test_real_loop_startup_paging_history_calculator_and_reset(self):
         # SOMMAIRE -> boot -> SUITE -> blank username/shared French. Page a long
@@ -121,3 +121,18 @@ class ConsoleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_can_clears_only_tail_with_current_style_and_never_moves_or_wraps():
+    from services.terminal_display import STANDARD
+    screen = Screen()
+    screen.write(STANDARD.position(24) + b"LEFT STAYS|old tail" + b"\x1b\x5d\x1b\x42")
+    screen.write(STANDARD.position(24, 11) + b"\x1b\x5d\x1b\x42")
+    before = (screen.row, screen.column)
+    screen.write(b"\x18")
+    assert (screen.row, screen.column) == before == (23, 10)
+    assert "".join(screen.rows[-1]) == "LEFT STAYS" + " " * 30
+    assert screen.styles[-1][10:] == [(2, True, 0)] * 30
+    assert all("".join(row).strip() == "" for row in screen.rows[:-1])
+    screen.write(b"NEW")
+    assert "".join(screen.rows[-1]).startswith("LEFT STAYSNEW")

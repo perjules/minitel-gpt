@@ -440,6 +440,59 @@ Use a fresh admin preview after fetching, since the confirmed commit may change.
 If deployment still fails, inspect `sudo journalctl -u minitel-deploy -n 100
 --no-pager`; a generic `CalledProcessError` does not identify the failed step.
 
+### Recovering a checkout/installed-branch mismatch
+
+Owner-confirmed recovery on 5 November 2026 for:
+
+```text
+Deployment failed (RuntimeError): Checkout differs from installed branch
+```
+
+This branch-switch preflight compares the checkout's current Git branch with
+`runtime.json`'s installed branch. A mismatch refuses the deployment before
+preparation/activation; even selecting `develop` in the admin can fail. The update
+path has the equivalent error `Checkout branch differs from the installed update
+branch`. This establishes inconsistent branch state, not why it became inconsistent.
+
+To deliberately recover onto `develop`, inspect the checkout first:
+
+```bash
+cd /home/minitel/minitel-gpt
+git status --short --branch
+```
+
+If there are modified tracked files, stop and preserve/review them before
+continuing. With a clean tracked tree:
+
+```bash
+git switch develop &&
+git pull --ff-only origin develop &&
+sudo bash scripts/install_runtime.sh --branch develop
+```
+
+Use the checkout's runtime installer to reconcile source, protected helper,
+environment and installed branch metadata. This preserves local configuration,
+credentials, user data and selected extras. The worker survives an SSH disconnect;
+Wi-Fi/services may restart during activation. Wait for completion and verify:
+
+```bash
+cat /var/lib/minitel-gpt/deployment.json
+sudo systemctl is-active minitel-chatgpt admin-ui
+```
+
+Expected: phase `ready` and both services `active`. On failure inspect:
+
+```bash
+sudo journalctl -u minitel-runtime-install -n 80 --no-pager
+```
+
+Do not manually edit `runtime.json`, force-switch/reset Git, delete local files or
+relax deployment preflight to hide the mismatch. If Git refuses the fast-forward
+or reports a collision, inspect that specific state rather than overriding it.
+For normal future branch changes use the admin deployment workflow. Standalone
+diagnostics should be extracted to a temporary file without switching the deployed
+checkout; [INTERACTION_PROBE.md](INTERACTION_PROBE.md) gives an exact procedure.
+
 ## Multi-user compatibility
 
 See [USERS.md](USERS.md). Once the encrypted account bundle exists, code targets

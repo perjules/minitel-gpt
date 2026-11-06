@@ -32,6 +32,7 @@ class KeyTerm:
     def __init__(self, keys):
         self.keys = iter(keys)
         self.rows = []
+        self.view = None
         self.s = Mock()
         self.s.local_echo = True
 
@@ -39,7 +40,7 @@ class KeyTerm:
         return next(self.keys)
 
     def clear(self):
-        pass
+        self.view = None
 
     def w(self, value):
         self.rows.append(value)
@@ -538,7 +539,7 @@ class CancellationTests(unittest.TestCase):
             self.assertNotIn("Connexion discrète", str(term.rows))
             if key == chat.K_SUITE:
                 self.assertIn("Total", str(term.rows))
-                self.assertIn("facture telephonique", str(term.rows))
+                self.assertIn("facture téléphonique", str(term.rows))
 
     def test_complete_receipt_auto_scroll_final_block_visible(self):
         uart = startup.FakeSerial(b"")
@@ -548,7 +549,7 @@ class CancellationTests(unittest.TestCase):
         screen, scrolling = startup.render_videotex(uart.output)
         self.assertFalse(scrolling)
         self.assertIn("Total", "\n".join(screen))
-        self.assertIn("facture telephonique.", "\n".join(screen))
+        self.assertIn("facture téléphonique.", "\n".join(screen))
         self.assertTrue(screen[0].startswith("Total"))
 
     def test_outstanding_worker_is_returned_for_main_loop_overlap_guard(self):
@@ -602,7 +603,7 @@ class IntegrationTests(unittest.TestCase):
             output = str(term.rows)
             self.assertIn("Annuaire central", output)
             self.assertIn("Robert", output)
-            self.assertIn("Derniere connexion : 29/02/1984", output)
+            self.assertIn("Dernière connexion : 29/02/1984", output)
 
     def test_unknown_name_classifies_once_then_binds_matching_profile_and_alias(self):
         original_session = rose.Session
@@ -630,9 +631,9 @@ class IntegrationTests(unittest.TestCase):
 
     def test_unclear_or_failed_name_resolution_never_starts_persona_or_bill(self):
         for result, fragment in [(rose.Reply("unclear"), 'Le nom "Camille" est introuvable dans le registre central.'),
-                                 (rose.Reply("unexpected"), "ne repond pas"),
-                                 (rose.Reply(status="error"), "ne repond pas"),
-                                 (rose.Reply(status="moderation"), "a refuse la mise en relation")]:
+                                 (rose.Reply("unexpected"), "ne répond pas"),
+                                 (rose.Reply(status="error"), "ne répond pas"),
+                                 (rose.Reply(status="moderation"), "a refusé la mise en relation")]:
             model = Mock(ready=lambda: True)
             model.classify_name.return_value = result
             term = KeyTerm(typed("fixture"))
@@ -767,8 +768,8 @@ class IntegrationTests(unittest.TestCase):
         with patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}), patch.object(terminal, "show_bill") as billing:
             terminal.run(term, "", model)
         output = str(term.rows)
-        self.assertIn("Acces refuse", output)
-        self.assertIn("services centraux d'accreditation", output)
+        self.assertIn("Accès refusé", output)
+        self.assertIn("services centraux d'accréditation", output)
         self.assertIn("L'enthousiasme ne vaut pas", output)
         self.assertNotIn("wrong-password", output)
         self.assertNotIn("Correspondances confidentielles", output)
@@ -947,7 +948,7 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(len(receipts), 1)
             self.assertEqual(receipts[0].messages, int(bool(alias)))
             self.assertIn("Mot d'arret", str(term.rows))
-            self.assertIn("France Telecom", str(term.rows))
+            self.assertIn("France Télécom", str(term.rows))
             self.assertNotIn("fixture", str(term.rows))
         # Structured rejection goes straight to bill, with no persona response.
         model = Mock(ready=lambda: True, return_value=rose.Reply(status="moderation"))
@@ -1040,11 +1041,13 @@ def test_evaluation_biographies_fit_every_roster_page(gender):
         term = KeyTerm(keys)
         assert terminal.roster(term, gender) == (None, "retour")
         assert "[Réponse abrégée]" not in term.rows
-        assert f"Catalogue {page + 1}/{pages}" in term.rows
+        assert len(term.view.pages) == 1
+        shown = term.view.pages[0]
+        assert f"Catalogue {page + 1}/{pages}" in shown
         for person in people[page * 2:page * 2 + 2]:
-            assert chat.safe_display(person["name"]) in term.rows
+            assert chat.safe_display(person["name"]) in shown
             for line in chat.wrap(chat.safe_display(person["bio"])):
-                assert line in term.rows
+                assert line in shown
                 assert len(line) <= 39
 
 

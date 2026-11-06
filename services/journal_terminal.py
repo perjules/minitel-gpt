@@ -11,6 +11,7 @@ from . import (
     rose_terminal,
     terminal_documents,
     terminal_link,
+    videotex,
 )
 
 
@@ -53,11 +54,11 @@ def read_field(term, session):
                 buffer.pop()
                 if not secret:
                     term.w(b"\x08 \x08")
-        elif kind == "char" and 0x20 <= code <= 0x7E:
+        elif kind == "char" and videotex.input_character(code):
             if len(buffer) < 2000 and not overflow:
                 buffer.append(chr(code))
                 if not secret:
-                    term.w(bytes([code]))
+                    term.w(chr(code))
             else:
                 buffer.clear()
                 overflow = True
