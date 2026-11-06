@@ -137,3 +137,24 @@ de fond. Le champ de saisie a du texte blanc sur fond gris ; un terminal console
 16 couleurs ou plus utilise le gris sombre de sa palette, sinon le rendu reste
 approximatif. Le clavier console transmet les accents français par les mêmes
 séquences que le Minitel, sans modifier la casse des touches.
+
+## Défilement continu isolé
+
+Dans le chat ordinaire, **TEST SCROLL** affiche 54 lignes locales en mode rouleau,
+puis restaure directement la dernière page (3/3). Ctrl-U / ANNULATION interrompt
+le défilement mais conserve tout ce document préchargé. Ctrl-R / RETOUR et
+Ctrl-N / SUITE retrouvent ensuite leur rôle de pagination. Aucun appel API ni
+enregistrement du diagnostic ; la console défile très vite car elle ne simule
+pas la liaison 1200 bauds. Voir [TERMINAL_SCROLLING.md](TERMINAL_SCROLLING.md)
+pour le contrat d'entrée et la validation physique.
+
+
+## Producteurs en flux
+
+**TEST STREAM** lance un moniteur Python local (54 lignes à une seconde d'intervalle).
+**STREAM votre question** utilise Mistral en flux, sans contexte personnel ni mémoire.
+**STREAM WEB votre recherche** active la recherche hébergée si elle est configurée.
+Ctrl-U / ANNULATION arrête réellement le producteur local, puis le cadre habituel
+revient sur la dernière page. Ctrl-R / RETOUR et Ctrl-N / SUITE paginent le texte
+reçu. Les deux commandes STREAM sont de vrais appels API facturés ; TEST STREAM
+reste local. Voir [STREAM_SOURCES.md](STREAM_SOURCES.md).

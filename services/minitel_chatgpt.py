@@ -30,6 +30,7 @@ try:  # Support both systemd's direct script and package imports in tests.
         deployment,
         gmail_mail,
         io_limits,
+        llm_streaming,
         mainframe_update,
         memory_session,
         mistral_answers,
@@ -37,9 +38,11 @@ try:  # Support both systemd's direct script and package imports in tests.
         pronote,
         pronote_answers,
         pronote_mode,
+        stream_sources,
         terminal_diagnostics,
         terminal_display,
         terminal_link,
+        terminal_scrolling,
         user_services,
         videotex,
     )
@@ -52,6 +55,7 @@ except ImportError:
         deployment,
         gmail_mail,
         io_limits,
+        llm_streaming,
         mainframe_update,
         memory_session,
         mistral_answers,
@@ -59,9 +63,11 @@ except ImportError:
         pronote,
         pronote_answers,
         pronote_mode,
+        stream_sources,
         terminal_diagnostics,
         terminal_display,
         terminal_link,
+        terminal_scrolling,
         user_services,
         videotex,
     )
@@ -693,6 +699,13 @@ class Term:
                 self.keyboard_activity()
             return ('char', b)
         return ('timeout', None)
+
+    def poll_key(self):
+        """Check keys without an empty serial/curses read delaying each row."""
+        self.poll_presence()
+        if not self._input_bytes and self.io(getattr, self.s, "in_waiting", None) == 0:
+            return "timeout", None
+        return self.read_key(.001)
 
 
 def wrap(text, width=COLS):
@@ -1672,6 +1685,49 @@ def run_session(t):
                 t.view.status("TEST UNICODE - local, sans API")
                 continue
 
+            if recall_eligible and terminal_diagnostics.scroll_command(question):
+                diagnostic = terminal_diagnostics.test_scroll()
+                result = terminal_scrolling.show(t, diagnostic["display"], language)
+                if result == "guide":
+                    show_guide(t, language)
+                if result != "done":
+                    action = result
+                    break
+                continue
+
+            stream_test = recall_eligible and terminal_diagnostics.stream_command(question)
+            stream_request = llm_streaming.command(question) if recall_eligible else None
+            if stream_test or stream_request is not None:
+                if pending is not None and pending[0].is_alive():
+                    show_response(t, "Requête précédente en cours. Réessayez bientôt.", language)
+                    continue
+                if stream_test:
+                    source = stream_sources.ProcessSource(
+                        [sys.executable, "-u", "-m", "services.terminal_diagnostics", "--stream-demo"],
+                        cwd=Path(__file__).resolve().parents[1])
+                elif not stream_request["prompt"]:
+                    show_response(t, "STREAM votre question\nSTREAM WEB votre recherche\nTEST STREAM : moniteur local", language)
+                    continue
+                elif PROVIDER != "mistral" or not MISTRAL_KEY or MISTRAL_KEY == "...":
+                    show_response(t, "Flux API indisponible : Mistral doit être configuré.", language)
+                    continue
+                elif stream_request["web"] and (options[0] != "conversations" or not options[1]):
+                    show_response(t, "Recherche web en flux désactivée dans la configuration.", language)
+                    continue
+                else:
+                    # Isolated public prompt: no personal history, recall, local
+                    # tools, memory writes or retry of a submitted paid request.
+                    source = llm_streaming.mistral(
+                        [{"role": "user", "content": stream_request["prompt"]}], language,
+                        MISTRAL_KEY, MISTRAL_MODEL, api=options[0], web_search=stream_request["web"])
+                result = stream_sources.show(t, source, language)
+                if result == "guide":
+                    show_guide(t, language)
+                if result != "done":
+                    action = result
+                    break
+                continue
+
             memory_control = memory_session.household_command(question)
             if memory_control:
                 if memory_control == "lock":
@@ -1976,7 +2032,9 @@ def run_session(t):
                     t, answer, language, title="3615 IA / NOEL" if response.get("christmas") else "3615 IA / MEMOIRE")
             else:
                 result = (show_calculator_scene(t, response["scene"], language)
-                          if response and response.get("scene") else show_response(t, safe_display(answer), language))
+                          if response and response.get("scene") else
+                          terminal_scrolling.show(t, answer, language) if response and response.get("scrolling") else
+                          show_response(t, safe_display(answer), language))
             if response and response.get('scene') and result == 'done':
                 show_response(t, safe_display(answer), language)
             if response and response.get('scene') and result != 'done':

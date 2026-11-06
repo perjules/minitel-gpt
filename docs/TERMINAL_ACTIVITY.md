@@ -1,6 +1,9 @@
 # Terminal activity feedback and future autonomous tasks
 
-Design decisions recorded 5 November 2026. **Planning only; no runtime changes.**
+Design decisions recorded 5 November 2026. **WP-A remains planning only.**
+On 6 November the owner authorized the isolated full-screen scrolling primitive,
+implemented in [TERMINAL_SCROLLING.md](TERMINAL_SCROLLING.md). This supersedes the
+old WP-B hold on that display primitive; task runners/provider streams remain future work.
 Nearer priority: short, truthful activity messages during existing requests.
 Later exploration: a full-screen activity view for a concrete autonomous task.
 Neither postpones the pending hardware experiment or clearing/compression/recall
@@ -210,5 +213,6 @@ autonomous runner, durable task store, new command vocabulary or menu system.
   Conversations route before work; this note authorizes no opportunistic migration.
 - [Existing terminal UX and recovery evidence](TERMINAL_UX.md).
 
-No progress implementation, new tool, provider request, prompt/personality edit
-or long-task runtime is included in this documentation change.
+The original note added no progress implementation, provider request or long-task
+runtime. The later scrolling primitive and its local TEST SCROLL diagnostic are
+documented separately; they do not implement WP-A or a task runner.

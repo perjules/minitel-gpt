@@ -130,7 +130,8 @@ isolation, native case acknowledgement/fallback/cleanup, mixed-case hidden
 password entry, console bypass and authenticated admin persistence/restarts.
 The physical acceptance procedure is in
 [TERMINAL_UX_PLAN.md](TERMINAL_UX_PLAN.md#resume-checklist). No accent codec or
-activity/scrolling behavior is added by these packages.
+activity/scrolling behavior was added by those original packages. Later French
+G2 and scrolling checks are documented below.
 
 Rose's fixed-frame adapter has focused checks in `tests/test_rose_display.py`:
 visible gray input, CAN transitions, long replies, pinned stop word, local paging,
@@ -144,9 +145,27 @@ French accents versus isolated combining marks, and exclusion from API requests,
 conversation history, memory and prompt recall. The SSH module entry point only
 prints its source fixture; it does not open the serial port.
 
+`tests/test_terminal_scrolling.py` covers the explicit result flag and local
+TEST SCROLL command, native rouleau, EOF without a key, static/partial-stream
+stop semantics, indefinite quiet streams, split chunks/accents, source and serial
+failures, Ctrl-C cleanup, echo gating, direct last-page restoration, normal
+paging/editing afterward, nonblocking console keys, and bounded 1200/7E1 backlog
+with presence probes. It uses synthetic text/queues and fake UARTs only. Physical
+acceptance remains separate in [TERMINAL_SCROLLING.md](TERMINAL_SCROLLING.md).
+
 `tests/test_videotex_text.py` covers native French G2: split/dead accents across
 polling timeouts, protocol replies, immediate function exits, unknown sequences,
 shared/private readers, no secret echo, uppercase fallback, encoded byte budgets,
 console key round trips and white-on-gray C2 zone preservation through editing,
 CAN and paging. Historical byte-stripping test helpers now decode SS2 rather
 than treating its selector B as visible text. No live UART/API is used.
+
+
+## Owned streaming sources
+
+Tests test_stream_sources.py and test_stream_lifecycle.py cover process pipes/UTF-8,
+TERM/KILL and descendants, quiet/blocked sources, fragmented SSE, Mistral final
+validation/citations, hidden reasoning exclusion, partial/failure paths and terminal
+recovery. HTTP integration uses only a synthetic loopback server, never a real
+provider. Source/stream commands bypass ordinary history, memory and local tools.
+See [STREAM_SOURCES.md](STREAM_SOURCES.md) for physical checks.
