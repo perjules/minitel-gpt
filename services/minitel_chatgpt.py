@@ -1748,7 +1748,7 @@ def run_session(t):
                             t._pending = pending
                             connected, result = wait_answer(t, pending, 220)
                             if connected is not None:
-                                result = show_response(t, connected['display'], language)
+                                result = airzone_connect.show_summary(t, connected['display'], language)
                             elif result not in {'sommaire', 'guide'}:
                                 result = show_response(t, 'Connexion non confirmée. Vérifiez le service par SSH.', language)
                     else:

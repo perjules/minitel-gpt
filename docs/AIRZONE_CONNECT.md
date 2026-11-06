@@ -6,6 +6,21 @@ It is never an LLM tool. `HACK AIRZONE` keeps its detection/photo/.env pairing.
 Mock OUI reports simulation; no sudo, config, service or .env changes occur.
 ANNULATION kills diagnostics as usual. NON/empty/exit makes no service change.
 
+After OUI, mock and real runs end on a dedicated **ADRESSES DU DASHBOARD** page:
+the configured Tailscale URL (including its actual HTTPS port) and the installed
+loopback URL, labelled **Local - sur le Pi uniquement**. Addresses come from the
+existing deployment manifest; real success also supplies its verified configured
+origin. Missing/invalid configuration is reported as unavailable, never replaced
+with fixture URLs or guessed ports. A non-Tailscale configured origin is labelled
+as such rather than asserted to be a tailnet address. URLs are configured entry
+points, not a claim that remote HTTPS has been independently tested.
+
+The installed dashboard binds loopback; its local URL is for a browser running
+on the Pi. Direct Wi-Fi/LAN dashboard access is not exposed by this integration.
+No listener, firewall, Serve or router configuration changes are made. Diagnostic
+and factual-summary pages remain accessible with RETOUR/SUITE; both full addresses
+appear together on the final page, with ordinary chat input immediately available.
+
 Both applications can run on the current Minitel SD, as Julian now explicitly
 authorizes. SD migration, credential transfer and service removal are his separate
 operations; no cloning, migration or card scrub is automated here.

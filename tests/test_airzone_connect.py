@@ -10,7 +10,8 @@ import pytest
 import test_terminal_startup as startup
 from test_airzone_demo import envelope
 from test_rose_echo import submitted
-from test_terminal_display import VisibleUART
+from test_terminal_display import VisibleUART, assert_gray_input
+from test_terminal_startup import fn
 
 from scripts import airzone_connect as root
 from services import airzone_connect as connect
@@ -20,6 +21,13 @@ from services import minitel_chatgpt as chat
 from services import terminal_display
 
 TARGET = {'host': '192.168.1.50', 'port': 3000, 'system_id': 1}
+
+
+@pytest.fixture(autouse=True)
+def address_manifest(tmp_path, monkeypatch):
+    path = tmp_path / 'dashboard-deployment.json'
+    monkeypatch.setattr(connect, 'DASHBOARD_DEPLOYMENT', path)
+    return path
 
 
 @pytest.fixture
@@ -157,13 +165,17 @@ def test_root_reuses_actual_cli_contract_and_fixed_read_only_invocation(tmp_path
     assert argv[6] == 'state' and '--mock' not in argv and budget == 8
 
 
-def test_helper_is_fixed_and_writes_env_only_on_confirmed_success(tmp_path, monkeypatch):
-    result = {'ok': True, 'host': TARGET['host'], 'zones': 6, 'origin': 'https://pi.example:8443'}
+def test_helper_is_fixed_and_writes_env_only_on_confirmed_success(tmp_path, monkeypatch, address_manifest):
+    origin = 'https://pi.family.ts.net:8443'
+    address_manifest.write_text(json.dumps({'origin': origin, 'port': 8081}))
+    result = {'ok': True, 'host': TARGET['host'], 'zones': 6, 'origin': origin}
     run = Mock(return_value=SimpleNamespace(returncode=0, stdout=json.dumps(result).encode()))
     monkeypatch.setattr(connect.subprocess, 'run', run)
     monkeypatch.setattr(hack, 'ROOT', tmp_path)
     text = connect.activate(TARGET)['display']
     assert '6 zones' in text and 'Commandes HVAC désactivées' in text
+    assert 'Tailnet (URL configurée)' in text and origin in text and 'http://127.0.0.1:8081' in text
+    assert 'http://192.168.1.50:8081' not in text
     assert 'AIRZONE_GATEWAY=192.168.1.50' in (tmp_path / '.env').read_text()
     assert run.call_args.args[0] == ['/usr/bin/sudo', '-n', '/usr/local/libexec/minitel-airzone-connect']
     assert run.call_args.kwargs['shell'] is False and run.call_args.kwargs['timeout'] == 210
@@ -184,17 +196,26 @@ def test_failure_or_bad_receipt_never_saves_gateway(tmp_path, monkeypatch, resul
 
 
 @pytest.mark.parametrize('mock,reply', [(True, 'OUI'), (False, 'NON'), (False, 'OUI')])
-def test_french_confirmation_and_mock_do_not_activate_service(monkeypatch, mock, reply):
+def test_french_confirmation_and_mock_do_not_activate_service(monkeypatch, mock, reply, address_manifest):
     monkeypatch.setenv('AIRZONE_DEMO_ENABLED', '1')
     monkeypatch.setattr(hack, 'verified_state', Mock(return_value=envelope(real=not mock)))
     activate = Mock(return_value={'display': 'ACTUAL RESULT'})
     monkeypatch.setattr(connect, 'activate', activate)
+    address_manifest.write_text(json.dumps({'origin': 'https://pi.family.ts.net:8443', 'port': 8081}))
     uart = VisibleUART()
     term = chat.Term(uart)
     terminal_display.View(term, 'PHOTO SUMMARY').install()
     uart.keys.extend(submitted(reply))
     pending, action = connect.confirm(term, Mock())
-    assert action == 'done' and term.view.text == 'PHOTO SUMMARY'
+    assert action == 'done' and term.view.text.startswith('PHOTO SUMMARY')
+    if mock and reply == 'OUI':
+        assert 'https://pi.family.ts.net:8443' in term.view.text
+        assert 'http://127.0.0.1:8081' in term.view.text
+        assert term.view.page == len(term.view.pages) - 1
+        assert 'SIMULATION' in term.view.notice
+        assert not (address_manifest.parent / '.env').exists()
+    else:
+        assert term.view.text == 'PHOTO SUMMARY'
     if pending is not None:
         pending[0].join(1)
         assert pending[1].get_nowait() == ({'display': 'ACTUAL RESULT'}, None)
@@ -274,3 +295,58 @@ def test_confirmed_main_loop_activation_uses_result_and_normal_chat_recovers(mon
     assert [call[1][-1]['content'] for call in calls] == ['FOLLOW UP']
     assert 'connect airzone' not in str(helper.memories[0].record.mock_calls)
     assert term is not None
+
+
+@pytest.mark.parametrize('metadata', [None, [], {'origin': 'https://pi.ts.net/evil\x1b', 'port': True},
+                                    {'origin': 'https://pi.ts.net:99999', 'port': 70000},
+                                    {'origin': 'https://user:pass@pi.ts.net', 'port': '8081'}])
+def test_missing_or_invalid_address_configuration_never_fabricates_urls(address_manifest, metadata):
+    if metadata is not None:
+        address_manifest.write_text(json.dumps(metadata))
+    result = connect.dashboard_addresses()
+    assert 'Tailnet : adresse non déterminée.' in result and 'Adresse indisponible.' in result
+    assert '8081' not in result and '\x1b' not in result and 'pass@' not in result
+
+
+@pytest.mark.parametrize('bad', ['oversized', 'invalid_json', 'symlink', 'fifo'])
+def test_unavailable_or_unsafe_manifest_does_not_block_summary(address_manifest, bad):
+    import os
+    if bad == 'oversized':
+        address_manifest.write_text(json.dumps({'origin': 'https://pi.ts.net', 'port': 8081, 'extra': 'x' * 4096}))
+    elif bad == 'invalid_json':
+        address_manifest.write_text('not JSON')
+    elif bad == 'symlink':
+        address_manifest.symlink_to(address_manifest.parent / 'missing')
+    else:
+        os.mkfifo(address_manifest)
+    assert 'Adresse indisponible.' in connect.dashboard_addresses()
+
+
+def test_verified_origin_survives_missing_manifest_and_custom_origin_is_not_claimed_tailnet(address_manifest):
+    result = connect.dashboard_addresses('https://pi.family.ts.net:8443')
+    assert 'https://pi.family.ts.net:8443' in result and 'Adresse indisponible.' in result
+    address_manifest.write_text(json.dumps({'origin': 'http://127.0.0.1:8081', 'port': 8081}))
+    result = connect.dashboard_addresses()
+    assert 'Tailnet : adresse non déterminée.' in result and 'URL configurée :' in result
+
+
+def test_final_page_shows_both_complete_urls_and_diagnostic_pages_remain_navigable(address_manifest):
+    origin = 'https://minitel-mainframe.family-network.ts.net:8443'
+    uart = VisibleUART()
+    term = chat.Term(uart)
+    original = '\n'.join(f'DIAGNOSTIC {i:02d}' for i in range(55))
+    terminal_display.View(term, original).install()
+    address_manifest.write_text(json.dumps({'origin': origin, 'port': 8081}))
+    text = connect.dashboard_addresses()
+    assert connect.show_summary(term, 'SIMULATION\n\n' + text) == 'done'
+    assert term.view.text.startswith(original)
+    assert term.view.page == len(term.view.pages) - 1
+    page = ''.join(term.view.pages[term.view.page])
+    assert origin in page and 'http://127.0.0.1:8081' in page
+    assert 'ADRESSES DU DASHBOARD' in page
+    assert_gray_input(uart)
+    last = term.view.page
+    uart.keys.extend(fn(chat.K_RETOUR) + submitted('FOLLOW UP'))
+    assert chat.read_question(term) == ('FOLLOW UP', 'envoi')
+    assert term.view.page == last - 1
+    assert_gray_input(uart)
