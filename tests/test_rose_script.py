@@ -111,7 +111,7 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(calls[-1][-1]["content"], "Encore")
         self.assertTrue(any(e["event"] == "interactive_start" for e in events))
         self.assertEqual([e["text"] for e in events if e.get("source") == "interactive"], ["Encore", "RETOUR"])
-        self.assertIn("Reponse visible", str(term.rows))
+        self.assertIn("Réponse visible", str(term.rows))
         self.assertNotIn("Mot d'arret", str(term.rows))
         self.assertFalse(sessions[0].active)
         self.assertEqual(sessions[0].history, [])

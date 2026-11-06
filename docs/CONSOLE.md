@@ -41,7 +41,7 @@ puis Entrée permet de changer de nom, sans rejouer le démarrage. RETOUR quitte
 console CALC ou interrompt son spectacle; dans PRONOTE, il quitte le mode ou
 interrompt la consultation. Dans le lecteur paginé, RETOUR revient à la page
 précédente ; CORRECTION efface un caractère. Tapez les commandes applicatives (`MAIL`, `CALC`, `ANNULER`, etc.)
-puis Entrée. La saisie accepte les caractères ASCII comme la boucle actuelle.
+puis Entrée. La saisie accepte les caractères ASCII et le petit répertoire français G2 du terminal.
 
 ## Ce qui est partagé
 
@@ -49,7 +49,7 @@ La console fournit seulement un transport clavier/écran à `Term`; elle appelle
 `minitel_chatgpt.run` et son décodeur de touches réels. Elle utilise les mêmes
 presets, `.env`, fichiers PRONOTE, mémoire, historique, services AI, routage,
 sources, pages et règles de confirmation. Elle reproduit le texte réellement
-émis, après conversion ASCII, sur un écran de 40 × 24 cellules, avec les modes
+émis, après encodage Vidéotex (ASCII et caractères français G2), sur un écran de 40 × 24 cellules, avec les modes
 page et défilement. Elle conserve les pauses applicatives et les délais réseau.
 
 Le positionnement absolu, les niveaux de gris (approximés par dim/bold) et
@@ -131,3 +131,9 @@ Le rappel est désactivé dans les fonctionnalités, saisies privées et confirm
 Seules les requêtes de chat ordinaires ayant abouti sont conservées, sans doublons
 consécutifs. SOMMAIRE, LOGOUT, expiration et déconnexion effacent cet historique.
 Il ne faut pas confondre ce rappel local avec l'historique conversationnel stocké.
+
+Depuis le 6 novembre, le modèle console décode SS2 et les délimiteurs de couleur
+de fond. Le champ de saisie a du texte blanc sur fond gris ; un terminal console
+16 couleurs ou plus utilise le gris sombre de sa palette, sinon le rendu reste
+approximatif. Le clavier console transmet les accents français par les mêmes
+séquences que le Minitel, sans modifier la casse des touches.

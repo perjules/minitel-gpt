@@ -539,7 +539,7 @@ class CancellationTests(unittest.TestCase):
             self.assertNotIn("Connexion discrète", str(term.rows))
             if key == chat.K_SUITE:
                 self.assertIn("Total", str(term.rows))
-                self.assertIn("facture telephonique", str(term.rows))
+                self.assertIn("facture téléphonique", str(term.rows))
 
     def test_complete_receipt_auto_scroll_final_block_visible(self):
         uart = startup.FakeSerial(b"")
@@ -549,7 +549,7 @@ class CancellationTests(unittest.TestCase):
         screen, scrolling = startup.render_videotex(uart.output)
         self.assertFalse(scrolling)
         self.assertIn("Total", "\n".join(screen))
-        self.assertIn("facture telephonique.", "\n".join(screen))
+        self.assertIn("facture téléphonique.", "\n".join(screen))
         self.assertTrue(screen[0].startswith("Total"))
 
     def test_outstanding_worker_is_returned_for_main_loop_overlap_guard(self):
@@ -603,7 +603,7 @@ class IntegrationTests(unittest.TestCase):
             output = str(term.rows)
             self.assertIn("Annuaire central", output)
             self.assertIn("Robert", output)
-            self.assertIn("Derniere connexion : 29/02/1984", output)
+            self.assertIn("Dernière connexion : 29/02/1984", output)
 
     def test_unknown_name_classifies_once_then_binds_matching_profile_and_alias(self):
         original_session = rose.Session
@@ -631,9 +631,9 @@ class IntegrationTests(unittest.TestCase):
 
     def test_unclear_or_failed_name_resolution_never_starts_persona_or_bill(self):
         for result, fragment in [(rose.Reply("unclear"), 'Le nom "Camille" est introuvable dans le registre central.'),
-                                 (rose.Reply("unexpected"), "ne repond pas"),
-                                 (rose.Reply(status="error"), "ne repond pas"),
-                                 (rose.Reply(status="moderation"), "a refuse la mise en relation")]:
+                                 (rose.Reply("unexpected"), "ne répond pas"),
+                                 (rose.Reply(status="error"), "ne répond pas"),
+                                 (rose.Reply(status="moderation"), "a refusé la mise en relation")]:
             model = Mock(ready=lambda: True)
             model.classify_name.return_value = result
             term = KeyTerm(typed("fixture"))
@@ -768,8 +768,8 @@ class IntegrationTests(unittest.TestCase):
         with patch.dict(os.environ, {"ROSE_PASSWORD": "fixture"}), patch.object(terminal, "show_bill") as billing:
             terminal.run(term, "", model)
         output = str(term.rows)
-        self.assertIn("Acces refuse", output)
-        self.assertIn("services centraux d'accreditation", output)
+        self.assertIn("Accès refusé", output)
+        self.assertIn("services centraux d'accréditation", output)
         self.assertIn("L'enthousiasme ne vaut pas", output)
         self.assertNotIn("wrong-password", output)
         self.assertNotIn("Correspondances confidentielles", output)
@@ -948,7 +948,7 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(len(receipts), 1)
             self.assertEqual(receipts[0].messages, int(bool(alias)))
             self.assertIn("Mot d'arret", str(term.rows))
-            self.assertIn("France Telecom", str(term.rows))
+            self.assertIn("France Télécom", str(term.rows))
             self.assertNotIn("fixture", str(term.rows))
         # Structured rejection goes straight to bill, with no persona response.
         model = Mock(ready=lambda: True, return_value=rose.Reply(status="moderation"))

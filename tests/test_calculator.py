@@ -391,7 +391,7 @@ class PlaybackTests(unittest.TestCase):
             )
         self.assertEqual(result, "done")
         self.assertTrue(all(len(row) <= 39 for row in t.rows))
-        self.assertTrue(any("indefini" in row for row in t.rows))
+        self.assertTrue(any("indéfini" in row for row in t.rows))
         self.assertTrue(any("Alcatel" in row for row in t.rows))
         self.assertEqual(t.w.call_args.args[0], terminal.SCROLL_OFF)
         self.assertLess(clock[0], 35)

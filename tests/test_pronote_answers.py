@@ -295,7 +295,7 @@ class LocalAnswerTests(unittest.TestCase):
             term.view.move(1)
         output = screen_text(uart.output)
         self.assertIn("17,5/20", output)
-        self.assertIn("Non note", output)
+        self.assertIn("Non noté", output)
         self.assertIn("Trimestre 1", output)
 
     def test_table_conversion_retains_escaped_pipes_code_blocks_and_long_word_tails(self):

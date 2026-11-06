@@ -5,7 +5,7 @@ import time
 from contextlib import contextmanager
 from queue import Empty
 
-from . import rose, terminal_link
+from . import rose, terminal_link, videotex
 
 log = logging.getLogger(__name__)
 
@@ -184,7 +184,7 @@ def _read_field(term, secret, safeword, paging, view=None):
                         view.input()
                     elif not secret:
                         term.w(b"\x08 \x08")
-            elif 0x20 <= code <= 0x7E:
+            elif videotex.input_character(code):
                 if not overflow:
                     buf.append(chr(code))
                 if len(buf) > (128 if secret else rose.MAX_INPUT):
@@ -305,7 +305,7 @@ def _wait(term, job, safeword, timeout):
         elif (kind == "fn" and code == chat.K_CORR) or (kind == "char" and code in (chat.BS, 0x7F)):
             if typed:
                 typed.pop()
-        elif kind == "char" and 0x20 <= code <= 0x7E and len(typed) < rose.MAX_INPUT:
+        elif kind == "char" and videotex.input_character(code) and len(typed) < rose.MAX_INPUT:
             typed.append(chr(code))
         # Finish a begun command before displaying the reply; do not turn a
         # partially typed safeword into a new conversational submission.

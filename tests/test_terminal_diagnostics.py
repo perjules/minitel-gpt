@@ -34,9 +34,9 @@ def test_fixture_survives_provider_json_and_uses_real_answer_view(monkeypatch, e
     term = chat.Term(uart)
     assert chat.show_response(term, response["text"]) == "done"
     assert len(term.view.pages) == 1 and len(term.view.pages[0]) == 18
-    assert uart.lines()[3].startswith("02 FR: e e e e a a u u u i i o c")
+    assert uart.lines()[3].startswith("02 FR: é è ê ë à â ù û ü î ï ô ç")
     assert "?" not in uart.lines()[3]  # Ordinary French letters are not unknown glyphs.
-    assert uart.lines()[5].startswith("04 NFD: e a u c")
+    assert uart.lines()[5].startswith("04 NFD: é à ü ç")
     assert uart.lines()[6].startswith("05 ISOLES: ? ? ? ?")
     assert "Page 1/1" in uart.lines()[19]
     assert chat.read_question(term) == ("NEXT", "envoi")

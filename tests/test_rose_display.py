@@ -29,7 +29,7 @@ def test_rose_uses_gray_fixed_input_can_clearing_and_shared_frame(hardware):
     rose_terminal.display(term, response(), framed=True, safeword="navet")
     assert uart.lines()[0][:39] == "*** 3615 rose ***".center(39)
     assert rose_terminal.read_field(term, safeword="navet") == ("Q" * 150, "submit")
-    assert all(style == (2, True) for row in uart.screen.styles[21:] for style in row)
+    assert all(style == (2, True, 7) for row in uart.screen.styles[21:] for style in row[1:])
     assert uart.lines()[20].strip() == "Mot d'arret : navet"
     before = len(uart.output)
     term.view.input_notice = "Attente... Arret : navet"

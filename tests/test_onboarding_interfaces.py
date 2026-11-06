@@ -91,8 +91,8 @@ def test_real_terminal_sommaire_leaves_welcome_and_resume_is_explicit_without_bo
         chat.run(chat.Term(uart))
     output = screen_text(uart.output)
     assert (
-        "Quel age avez-vous" in output
-        and "matiere" in output
+        "Quel âge avez-vous" in output
+        and "matière" in output
         and "Reprenons tranquillement" in output
     )
     assert phases == ["first", "reply", "resume"]

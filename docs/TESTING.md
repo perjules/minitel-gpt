@@ -143,3 +143,10 @@ JSON text with escaped/literal Unicode, the real one-page answer viewer, ordinar
 French accents versus isolated combining marks, and exclusion from API requests,
 conversation history, memory and prompt recall. The SSH module entry point only
 prints its source fixture; it does not open the serial port.
+
+`tests/test_videotex_text.py` covers native French G2: split/dead accents across
+polling timeouts, protocol replies, immediate function exits, unknown sequences,
+shared/private readers, no secret echo, uppercase fallback, encoded byte budgets,
+console key round trips and white-on-gray C2 zone preservation through editing,
+CAN and paging. Historical byte-stripping test helpers now decode SS2 rather
+than treating its selector B as visible text. No live UART/API is used.

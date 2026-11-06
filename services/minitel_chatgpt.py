@@ -41,6 +41,7 @@ try:  # Support both systemd's direct script and package imports in tests.
         terminal_display,
         terminal_link,
         user_services,
+        videotex,
     )
 except ImportError:
     # Direct systemd entry point: keep one identity for exception/session classes.
@@ -62,6 +63,7 @@ except ImportError:
         terminal_display,
         terminal_link,
         user_services,
+        videotex,
     )
 
 try:
@@ -412,6 +414,7 @@ class Term:
         self._write_slack = getattr(self.s, "write_timeout", None)
         self.physical = isinstance(self.s, serial.SerialBase)
         self._input_bytes = deque()
+        self._ss2 = bytearray()
         self._requested_input_case = os.getenv("MINITEL_INPUT_CASE", "lowercase")
         self._keyboard_original = None
         self._keyboard_changed = False
@@ -543,6 +546,7 @@ class Term:
         except terminal_link.Unavailable:
             log.warning("terminal_keyboard restoration=unavailable")
         self._input_bytes.clear()
+        self._ss2.clear()
         close = getattr(self.s, "close", None)
         if callable(close):
             try:
@@ -552,7 +556,8 @@ class Term:
 
     def w(self, data):
         if isinstance(data, str):
-            data = to_ascii(data).encode("ascii", errors="replace")
+            data = videotex.encode("".join(char if char in videotex.GLYPHS else to_ascii(char)
+                                         for char in unicodedata.normalize("NFC", data)))
         baud = getattr(self.s, "baudrate", None)
         started = time.monotonic() if isinstance(baud, int) and baud > 0 else None
         slack = getattr(self, "_write_slack", None)
@@ -591,6 +596,7 @@ class Term:
             self.center(text)
 
     def clear(self):
+        self._ss2.clear()
         self.view = None
         self.w(bytes([FF, RS]))
         time.sleep(0.2)
@@ -627,6 +633,7 @@ class Term:
             if b is None:
                 continue
             if b == SEP:
+                self._ss2.clear()
                 # Mode Videotex (Minitel 1) : SEP + code touche
                 code = self.read_byte()
                 t2 = time.monotonic() + 0.5
@@ -664,9 +671,24 @@ class Term:
                     while code is None and time.monotonic() < t3:
                         code = self.read_byte()
                     if code in SS3_MAP:
+                        self._ss2.clear()
                         self.keyboard_activity()
                         return ('fn', SS3_MAP[code])
                 continue              # autre séquence ESC → ignorer
+            if b == videotex.SS2:
+                self._ss2[:] = bytes([b])
+                continue
+            if self._ss2:
+                if b < 0x20 or b == 0x7F:
+                    self._ss2.clear()  # Execute controls without swallowing an exit.
+                else:
+                    self._ss2.append(b)
+                    if len(self._ss2) == 2 and b in videotex.ACCENTS:
+                        continue  # A dead accent may precede its base by seconds.
+                    char = videotex.decode(self._ss2)
+                    self._ss2.clear()
+                    self.keyboard_activity()
+                    return "char", ord(char)
             if b in (CR, LF, BS, 0x7F) or 0x20 <= b <= 0x7E:
                 self.keyboard_activity()
             return ('char', b)
@@ -869,7 +891,7 @@ def retour_requested(kind, code, typed):
     if (kind == 'fn' and code == K_CORR) or (kind == 'char' and code in (BS, 0x7F)):
         if typed:
             typed.pop()
-    elif kind == 'char' and 0x20 <= code <= 0x7E and len(typed) < 40:
+    elif kind == 'char' and videotex.input_character(code) and len(typed) < 40:
         typed.append(chr(code))
     return False
 
@@ -919,7 +941,7 @@ def safe_display(text):
         if char not in "\n\t" and (ord(char) < 32 or ord(char) == 127):
             output.append(f"\\x{ord(char):02x}")
         else:
-            mapped = symbols.get(char, to_ascii(char))
+            mapped = char if char in videotex.GLYPHS else symbols.get(char, to_ascii(char))
             # Keep unknown Unicode visible without filling the 39-column page
             # with diagnostic Unicode code-point strings. Source data remains unchanged.
             output.append(mapped or "?")
@@ -1303,7 +1325,7 @@ def read_memory_password(t):
         if kind == "fn" and code == K_CORR or kind == "char" and code in (BS, 0x7F):
             if buffer:
                 buffer.pop()
-        elif kind == "char" and 0x20 <= code <= 0x7E:
+        elif kind == "char" and videotex.input_character(code):
             if len(buffer) < 2000 and not overflow:
                 buffer.append(chr(code))
             else:
@@ -1409,7 +1431,7 @@ def read_question_legacy(t: Term, allow_empty=False, calculator_mode=False, navi
             if buf:
                 buf.pop()
                 t.w(bytes([BS, 0x20, BS]))
-        elif 0x20 <= c <= 0x7E:
+        elif videotex.input_character(c):
             if len(buf) < io_limits.MAX_QUESTION_CHARS and not overflow:
                 buf.append(chr(c))
             else:

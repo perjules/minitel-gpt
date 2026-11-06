@@ -52,7 +52,7 @@ wrap and bottom-right rollover; text lines have up to 39 characters.
 | 02–19 | 18 rows of loaded content |
 | 20 | Page number and contextual function-key navigation |
 | 21 | Ready/waiting/status/length notice |
-| 22–24 | Fixed inverse input area: light-gray rectangle, black prompt/text |
+| 22–24 | Fixed input area: gray rectangle, white user text |
 
 `services/terminal_display.py` defines a small immutable geometry and one loaded
 `View`: complete text/pages, current page, draft input, displayed-page set and
@@ -77,7 +77,7 @@ No dependencies, database schema, model prompts or service configuration change.
   textual page shortcuts. They never leave the reader to invoke a model/service.
 - Partially typed input survives paging. **CORRECTION** and Backspace remove one
   character; **ANNULATION** clears the complete draft, including hidden portions.
-- Input still accepts up to **2,000 ASCII characters**. After roughly 114 typed
+- Input still accepts up to **2,000 characters** (ASCII plus supported French G2). After 110 typed
   characters the three-row viewport moves to a fresh segment, with the total
   length shown in the status row. Backspace can return to the previous segment.
   No part of the stored command is truncated or auto-submitted. An oversized
@@ -207,8 +207,8 @@ Following the 5 November hardware validation, occupied rows clear with cursor
 positioning, explicit attributes and CAN (`18`), visiting lower rows first.
 CAN erases the entire row tail at once and leaves the cursor in place. This
 supersedes the earlier right-to-left `BS SPACE BS` animation and 100-character
-full-screen threshold. One row clear uses 10 bytes; all 18 content rows take
-180 bytes, approximately 1.5 seconds of UART time, excluding other frame updates.
+full-screen threshold. A normal row clear now uses 12 bytes including an explicit background reset;
+all 18 content rows take 216 bytes, approximately 1.8 seconds of UART time, excluding other frame updates.
 The heading remains visible regardless of answer length. FF is reserved for
 initial setup or an uncertain screen cache.
 
@@ -275,7 +275,7 @@ navigation stay in normal video. Column 40 remains the unused rollover margin.
 Private password screens retain their separate hidden-input behavior.
 
 The owner confirmed the inverse input works well, but found its initial white
-background too bright. Check the gray field, black typed text and cursor visibility on the Matra,
+background too bright. Check the gray field, white typed text and cursor visibility on the Matra,
 then compare short/long input, submission and both paging directions.
 
 ### Softer input background (5 November 2026)
@@ -284,8 +284,9 @@ then compare short/long input, submission and both paging directions.
 is a gray level, documented by [STUM 1B](https://jbellue.github.io/stum1b/) as
 nominally 70% luminance, versus white's 100%; actual luminance depends on the tube.
 Inverse video swaps the foreground and background pixels, so the input becomes
-black text on gray while ordinary content remains white on black. This uses the
-existing character inversion rather than changing zone-background delimiters.
+black text on gray while ordinary content remains white on black. This was the
+5 November design; the 6 November follow-up below adds white ink using a
+background-zone delimiter while retaining that same gray paper.
 
 The row cache now includes foreground color as well as text/inversion; a color
 change therefore repaints even identical text. Reverse erasure preserves the
@@ -371,12 +372,14 @@ Minitel if its keyboard behaves unexpectedly, then restart the service.
 
 ### Compact ASCII fallback (6 November 2026)
 
-Output retains the existing standard-library accent/typographic transliteration.
+Output preserves the native French repertoire described below; other typography
+retains standard-library transliteration and explicit fallbacks.
 Common arrows now use ASCII equivalents (`→` becomes `->`), alongside the existing
 technical-symbol mappings and readable currency/fraction fallbacks. An unknown
 Unicode character becomes one `?` instead of a six- or ten-character code-point
 escape. Raw terminal controls remain escaped; source mail, school data, model
-responses and stored text are not rewritten. Keyboard/accent input is unchanged.
+responses and stored text are not rewritten. French input decoding is covered by
+the subsequent SS2 fix below.
 
 ### Rose uses the shared frame (6 November 2026)
 
@@ -403,7 +406,7 @@ source page can also be printed in SSH, without opening the serial port:
 .venv/bin/python -m services.terminal_diagnostics
 ```
 
-The fixture occupies all 18 content rows in the current ASCII viewer. It covers
+The fixture occupies all 18 content rows in the current Videotex viewer. It covers
 ASCII, French lowercase/capitals, decomposed accents, isolated combining marks,
 ligatures, arrows, mathematics, currencies, fractions, punctuation, unusual
 spaces, other Latin letters/scripts, emoji, box drawing and a literal JSON escape.
@@ -412,8 +415,8 @@ this tests current conversion, not native Videotex glyph support.
 
 Expected current distinctions:
 
-- `02 FR` and `03 CAPS`: ordinary French accents become plain ASCII letters,
-  not `?`. `04 NFD` (base + accent) also becomes plain letters.
+- `02 FR` and `04 NFD`: supported French letters now retain native accents.
+  `03 CAPS` falls back to unaccented capitals, which this generation can display.
 - `05 ISOLES`: the four marks lack base letters and currently become `?`.
 - `07 FLECHES`: arrows use their readable ASCII equivalents.
 - Unknown characters use `?`; compound emoji can occupy several code points.
@@ -423,8 +426,48 @@ Expected current distinctions:
 
 Accent handling predates these packages: upstream commit
 [6da626b](https://github.com/perjules/minitel-gpt/commit/6da626b2d028598b754e8a3374f9bd990e3bb3e5)
-introduced `NFKD` + ASCII transliteration (`é` → `e`). Both current develop and the
-feature branch retain it. The hardware probe showed native accents by explicitly
-sending Videotex SS2 sequences (for example `19 42 65` for é); ordinary output
-currently does not use that encoder. This diagnostic changes neither output
-conversion nor accent input; it makes their current behavior reproducible.
+introduced `NFKD` + ASCII transliteration (`é` → `e`). This was also the
+feature branch behavior when the diagnostic was added. The hardware probe
+displayed native accents by explicitly sending SS2 sequences (`19 42 65` for é).
+After the owner reported the accent-key selector appearing as B, the following
+fix added a native French subset. Code history does not establish every earlier
+deployed path or invalidate the owner’s observation of accented text.
+
+### French G2 and white input text (6 November 2026)
+
+The native subset in `services/videotex.py` handles French lowercase accented
+vowels/cedilla plus œ/Œ and £. It is a bounded G2 codec, not general Unicode support.
+Supported characters survive `safe_display`, are counted as one screen/editor
+cell and become two- or three-byte SS2 sequences on the seven-bit link. REP still
+compresses ASCII runs only; it does not split native glyph sequences. Other
+characters keep readable transliteration or `?`. Uppercase accented output is
+unavailable on this terminal generation and falls back to plain capitals;
+ä/ö/ü depend on the terminal’s VGP variant and may display as their base vowel.
+No stored messages, existing passwords or provider responses are rewritten.
+
+Keyboard SS2 is decoded incrementally at `Term.read_key`, before every normal or
+private reader. A dead accent (`19 42`, for example) remains pending until its
+base arrives, including across short polling timeouts. Recognized protocol replies
+can interleave; function keys cancel the pending accent without being swallowed.
+Unknown sequences use one placeholder rather than leaking selector letters.
+Clear/close discards pending accent state. Each correction removes one decoded
+character; secret readers still output no text. Native lowercase remains the
+firmware mode; no Python case swap is introduced. The console uses the same codec.
+
+White input ink uses the inverse character attribute with foreground 2 and
+background 7. Inversion makes the visible paper remain gray 2 and the ink white 7.
+STUM background attributes are zone-based: an explicit space delimiter is required.
+C2 is kept as that delimiter on each input row, so all user text remains in
+C3–C39 (37 cells/row); C1 holds the prompt/blank. The viewport holds 110 characters
+plus its cursor and the initial caret stays R22 C3. CAN preserves the delimiter;
+C40 is cleared without being printed. The first gray CAN fill precedes the white
+zone setup to avoid a bright initialization flash. The console models background
+zones and uses white-on-dark-gray color pairs where supported.
+
+Protocol reference: [STUM, Videotex character and attribute encoding](https://jbellue.github.io/stum1b/),
+sections “Codage des lettres accentuées”, “Codage des attributs définis par zone”
+and CAN/US behavior. Offline coverage includes delayed/split SS2, exits, private
+readers, seven-bit encoding, cell counts, USB backpressure, C2 zone preservation,
+editing and paging. Physical acceptance remains pending: check white text on gray,
+spaces/backspace/long drafts, Shift-RETOUR then a vowel, `TEST UNICODE` rows 02–05,
+and hidden input. No claim of physical validation is made by the emulator tests.

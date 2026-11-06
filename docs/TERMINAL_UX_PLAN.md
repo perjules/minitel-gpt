@@ -268,7 +268,8 @@ heading/attribute polish and mosaic experiments are out of scope.
 
 WP1–WP4A are implemented on `feature/terminal-capability-probe`, with separate
 commits and offline checks. No push or promotion to `develop`/`main` is implied.
-WP4B (accents) remains explicitly deferred. Activity/scrolling work in
+WP4B now has a limited French G2 subset, authorized by the owner’s 6 November
+report of broken accent keys; broader Unicode work remains deferred. Activity/scrolling work in
 TERMINAL_ACTIVITY.md remains a separate future scope.
 
 After publication/deployment is explicitly requested, physical application
@@ -342,3 +343,16 @@ offline tests do not count as physical application acceptance.
 - Physical application acceptance: **pending** using the resume checklist above.
   Initial hardware capabilities passed; this does not assert that the combined
   application branch has already been exercised on the Matra.
+
+## Owner follow-up: French G2 and input contrast (6 November 2026)
+
+Following physical testing, the owner requested white input on the retained gray
+background and reported Shift-RETOUR leaking B instead of composing an accent.
+This authorizes the common French SS2 input/output subset of WP4B, separately
+from general Unicode support. The incremental decoder, known G2 encoder, cell
+cache and console now share that repertoire. Uppercase accents remain readable
+plain capitals; existing secrets/data are unchanged. Input paper stays at gray 2;
+white ink uses background 7 under inversion and a preserved C2 delimiter. Text
+columns become C3–C39 on each input row; initial caret and overall geometry stay
+unchanged. CAN adds explicit background selection (12 bytes per normal row).
+See TERMINAL_UX.md for protocol references and the remaining physical checks.

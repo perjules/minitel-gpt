@@ -311,5 +311,5 @@ class TerminalModeTests(unittest.TestCase):
                                                               "description": "Été : x ≤ 3 ; Ω"}]}, "homework", full=True)
         lines = chat.wrap(chat.safe_display(source))
         self.assertTrue(all(len(line) <= 39 for line in lines))
-        self.assertIn("Mathematiques", "\n".join(lines))
+        self.assertIn("Mathématiques", "\n".join(lines))
         self.assertNotIn("?", "\n".join(lines))

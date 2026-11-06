@@ -27,7 +27,7 @@ def test_rep_literal_equivalence_with_split_controls(length, character):
         assert (left.row, left.column) == (right.row, right.column)
 
 
-@pytest.mark.parametrize("text", ["\n", "\x18", "é", "\x1bA"])
+@pytest.mark.parametrize("text", ["\n", "\x18", "☃", "\x1bA"])
 def test_rep_rejects_controls_and_unencoded_accents(text):
     with pytest.raises((ValueError, UnicodeEncodeError)):
         encode_runs(text)
