@@ -9,10 +9,25 @@ from urllib.parse import urlsplit
 
 import requests
 
+try:
+    from . import answer_diagnostics
+except ImportError:
+    import answer_diagnostics
+
 URL = "https://api.mistral.ai/v1/conversations"
 PROMPT_FILE = Path(__file__).resolve().parent.parent / "config" / "factual_prompt.txt"
 CHAT_PROMPT_FILE = PROMPT_FILE.with_name("chat_personality.txt")
 log = logging.getLogger(__name__)
+
+
+def raise_for_status(response, stage):
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as error:
+        log.warning("provider_error stage=%s http_status=%s code=%s fields=%s",
+                    stage, answer_diagnostics.http_status(error), answer_diagnostics.code(error),
+                    answer_diagnostics.validation_fields(response))
+        raise
 
 # Ordinary-answer guidance, separate from stored records and operational identity.
 # Also used by the terminal/admin legacy chat adapters; never by private tools.
@@ -225,7 +240,7 @@ def answer(history, language, key, model, web_search=True, timeout=60, knowledge
         response = requests.post(URL, headers={"Authorization": f"Bearer {key}",
                                                "Content-Type": "application/json"},
                                  json=payload, timeout=timeout)
-        response.raise_for_status()
+        raise_for_status(response, "public")
         status = "malformed"
         result = parse_response(response.json(), prior_references(history))
         question = history[-1]["content"]

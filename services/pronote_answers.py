@@ -156,7 +156,7 @@ def answer(history, language, key, model, web_search, timeout, knowledge, backen
         response = requests.post(engine.URL, headers={"Authorization": f"Bearer {key}",
                                                        "Content-Type": "application/json"},
                                  json=request, timeout=remaining)
-        response.raise_for_status()
+        engine.raise_for_status(response, "school")
         data = response.json()
         if not isinstance(data, dict) or not isinstance(data.get("outputs"), list):
             raise TypeError("Malformed local tool response")

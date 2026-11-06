@@ -43,6 +43,7 @@ try:
         admin_memory_pages,
         admin_service_pages,
         admin_session_pages,
+        answer_diagnostics,
         calculator,
         christmas_list,
         config_store,
@@ -78,6 +79,7 @@ except ImportError:
     import admin_memory_pages
     import admin_service_pages
     import admin_session_pages
+    import answer_diagnostics
     import calculator
     import christmas_list
     import config_store
@@ -1943,7 +1945,8 @@ def diagnostic_report():
               "uptime": system_health.uptime(), "temperature_c": system_health.temperature(),
               "disk": system_health.disk(PROJ_DIR), "local_ip": ip_address(),
               "wifi": system_health.wifi(), "tailscale": system_health.tailscale(),
-              "deployment": system_health.deployment(DEPLOYMENT_STATUS)}
+              "deployment": system_health.deployment(DEPLOYMENT_STATUS),
+              "recent_answer_errors": answer_diagnostics.recent_events(log_tail("chatgpt", 200))}
     response = app.response_class(json.dumps(report, ensure_ascii=False, indent=2) + "\n", mimetype="text/plain")
     response.headers["Content-Disposition"] = "attachment; filename=minitel-diagnostic.txt"
     return response

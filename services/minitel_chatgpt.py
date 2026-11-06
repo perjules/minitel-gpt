@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 
 try:  # Support both systemd's direct script and package imports in tests.
     from . import (
+        answer_diagnostics,
         calculator,
         christmas_list,
         deployment,
@@ -50,6 +51,7 @@ except ImportError:
     # Direct systemd entry point: keep one identity for exception/session classes.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from services import (
+        answer_diagnostics,
         calculator,
         christmas_list,
         deployment,
@@ -909,7 +911,7 @@ def retour_requested(kind, code, typed):
     return False
 
 
-def wait_answer(t, pending, timeout, allow_retour=False):
+def wait_answer(t, pending, timeout, allow_retour=False, *, language=None):
     """Reset stops local waiting; provider work/billing may continue."""
     _, output, started = pending
     deadline = started + timeout
@@ -927,17 +929,12 @@ def wait_answer(t, pending, timeout, allow_retour=False):
         if error:
             # Fixed diagnostic codes only; never log provider bodies or arbitrary
             # exception messages containing questions, tokens or school records.
-            reason = {
-                "Sources without observed search execution": "unverified_references",
-                "Unexpected web search in private request": "private_web_output",
-                "Expected one final assistant entry": "ambiguous_final",
-                "Empty factual answer": "empty_answer",
-                "Local tool call limit": "local_tool_limit",
-            }.get(str(error), "unclassified")
-            status = getattr(getattr(error, "response", None), "status_code", None)
+            reason = answer_diagnostics.code(error)
+            status = answer_diagnostics.http_status(error)
             log.warning("answer status=api_error error=%s code=%s http_status=%s",
                         type(error).__name__, reason, status if type(status) is int else "-")
-            return None, 'error'
+            return ({"display": answer_diagnostics.notice(error, language), "turn": None}
+                    if language is not None else None), 'error'
         return result, 'done'
     log.warning("answer status=deadline elapsed=%.2f", time.monotonic() - started)
     return None, 'deadline'
@@ -1971,7 +1968,7 @@ def run_session(t):
                 optional["calc"] = calc
                 pending = start_answer(system_prompt, candidate, language, options, knowledge, **optional)
                 t._pending = pending
-                response, action = wait_answer(t, pending, options[2], allow_retour=calculator_request)
+                response, action = wait_answer(t, pending, options[2], allow_retour=calculator_request, language=language)
                 if action == 'guide':
                     show_guide(t, language)
                     break

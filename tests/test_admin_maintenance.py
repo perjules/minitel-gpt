@@ -47,10 +47,15 @@ def test_power_controls_are_post_only_and_do_not_call_systemctl_directly(console
     queue.assert_called_once_with(operation)
 
 
-def test_diagnostics_omit_private_configuration_and_conversation_contents(console):
+def test_diagnostics_omit_private_configuration_and_conversation_contents(console, monkeypatch):
     client, _, _ = console
     admin.ENV_FILE.write_text('MISTRAL_KEY=private-secret-marker\n')
+    monkeypatch.setattr(admin, "log_tail", Mock(return_value=(
+        'synthetic prompt\nprivate-secret-marker answer status=api_error error=HTTPError '
+        'code=invalid_request http_status=422')))
     report = client.get('/diagnostics.txt')
     assert report.status_code == 200 and 'attachment' in report.headers['Content-Disposition']
     assert 'private-secret-marker' not in report.text and 'synthetic prompt' not in report.text
+    assert report.json is None  # Download remains plain text JSON.
+    assert '"http_status": 422' in report.text and '"recent_answer_errors"' in report.text
     assert admin.app.test_client().get('/diagnostics.txt').status_code == 302
