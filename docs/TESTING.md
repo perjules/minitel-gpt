@@ -137,3 +137,9 @@ visible gray input, CAN transitions, long replies, pinned stop word, local pagin
 private exit keys, echo restoration/failure, bounded input and retiring private
 frames before ordinary chat. `tests/test_terminal_ascii.py` checks readable symbol
 fallbacks and unchanged source text through email/school document views.
+
+`tests/test_terminal_diagnostics.py` verifies the local `TEST UNICODE` tool,
+JSON text with escaped/literal Unicode, the real one-page answer viewer, ordinary
+French accents versus isolated combining marks, and exclusion from API requests,
+conversation history, memory and prompt recall. The SSH module entry point only
+prints its source fixture; it does not open the serial port.

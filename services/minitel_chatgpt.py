@@ -37,6 +37,7 @@ try:  # Support both systemd's direct script and package imports in tests.
         pronote,
         pronote_answers,
         pronote_mode,
+        terminal_diagnostics,
         terminal_display,
         terminal_link,
         user_services,
@@ -57,6 +58,7 @@ except ImportError:
         pronote,
         pronote_answers,
         pronote_mode,
+        terminal_diagnostics,
         terminal_display,
         terminal_link,
         user_services,
@@ -1639,6 +1641,14 @@ def run_session(t):
                 t.line('Profil modifié. Reconnectez-vous.')
                 username = language = None
                 break
+
+            # Deterministic local tool: use the ordinary answer display path,
+            # but never send the fixture to a model, memory, history or printer.
+            if recall_eligible and terminal_diagnostics.unicode_command(question):
+                diagnostic = terminal_diagnostics.test_unicode()
+                show_response(t, diagnostic["display"], language)
+                t.view.status("TEST UNICODE - local, sans API")
+                continue
 
             memory_control = memory_session.household_command(question)
             if memory_control:

@@ -388,3 +388,43 @@ Hardware echo is suppressed while editing or waiting and restored exactly on
 exit. Private frames are detached before ordinary chat resumes; the secret gate,
 animated bill and scripted transcript workshop retain their dedicated paths.
 See [ROSE.md](ROSE.md#affichage-partagé-6-novembre-2026) for keys and physical checks.
+
+### Local TEST UNICODE diagnostic (6 November 2026)
+
+In ordinary Minitel chat, type `test Unicode` then ENVOI (case-insensitive).
+This calls the local `services.terminal_diagnostics.test_unicode()` tool and feeds
+its Unicode `display` result into the same `show_response` / View path as an AI
+answer. No model, web search, raw UART writes, memory, prompt recall or printing
+are involved. The exact command is intercepted only in ordinary chat, so it does
+not override feature composition, password or confirmation input. The tool's
+source page can also be printed in SSH, without opening the serial port:
+
+```bash
+.venv/bin/python -m services.terminal_diagnostics
+```
+
+The fixture occupies all 18 content rows in the current ASCII viewer. It covers
+ASCII, French lowercase/capitals, decomposed accents, isolated combining marks,
+ligatures, arrows, mathematics, currencies, fractions, punctuation, unusual
+spaces, other Latin letters/scripts, emoji, box drawing and a literal JSON escape.
+A normal next prompt works without leaving the page. Photograph the numbered rows;
+this tests current conversion, not native Videotex glyph support.
+
+Expected current distinctions:
+
+- `02 FR` and `03 CAPS`: ordinary French accents become plain ASCII letters,
+  not `?`. `04 NFD` (base + accent) also becomes plain letters.
+- `05 ISOLES`: the four marks lack base letters and currently become `?`.
+- `07 FLECHES`: arrows use their readable ASCII equivalents.
+- Unknown characters use `?`; compound emoji can occupy several code points.
+- `17 LITTERAL` deliberately contains the six literal characters `\u00e9`.
+  A parsed JSON escape `"\u00e9"` instead becomes the same Python `é` as a
+  literal Unicode JSON string, before display conversion.
+
+Accent handling predates these packages: upstream commit
+[6da626b](https://github.com/perjules/minitel-gpt/commit/6da626b2d028598b754e8a3374f9bd990e3bb3e5)
+introduced `NFKD` + ASCII transliteration (`é` → `e`). Both current develop and the
+feature branch retain it. The hardware probe showed native accents by explicitly
+sending Videotex SS2 sequences (for example `19 42 65` for é); ordinary output
+currently does not use that encoder. This diagnostic changes neither output
+conversion nor accent input; it makes their current behavior reproducible.
