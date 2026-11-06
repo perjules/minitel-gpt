@@ -116,7 +116,12 @@ without a URL, hostname or port. Port/system defaults are 3000/1.
 
 One advertised function, `airzone_diagnostic`, accepts only `action`:
 `discover`, `identify`, `probe`, `state`. The existing Mistral function-call/result
-format selects one action, followed by one synthesis with tools removed. No web
+format selects one action, followed by one synthesis with tools removed. The
+explicit slogan `LIBERE LA CLIMATISATION !` (also `LIBERE LA CLIM`) directly
+requests `state` through that same executor; the model cannot stop at discovery
+or refuse the diagnostic. Without a configured real host, this runs discovery →
+probe → state; with mock/no host, probe → state; with a configured host, state.
+An empty discovery is reported as inconclusive without model interpretation. No web
 tool is mixed into the diagnostic request. Only relevant Airzone/AC/room-temperature
 questions enter this path; ordinary chat and other service workflows retain their
 existing routing. Disabled means no advertised Airzone tool or local invocation.

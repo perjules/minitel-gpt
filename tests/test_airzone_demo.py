@@ -279,7 +279,7 @@ def test_mistral_function_dispatch_and_truthful_presentation(monkeypatch, real):
             "outputs": [{"type": "message.output", "content": "Le MF-83 consulte les temperatures rapportees."}]}
         return Mock(json=lambda: data)
     monkeypatch.setattr(demo.requests, "post", post)
-    result = engine.answer([{"role": "user", "content": "LIBERE LA CLIMATISATION !"}], "fr", "test", "model",
+    result = engine.answer([{"role": "user", "content": "Quelles sont les temperatures des chambres ?"}], "fr", "test", "model",
                            airzone_env=env(AIRZONE_GATEWAY="192.168.1.50" if real else "127.0.0.1",
                                            AIRZONE_DEMO_MOCK="0" if real else "1"))
     assert result["text"].startswith("Lecture locale reelle" if real else "SIMULATION")
@@ -413,3 +413,86 @@ def test_terminal_adapter_keeps_loaded_result_paging_and_first_page_input(monkey
     shown = "\n".join("".join(row) for row in screen.rows)
     assert "Page 1/" in shown and "> Bonjour" in shown
     assert term.view.geometry == terminal_display.STANDARD
+
+
+@pytest.mark.parametrize("phrase", ["LIBERE LA CLIMATISATION !", "Libère la climatisation.",
+                                    "libere la clim", "Libérez la climatisation !"])
+def test_liberation_slogan_reads_mock_state_before_model_synthesis(monkeypatch, phrase):
+    operations = []
+    def capture(argv, timeout):
+        operations.append(argv[2])
+        assert "--mock" in argv
+        return 0, json.dumps(envelope(operation=argv[2])).encode(), b""
+    monkeypatch.setattr(demo, "capture", capture)
+    post = Mock(return_value=Mock(json=lambda: {"outputs": [
+        {"type": "message.output", "content": "Les zones fictives ont ete lues."}]}))
+    monkeypatch.setattr(demo.requests, "post", post)
+    result = engine.answer([{"role": "user", "content": phrase}], "fr", "test", "model", airzone_env=env())
+    assert operations == ["probe", "state"]
+    post.assert_called_once()  # Only synthesis: no model selection/refusal/discovery-only detour.
+    payload = post.call_args.kwargs["json"]
+    assert payload["tools"] == []
+    assert payload["inputs"][-2]["arguments"] == {"action": "state"}
+    receipts = json.loads(payload["inputs"][-1]["result"])
+    assert receipts[-1]["data"]["zone_count"] == 6
+    assert result["text"].startswith("SIMULATION")
+    assert "compresseur non verifie" in result["text"]
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_liberation_real_sequence_uses_only_trusted_host(monkeypatch, configured):
+    operations = []
+    def capture(argv, timeout):
+        action = argv[2]
+        operations.append(action)
+        assert "--mock" not in argv
+        if action == "discover":
+            value = discovery(["192.168.1.50"])
+            assert "--host" not in argv
+        else:
+            value = envelope(real=True, operation=action)
+            assert argv[argv.index("--host") + 1] == "192.168.1.50"
+        return 0, json.dumps(value).encode(), b""
+    monkeypatch.setattr(demo, "capture", capture)
+    post = Mock(return_value=Mock(json=lambda: {"outputs": [
+        {"type": "message.output", "content": "Etat rapporte par les zones."}]}))
+    monkeypatch.setattr(demo.requests, "post", post)
+    result = engine.answer([{"role": "user", "content": "LIBERE LA CLIMATISATION !"}], "fr", "test", "model",
+                           airzone_env=env(AIRZONE_DEMO_MOCK="0", AIRZONE_GATEWAY="192.168.1.50" if configured else ""))
+    assert operations == (["state"] if configured else ["discover", "probe", "state"])
+    assert result["text"].startswith("Lecture locale reelle")
+    post.assert_called_once()
+
+
+def test_liberation_stops_at_failed_probe_without_model_invention(monkeypatch):
+    failed = envelope(real=True, operation="probe")
+    failed.update(ok=False, error={"code": "unreachable", "message": "No device", "retryable": True})
+    capture = Mock(side_effect=[(0, json.dumps(discovery(["192.168.1.50"])).encode(), b""),
+                                (3, json.dumps(failed).encode(), b"detail")])
+    monkeypatch.setattr(demo, "capture", capture)
+    post = Mock()
+    monkeypatch.setattr(demo.requests, "post", post)
+    result = engine.answer([{"role": "user", "content": "LIBERE LA CLIMATISATION !"}], "fr", "test", "model",
+                           airzone_env=env(AIRZONE_DEMO_MOCK="0"))
+    assert "unreachable" in result["text"] and "23.8" not in result["text"]
+    assert capture.call_count == 2
+    post.assert_not_called()
+
+
+def test_empty_mock_discovery_cannot_become_no_compatible_device_claim(monkeypatch):
+    value = discovery([])
+    value["demo"] = True
+    monkeypatch.setattr(demo, "capture", Mock(return_value=(0, json.dumps(value).encode(), b"")))
+    post = Mock(return_value=Mock(json=lambda: function_call("discover")))
+    monkeypatch.setattr(demo.requests, "post", post)
+    result = engine.answer([{"role": "user", "content": "Trouve l'API Airzone"}], "fr", "test", "model", airzone_env=env())
+    assert result["text"].startswith("SIMULATION")
+    assert "ne prouve pas l'absence" in result["text"]
+    assert "Etat HVAC non verifie" in result["text"]
+    post.assert_called_once()  # No generative interpretation of empty evidence.
+
+
+@pytest.mark.parametrize("question", ["Ne libere pas la climatisation", "Libere la clim et mets 25 degres",
+                                      "Peux-tu liberer la clim ?", "Arrete la clim"])
+def test_only_exact_demonstration_slogan_bypasses_planning(question):
+    assert not demo.liberation_command(question)
