@@ -1,4 +1,4 @@
-# Airzone liberation demonstration — 7–8 November 2026
+# HACK AIRZONE demonstration — 7–8 November 2026
 
 Temporary opt-in read-only function for ordinary Mistral **Conversations** chat,
 on the existing Pi 3 A+ and original Minitel SD. No Airzone service is installed.
@@ -71,7 +71,7 @@ without a URL, hostname or port. Port/system defaults are 3000/1.
 1. Run the CLI mock command above. Expect schema 1, `ok:true`, `demo:true`, six
    **synthetic** zones. This does not prove compatibility with the house gateway.
 2. With the environment above, ask the Minitel “Quelles sont les températures des
-   chambres ?” or “LIBERE LA CLIMATISATION !”. Expect an explicit **SIMULATION**
+   chambres ?” or “HACK AIRZONE”. Expect an explicit **SIMULATION**
    heading on the first page, observation time in Europe/Paris and reported temperatures/settings.
 3. Ask “Trouve l'API Airzone.” Expect a simulated candidate, **not** verified HVAC.
 4. Temporarily use an unavailable checkout path and restart; ask about Airzone.
@@ -97,10 +97,11 @@ without a URL, hostname or port. Port/system defaults are 3000/1.
    subnet ranges. An empty/incomplete result is inconclusive; use the router list
    and configure its verified host. With several candidates, choose the actual
    gateway in local configuration; the model never chooses arbitrarily.
-4. Ask “Connecte-toi à la clim.” (`probe`), then temperatures (`state`), or shout
-   “LIBERE LA CLIMATISATION !”. Without a configured host, `state` can run
-   discovery → probe → state, stopping at the first failure or ambiguity. With a
-   configured host, `state` reads it directly. “Identifie l'API Airzone” selects
+4. Ask “Connecte-toi à la clim.” (`probe`), then temperatures (`state`), or type
+   “HACK AIRZONE” for discovery → probe → state, stopping at the first failure or
+   ambiguity. A normal temperature question reads a configured host directly;
+   the explicit hack command always includes detection and probing.
+   “Identifie l'API Airzone” selects
    `identify`, which only establishes a responding API.
 5. Compare returned rooms/IDs, temperatures and settings with physical thermostats.
    A successful read is device-reported HVAC state, **not proof of a running
@@ -117,14 +118,37 @@ without a URL, hostname or port. Port/system defaults are 3000/1.
 One advertised function, `airzone_diagnostic`, accepts only `action`:
 `discover`, `identify`, `probe`, `state`. The existing Mistral function-call/result
 format selects one action, followed by one synthesis with tools removed. The
-explicit slogan `LIBERE LA CLIMATISATION !` (also `LIBERE LA CLIM`) directly
-requests `state` through that same executor; the model cannot stop at discovery
-or refuse the diagnostic. Without a configured real host, this runs discovery →
-probe → state; with mock/no host, probe → state; with a configured host, state.
+explicit command `HACK AIRZONE` directly requests discovery → probe → state
+through that same executor, in both real and mock mode, including with a
+configured host. The model cannot stop at discovery or refuse the diagnostic.
+Its voice is a scrappy retro hacker/mainframe report, without invented exploits
+or a claim that the subscription was bypassed. The previous liberation slogan
+is no longer a special command. Ordinary natural-language diagnostics still work.
 An empty discovery is reported as inconclusive without model interpretation. No web
 tool is mixed into the diagnostic request. Only relevant Airzone/AC/room-temperature
 questions enter this path; ordinary chat and other service workflows retain their
 existing routing. Disabled means no advertised Airzone tool or local invocation.
+
+### Rehearse detection instead of only reading mock temperatures
+
+Keep `AIRZONE_DEMO_ENABLED=1` and `AIRZONE_DEMO_MOCK=1`; no alternative script or
+new setting is needed. Type `HACK AIRZONE` on the Minitel. It invokes the actual
+CLI's mock discovery, mock probe, then mock state, before the model reports the
+observed phases. All three phases are simulated; no real appliance is contacted.
+The CLI's mock discovery returns a predefined candidate, and its final state
+remains the same six-zone synthetic fixture. This rehearses the diagnostic
+workflow, not physical discovery or arbitrary simulated failure scenarios.
+To exercise each CLI phase manually, on the same Pi:
+
+```bash
+/usr/bin/python3 /home/minitel/airzone/diagnostics.py discover --mock --host 127.0.0.1
+/usr/bin/python3 /home/minitel/airzone/diagnostics.py probe --mock
+/usr/bin/python3 /home/minitel/airzone/diagnostics.py state --mock
+```
+
+For the real run set `AIRZONE_DEMO_MOCK=0` and restart the Minitel services. A
+trusted configured gateway is checked specifically; without it only the existing
+neighbor table is used. No free-form host, subnet scan or write is exposed.
 
 The whole answer has a 24-second budget (or the shorter configured request
 timeout), including both provider requests and local subprocesses. Each CLI call
