@@ -1161,6 +1161,8 @@ def start_update_request(language, preview=None):
                 words = mainframe_update.TEXT[language]
                 rows = (prepare_update_text(checked, language) if checked["ok"] else
                         [words["busy"] if checked.get("busy") else words["unavailable"]])
+                if checked["ok"] and checked.get("branch") == airzone_hack.UPDATE_BRANCH:
+                    rows.append("Module Airzone : synchronisation incluse.")
                 result = {"display": "\n".join(rows), "preview": checked}
             else:
                 result = {"rows": prepare_update_text(preview, language, procedure=True)}
@@ -1168,6 +1170,20 @@ def start_update_request(language, preview=None):
         except Exception as error:  # noqa: BLE001 - Forward failures to the UART owner.
             output.put((None, error))
 
+    worker = threading.Thread(target=request, daemon=True)
+    started = time.monotonic()
+    worker.start()
+    return worker, output, started
+
+
+def start_airzone_update(project, branch):
+    """Already-confirmed branch-only maintenance; no delayed Minitel launch."""
+    output = Queue(maxsize=1)
+    def request():
+        try:
+            output.put((airzone_hack.update_checkout(project, branch), None))
+        except Exception as error:  # noqa: BLE001 - Same bounded maintenance-worker boundary.
+            output.put((None, error))
     worker = threading.Thread(target=request, daemon=True)
     started = time.monotonic()
     worker.start()
@@ -1237,7 +1253,8 @@ def terminal_update(t, language):
         return show_response(t, words["unavailable"], language), pending
     action = show_response(t, result["display"], language)
     preview = result["preview"]
-    if action != "done" or not preview["ok"] or not preview["behind"]:
+    airzone_update = preview.get("branch") == airzone_hack.UPDATE_BRANCH
+    if action != "done" or not preview["ok"] or not (preview["behind"] or airzone_update):
         return action, pending
     while True:
         t.line(words["confirm"])
@@ -1255,6 +1272,22 @@ def terminal_update(t, language):
                 continue
             break
         t.line(words["invalid"])
+    project = Path(__file__).resolve().parents[1]
+    if airzone_update:
+        if not deployment.unchanged(project, preview):
+            return show_response(t, words["unavailable"], language), pending
+        t.line("Synchronisation du module Airzone...")
+        pending = start_airzone_update(project, preview["branch"])
+        t._pending = pending
+        synchronized, action = wait_answer(t, pending, 100)
+        if action in ("sommaire", "guide"):
+            return action, pending
+        if synchronized is None or not synchronized["ok"]:
+            message = synchronized["display"] if synchronized else "Synchronisation Airzone non confirmée. Vérifiez par SSH."
+            return show_response(t, message, language), pending
+        if not preview["behind"]:
+            return show_response(t, synchronized["display"], language), pending
+        t.line(synchronized["display"])
     t.line(words["preparing"])
     pending = start_update_request(language, preview)
     t._pending = pending
@@ -1700,7 +1733,10 @@ def run_session(t):
                 if pending is not None and pending[0].is_alive():
                     show_response(t, "Requête précédente en cours. Réessayez bientôt.", language)
                     continue
-                result = stream_sources.show(t, airzone_hack.source(), language)
+                source = airzone_hack.source()
+                result = stream_sources.show(t, source, language)
+                if result == "done":
+                    result = airzone_hack.offer_patch(t, source, language)
                 if result == "guide":
                     show_guide(t, language)
                 if result != "done":

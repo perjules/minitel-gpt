@@ -148,6 +148,11 @@ The same update operation is also available from the physical terminal through
 maintenance theatre. See [TERMINAL_UPDATES.md](TERMINAL_UPDATES.md) for operation,
 the one-use automatic boot display hint and physical acceptance checks.
 
+On `feature/airzone-demo` only, confirmed terminal MAJ also fetches and
+fast-forwards sibling `../airzone` as the ordinary user, even when Minitel itself
+is current. This is a terminal hook, not a change to this root helper or admin
+console. See [AIRZONE_DEMO.md](AIRZONE_DEMO.md) for its one-shot scope and limits.
+
 Admin buttons call fixed, root-owned commands allowed by sudoers. They queue a
 separate systemd job with a short delay so the HTTP response can finish; queued
 does not mean successfully applied. The job is independent of the admin process.

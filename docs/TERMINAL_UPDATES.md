@@ -32,6 +32,13 @@ remain visible because the owner requested the real wording. If no revisions are
 without asking to update. Failed verification is reported as unavailable, never
 as “up to date”. No private profile or integration data enters this call.
 
+Temporary exception on `feature/airzone-demo`: even a current Minitel offers
+maintenance with sibling Airzone synchronization explicitly included. After OUI,
+a bounded user-level worker fetches/fast-forwards `../airzone` from `origin/develop`,
+independent of feature flags. Only this exact installed/checked-out branch enables
+the hook. Pending Minitel deployment follows only on success; errors point to SSH.
+With no Minitel commits, no restart is needed. See [AIRZONE_DEMO.md](AIRZONE_DEMO.md).
+
 On first startup (after SOMMAIRE), one separate Git-only check fetches the installed
 branch and tests for pending fast-forward changes. Fetch has a three-second limit;
 each local Git check has a one-second limit. A known update appends **MISES A JOUR
@@ -46,6 +53,10 @@ by ENVOI authorizes the operation. NON, NO, ANNULER, CANCEL or inactivity cancel
 other text asks again. SOMMAIRE/GUIDE during the check, announcement or preparation
 leaves without queuing an update. An abandoned worker can only finish fetching or
 generating text; it cannot launch anything later.
+
+The Airzone-only synchronization worker is started **after** OUI and may finish
+its authorized Git operation after the user exits. That exit cannot queue the
+later Minitel deployment. Pre-confirmation behavior is unchanged.
 
 After confirmation, a second single model call prepares a longer mainframe repair
 sequence: vacuum tubes, transistor polish, core alignment, punched-card fine-tuning,

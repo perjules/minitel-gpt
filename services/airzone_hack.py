@@ -7,14 +7,16 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from . import airzone_demo as diagnostic
-from . import config_store, stream_sources
+from . import config_store, deployment, rose_terminal, stream_sources
 
 ROOT = Path(__file__).resolve().parents[1]
+UPDATE_BRANCH = "feature/airzone-demo"
 ANTICS = {
     "discover": (
         ("Réallocation des cycles sans surveillance.", "Sortie du kit d'intrusion sur disquette.",
@@ -36,7 +38,99 @@ ANTICS = {
 
 def source():
     """Lazy source: no model request, command arguments, credentials or UART in child."""
-    return stream_sources.ProcessSource([sys.executable, "-u", "-m", "services.airzone_hack"], cwd=ROOT)
+    identifier = uuid.uuid4().hex
+    current = stream_sources.ProcessSource([sys.executable, "-u", "-m", "services.airzone_hack"], cwd=ROOT,
+                                           env={"AIRZONE_HACK_RUN_ID": identifier})
+    current.airzone_run_id = identifier
+    current.airzone_evidence_dir = Path(os.environ.get("AIRZONE_EVIDENCE_DIR", str(Path.home() / "airzone-evidence"))).expanduser()
+    return current
+
+
+def patch_candidate(current):
+    """Only a completed receipt belonging to this exact, uncancelled stream."""
+    identifier = getattr(current, "airzone_run_id", None)
+    if not isinstance(identifier, str) or getattr(current, "cancelled", True) is not False:
+        return None
+    if getattr(current, "closed", False) is not True or current.process.returncode != 0:
+        return None
+    directory = current.airzone_evidence_dir
+    for kind in ("real", "mock"):
+        try:
+            report = json.loads(config_store.read_bytes(directory / f"minitel-last-{kind}.json"))
+            if (not isinstance(report, dict) or report.get("run_id") != identifier or report.get("status") != "complete"
+                    or type(report.get("demo")) is not bool or report["demo"] != (kind == "mock")):
+                continue
+            last = report["diagnostics"][-1]
+            target = last["result"]["target"]
+            gateway = diagnostic.host(target["host"])
+            result = diagnostic.validate(json.dumps(last["result"]).encode(), last["exit_code"],
+                                         "state", gateway, report["demo"], target["port"], target["system_id"])
+            if result["ok"]:
+                return gateway, report["demo"]
+        except (OSError, ValueError, TypeError, KeyError, IndexError, config_store.StorageFailure):
+            continue
+    return None
+
+
+def offer_patch(term, current, language="fr"):
+    """Local yes/no; preserve the photo-worthy summary instead of replacing it."""
+    candidate = patch_candidate(current)
+    if candidate is None:
+        return "done"
+    gateway, mock = candidate
+    chat = rose_terminal.api()
+
+    def notice(text):
+        if getattr(term, "view", None) is not None:
+            term.view.status(text)
+        else:
+            term.line(text)
+
+    while True:
+        notice("Raccorder Airzone au MF-83 ? OUI/NON")
+        answer, action = chat.read_question(term, allow_empty=True)
+        if action in {"sommaire", "guide"}:
+            return action
+        answer = (answer or "").strip().upper()
+        if action == "timeout" or answer in {"", "NON", "NO", "ANNULER", "CANCEL"}:
+            notice("Raccordement annulé. Bilan conservé.")
+            return "done"
+        if answer not in {"OUI", "YES"}:
+            continue
+        if mock:
+            notice("SIMULATION : raccordement fictif.")
+            return "done"
+        try:
+            config_store.update_env(ROOT / ".env", {"AIRZONE_GATEWAY": gateway})
+        except (OSError, ValueError, config_store.StorageFailure):
+            notice("Échec d'enregistrement. Vérifier SSH.")
+            return "done"
+        os.environ["AIRZONE_GATEWAY"] = gateway
+        notice("Airzone raccordé : " + gateway)
+        return "done"
+
+
+def update_checkout(project, branch):
+    """Temporary terminal-MAJ hook; no flags, root work or service installation."""
+    if branch != UPDATE_BRANCH:
+        return {"ok": True, "skipped": True}
+    project = Path(project)
+    checkout = project.parent / "airzone"
+
+    def git(path, *args):
+        return deployment.git(path, *args, timeout=60 if args[0] == "fetch" else 5)
+
+    if git(project, "branch", "--show-current")[:2] != (0, UPDATE_BRANCH):
+        return {"ok": False, "display": "Branche modifiée. Synchronisation annulée."}
+    for args, expected in ((("rev-parse", "--show-toplevel"), str(checkout.resolve())),
+                           (("branch", "--show-current"), "develop"),
+                           (("status", "--porcelain", "--untracked-files=no"), "")):
+        if git(checkout, *args)[:2] != (0, expected):
+            return {"ok": False, "display": "Module Airzone indisponible ou modifié. Vérifiez par SSH."}
+    for args in (("fetch", "origin", "develop"), ("merge", "--ff-only", "origin/develop")):
+        if git(checkout, *args)[0]:
+            return {"ok": False, "display": "Mise à jour Airzone échouée. Vérifiez Git par SSH."}
+    return {"ok": True, "display": "Module Airzone synchronisé. Aucune installation de service."}
 
 
 def revision(path):
@@ -94,7 +188,7 @@ def run(env=None, emit=None):
     env = os.environ if env is None else env
     emit = (lambda text: print(text, flush=True)) if emit is None else emit
     report = {"report_version": 1, "demo": env.get("AIRZONE_DEMO_MOCK", "0").lower() in {"1", "true", "yes"},
-              "status": "running", "diagnostics": [],
+              "status": "running", "diagnostics": [], "run_id": env.get("AIRZONE_HACK_RUN_ID"),
               "started_at": datetime.now(UTC).isoformat(), "revisions": {"minitel": None, "airzone": None}}
     directory = Path(env.get("AIRZONE_EVIDENCE_DIR", str(Path.home() / "airzone-evidence"))).expanduser()
     path = None

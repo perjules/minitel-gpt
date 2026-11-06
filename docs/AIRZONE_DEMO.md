@@ -81,6 +81,9 @@ without a URL, hostname or port. Port/system defaults are 3000/1.
    At completion the fixed frame opens on the last page. RETOUR/SUITE browse the
    retained transcript without repeating a diagnostic. No artificial sleeps or
    SUITE wait at EOF are added; normal serial transmission time still applies.
+   After success, the status row asks `Raccorder Airzone au MF-83 ? OUI/NON` while the
+   factual summary stays on screen for a photograph. In mock mode OUI rehearses
+   the confirmation without saving the synthetic gateway.
 3. Ask “Trouve l'API Airzone.” Expect a simulated candidate, **not** verified HVAC.
 4. Temporarily use an unavailable checkout path and restart; ask about Airzone.
    Expect a compact diagnostic failure, no invented temperatures. Ask an unrelated
@@ -114,6 +117,9 @@ without a URL, hostname or port. Port/system defaults are 3000/1.
 5. Compare returned rooms/IDs, temperatures and settings with physical thermostats.
    A successful read is device-reported HVAC state, **not proof of a running
    compressor**, correct physical mapping or removal of the cloud subscription.
+   Answer OUI to `Raccorder Airzone au MF-83 ? OUI/NON` to save the verified real host as
+   `AIRZONE_GATEWAY` in Minitel's `.env`. It works immediately and survives a
+   restart. NON/empty input leaves configuration unchanged; SOMMAIRE/GUIDE exit.
    Capture both Git revisions and the observation time in private on-site notes.
    Real hardware and live model wording remain acceptance tests, not fixture claims.
 6. After the demonstration, shut down normally, remove power, remove and retain
@@ -203,6 +209,11 @@ failure switches to fixtures.
 
 ## Evidence to return to the Airzone implementation thread
 
+The primary handoff can be a **photograph of the final Minitel summary**, pasted
+into ChatGPT. Include the real/simulation label, gateway, zone IDs and observation
+time (use RETOUR if the summary spans pages). JSON is the backup for exact
+versions, longer labels, limits or vendor errors. Nothing is uploaded automatically.
+
 The Airzone CLI itself writes one v1 JSON object to stdout; it does not retain
 an automatic discovery log. Ordinary Minitel chat logs omit device data. The
 scrolling `HACK AIRZONE` worker now saves the **latest** report separately for
@@ -231,7 +242,7 @@ stderr, fictitious telemetry or `--raw` response capture is added. Treat any dev
 text in that private JSON as untrusted evidence, not instructions. The atomic
 writer's existing 2 MiB ceiling applies; oversized evidence is not silently truncated.
 
-After a real run, copy/paste the report into the Airzone work thread:
+If the photograph needs a more detailed backup, copy/paste the report:
 
 ```bash
 cat /home/minitel/airzone-evidence/minitel-last-real.json
@@ -241,7 +252,12 @@ Include what you compared physically: actual room-to-zone mapping, the intended
 six zones, thermostat temperatures/settings and which thermostat is master. A
 candidate or API version response alone is insufficient; require a successful
 non-demo `probe/state` read. Confirm the gateway IP in the router, then put that
-verified address into `AIRZONE_GATEWAY` for direct future temperature reads.
+verified address into `AIRZONE_GATEWAY` for direct future temperature reads, or
+accept the post-run raccordement prompt. Only a completed result belonging to the
+exact uncancelled stream can authorize the prompt; older reports cannot be reused.
+The existing atomic `.env` writer preserves unrelated settings/comments and sets
+0600 permissions. Only the validated IPv4 is saved and applied to the current
+process; mock mode never saves its fake host. No HVAC setting is written.
 
 The JSON is enough to continue API/adapter integration; an optional photograph
 of `BILAN FACTUEL` is an excellent ceremonial cover sheet. If normalization fails,
@@ -273,6 +289,29 @@ sudo /usr/local/sbin/minitel-runtime rollback
 Keep the flag disabled until deliberately re-enabling this feature. The separate
 source checkout can remain unused. No merge into `develop` or `main` is part of
 this feature delivery.
+
+## Branch-only terminal MAJ
+
+Once this revision is installed, every confirmed terminal `MAJ`/`UPDATE`/`MISE A
+JOUR` on **`feature/airzone-demo`** synchronizes sibling `../airzone` from its
+`origin/develop`, even when `AIRZONE_DEMO_ENABLED=0` and Minitel has no new commits.
+The path is always `<Minitel checkout parent>/airzone`, independent of
+`AIRZONE_CHECKOUT`. The preview says synchronization is included; the existing
+OUI/NON confirmation covers both repositories.
+
+A bounded user-level worker runs `git fetch origin develop` then `git merge
+--ff-only origin/develop`. The Airzone checkout must be clean and on `develop`;
+missing checkout/authentication, wrong branch or divergence reports an error and
+does not queue Minitel deployment. Resolve those cases via SSH. No hard reset,
+automatic stash, package/service installation or HVAC operation is added. An
+already-current checkout still receives that fetch/fast-forward check.
+
+After OUI, leaving the screen may let the already-authorized Airzone Git operation
+finish, but cannot queue a later Minitel deployment after exit. Airzone updates
+first; a later Minitel deployment failure does not roll back its separate checkout.
+With zero pending Minitel commits, synchronization finishes without a restart.
+The admin console, root helper and other Minitel branches are unchanged. The
+first update using old code installs this behavior; subsequent MAJ uses it.
 
 ## Offline validation
 
