@@ -7,19 +7,35 @@ Mock OUI reports simulation; no sudo, config, service or .env changes occur.
 ANNULATION kills diagnostics as usual. NON/empty/exit makes no service change.
 
 After OUI, mock and real runs end on a dedicated **ADRESSES DU DASHBOARD** page:
-the configured Tailscale URL (including its actual HTTPS port) and the installed
-loopback URL, labelled **Local - sur le Pi uniquement**. Addresses come from the
-existing deployment manifest; real success also supplies its verified configured
-origin. Missing/invalid configuration is reported as unavailable, never replaced
-with fixture URLs or guessed ports. A non-Tailscale configured origin is labelled
-as such rather than asserted to be a tailnet address. URLs are configured entry
-points, not a claim that remote HTTPS has been independently tested.
+the configured Tailscale URL (including its actual HTTPS port), current **Wi-Fi/LAN**
+URLs, and the loopback URL labelled **Sur le Pi uniquement**. The installed
+deployment manifest supplies the configured origin/port; Minitel makes one GET to
+`http://127.0.0.1:PORT/api/addresses` for current `origin`, `loopback`, `lan_enabled`
+and `lan_urls`, following Airzone's LAN handoff of 6 November. That endpoint does
+no gateway I/O and works in mock mode. LAN IPs are never cached or inferred from
+the HVAC gateway IP: moving the Pi or renewing DHCP is reflected on the next run.
 
-The installed dashboard binds loopback; its local URL is for a browser running
-on the Pi. Direct Wi-Fi/LAN dashboard access is not exposed by this integration.
-No listener, firewall, Serve or router configuration changes are made. Diagnostic
-and factual-summary pages remain accessible with RETOUR/SUITE; both full addresses
-appear together on the final page, with ordinary chat input immediately available.
+The optional request has a two-second socket timeout and 16 KiB/16-address limits;
+it never uses environment proxies or follows redirects. Origin/loopback must match
+the installed configuration, LAN URLs must be private IPv4 HTTP origins on that
+same dashboard port, and malformed/inconsistent responses are rejected. No raw
+response or vendor text becomes screen instructions.
+
+Missing configuration/addresses are explicitly unavailable, never replaced with
+fixture URLs or guessed IPs/ports. Endpoint failure preserves configured Tailnet
+and Pi URLs and a successful HVAC activation. An installed `lan_access:true` flag
+with failed address reporting is **adresses indisponibles**, not a claim that LAN
+is off. A disabled LAN and no current private IPv4 have distinct messages. Older
+Airzone services lacking the endpoint show LAN as unconfirmed. A non-Tailscale
+configured origin is labelled accordingly. These URLs are entry points, not proof
+that a phone has successfully reached them.
+
+The Airzone dashboard project owns LAN listening/access rules; this integration
+makes no listener, firewall, Serve or router changes. Its commissioning helper
+preserves the `lan_access` deployment key and still forces real HVAC writes off.
+Diagnostic/photo pages remain available with RETOUR/SUITE, with normal chat input
+immediately available. Normal Pi installations show Tailnet, LAN and Pi URLs together
+on the final page; additional interface addresses paginate normally.
 
 Both applications can run on the current Minitel SD, as Julian now explicitly
 authorizes. SD migration, credential transfer and service removal are his separate

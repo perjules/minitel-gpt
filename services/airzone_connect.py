@@ -7,6 +7,7 @@ import stat
 import subprocess
 import threading
 import time
+from http.client import HTTPConnection, HTTPException
 from pathlib import Path
 from queue import Queue
 from urllib.parse import urlsplit
@@ -30,11 +31,49 @@ def origin_url(value):
     return None
 
 
+def current_dashboard_addresses(port, origin):
+    """The installed dashboard owns live interface discovery; GET loopback only."""
+    connection = None
+    try:
+        connection = HTTPConnection('127.0.0.1', port, timeout=2)
+        connection.request('GET', '/api/addresses')
+        response = connection.getresponse()
+        if response.status != 200:
+            return None  # Older services may not expose this endpoint yet.
+        raw = response.read(16385)
+        if len(raw) > 16384:
+            return None
+        data = json.loads(raw)
+        local = f'http://127.0.0.1:{port}'
+        if (not isinstance(data, dict) or data.get('origin') != origin or data.get('loopback') != local
+                or type(data.get('lan_enabled')) is not bool or not isinstance(data.get('lan_urls'), list)
+                or len(data['lan_urls']) > 16 or (not data['lan_enabled'] and data['lan_urls'])):
+            return None
+        for value in data['lan_urls']:
+            if not origin_url(value):
+                return None
+            url = urlsplit(value)
+            address = ipaddress.IPv4Address(url.hostname)
+            if (url.scheme != 'http' or url.port != port
+                    or not any(address in ipaddress.IPv4Network(n) for n in
+                               ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'))):
+                return None
+        return data
+    except (OSError, ValueError, HTTPException):
+        return None
+    finally:
+        if connection is not None:
+            try:
+                connection.close()
+            except (OSError, HTTPException):
+                pass  # Optional URL reporting must not conceal a completed activation.
+
+
 def dashboard_addresses(origin=None):
     """Display the installed URLs, including in mock rehearsal; no network changes.
 
-    The Aizone service binds loopback. A guessed Wi-Fi IP would not be a working
-    dashboard URL; the local address is explicitly for a browser on the Pi.
+    Never infer dashboard IPs from the gateway or cache the Pi's DHCP address.
+    Airzone's address endpoint also works in mock mode without gateway I/O.
     """
     metadata = {}
     try:
@@ -52,6 +91,7 @@ def dashboard_addresses(origin=None):
     origin = origin_url(origin) or origin_url(metadata.get('origin'))
     port = metadata.get('port')
     local = f'http://127.0.0.1:{port}' if type(port) is int and 1 <= port <= 65535 else None
+    current = current_dashboard_addresses(port, origin) if local and origin else None
     tailnet = False
     if origin:
         hostname = urlsplit(origin).hostname
@@ -67,8 +107,19 @@ def dashboard_addresses(origin=None):
         lines.append('Tailnet : adresse non déterminée.')
         if origin:
             lines.extend(('URL configurée :', origin))
-    lines.extend(('Local - sur le Pi uniquement :', local or 'Adresse indisponible.',
-                  'Wi-Fi/LAN : accès non exposé.'))
+    if current is not None:
+        if not current['lan_enabled']:
+            lines.append('Wi-Fi/LAN : accès non activé.')
+        elif current['lan_urls']:
+            lines.append('Wi-Fi/LAN (réseau local) :')
+            lines.extend(dict.fromkeys(current['lan_urls']))
+        else:
+            lines.append('Wi-Fi/LAN : aucune adresse actuelle.')
+    elif metadata.get('lan_access') is True:
+        lines.append('Wi-Fi/LAN : adresses indisponibles.')
+    else:
+        lines.append('Wi-Fi/LAN : accès non confirmé.')
+    lines.extend(('Sur le Pi uniquement :', local or 'Adresse indisponible.'))
     return '\n'.join(lines)
 
 

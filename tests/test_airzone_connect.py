@@ -27,6 +27,8 @@ TARGET = {'host': '192.168.1.50', 'port': 3000, 'system_id': 1}
 def address_manifest(tmp_path, monkeypatch):
     path = tmp_path / 'dashboard-deployment.json'
     monkeypatch.setattr(connect, 'DASHBOARD_DEPLOYMENT', path)
+    # No test may query an actual local service. Address-specific tests replace it.
+    monkeypatch.setattr(connect, 'HTTPConnection', Mock(side_effect=OSError('synthetic unavailable service')))
     return path
 
 
@@ -48,7 +50,7 @@ def installed(tmp_path, monkeypatch):
     (release / 'aizone.service').write_text('[Service]\nUser=aizone\nExecStart=python app.py @@ARGS@@\nEnvironment=AIZONE_REVISION=@@REVISION@@\n')
     (base / 'current').symlink_to(release)
     (base / 'deployment.json').write_text(json.dumps({'revision': revision, 'origin': 'https://pi.example:8443',
-                                                   'port': 8081, 'mode': 'mock'}))
+                                                   'port': 8081, 'mode': 'mock', 'lan_access': True}))
     unit = tmp_path / 'aizone.service'
     unit.write_text('original mock service\n')
     for name, value in [('BASE', base), ('CONFIG', config), ('UNIT', unit), ('STATE', state)]:
@@ -77,6 +79,7 @@ def test_success_switches_mode_preserves_url_and_turns_off_all_writes(installed)
     assert '--mock' not in installed.unit.read_text()
     metadata = json.loads((installed.base / 'deployment.json').read_text())
     assert metadata['mode'] == 'real' and metadata['port'] == 8081
+    assert metadata['lan_access'] is True
     backup = installed.state / 'airzone-before-connect.json'
     assert json.loads(backup.read_text()) == installed.before
     assert stat.S_IMODE(backup.stat().st_mode) == 0o600
@@ -350,3 +353,118 @@ def test_final_page_shows_both_complete_urls_and_diagnostic_pages_remain_navigab
     assert chat.read_question(term) == ('FOLLOW UP', 'envoi')
     assert term.view.page == last - 1
     assert_gray_input(uart)
+
+
+def address_payload():
+    # Actual output of Airzone network.dashboard_addresses with a synthetic Pi IP.
+    return json.loads((Path(__file__).parent / 'fixtures/airzone/dashboard-addresses.json').read_text())
+
+
+def endpoint(monkeypatch, payload, *, status=200, raw=None):
+    response = Mock(status=status)
+    response.read.return_value = json.dumps(payload).encode() if raw is None else raw
+    connection = Mock()
+    connection.getresponse.return_value = response
+    factory = Mock(return_value=connection)
+    monkeypatch.setattr(connect, 'HTTPConnection', factory)
+    return factory, connection, response
+
+
+def test_actual_address_contract_uses_fixed_loopback_get_and_bounds(monkeypatch, address_manifest):
+    data = address_payload()
+    factory, connection, response = endpoint(monkeypatch, data)
+    address_manifest.write_text(json.dumps({'origin': data['origin'], 'port': 8081, 'lan_access': True}))
+    text = connect.dashboard_addresses()
+    assert data['origin'] in text and data['lan_urls'][0] in text and data['loopback'] in text
+    assert 'Wi-Fi/LAN (réseau local)' in text and 'non exposé' not in text
+    factory.assert_called_once_with('127.0.0.1', 8081, timeout=2)
+    connection.request.assert_called_once_with('GET', '/api/addresses')
+    response.read.assert_called_once_with(16385)
+    connection.close.assert_called_once()
+
+
+def test_dhcp_change_is_observed_without_caching_or_gateway_confusion(monkeypatch, address_manifest):
+    data = address_payload()
+    address_manifest.write_text(json.dumps({'origin': data['origin'], 'port': 8081, 'lan_access': True}))
+    endpoint(monkeypatch, data)
+    first = connect.dashboard_addresses()
+    data['lan_urls'] = ['http://192.168.88.42:8081']
+    endpoint(monkeypatch, data)
+    second = connect.dashboard_addresses()
+    assert '192.168.1.42' in first and '192.168.1.42' not in second
+    assert '192.168.88.42' in second
+    assert TARGET['host'] not in first and TARGET['host'] not in second
+    assert json.loads(address_manifest.read_text()).keys() == {'origin', 'port', 'lan_access'}
+
+
+@pytest.mark.parametrize('bad', ['public', 'gateway_port', 'credentials', 'path', 'controls', 'loopback_lan',
+                                'origin', 'loopback', 'flag', 'disabled_with_urls', 'not_object', 'too_many'])
+def test_untrusted_or_inconsistent_address_response_is_rejected(monkeypatch, bad):
+    data = address_payload()
+    origin = data['origin']
+    bad_urls = {'public': 'http://8.8.8.8:8081', 'gateway_port': 'http://192.168.1.42:3000',
+                'credentials': 'http://user:pass@192.168.1.42:8081', 'path': 'http://192.168.1.42:8081/evil',
+                'controls': 'http://192.168.1.42:8081\x1b', 'loopback_lan': 'http://127.0.0.1:8081'}
+    if bad in bad_urls:
+        data['lan_urls'] = [bad_urls[bad]]
+    elif bad == 'origin':
+        data['origin'] = 'https://other.family.ts.net:8443'
+    elif bad == 'loopback':
+        data['loopback'] = 'http://127.0.0.1:8080'
+    elif bad == 'flag':
+        data['lan_enabled'] = 1
+    elif bad == 'disabled_with_urls':
+        data['lan_enabled'] = False
+    elif bad == 'not_object':
+        data = []
+    else:
+        data['lan_urls'] *= 17
+    _, connection, _ = endpoint(monkeypatch, data)
+    assert connect.current_dashboard_addresses(8081, origin) is None
+    connection.close.assert_called_once()
+
+
+@pytest.mark.parametrize('failure', ['timeout', 'legacy', 'redirect', 'malformed', 'oversized'])
+def test_optional_addresses_failure_preserves_configured_urls_and_does_not_assert_lan_off(
+        monkeypatch, address_manifest, failure):
+    data = address_payload()
+    address_manifest.write_text(json.dumps({'origin': data['origin'], 'port': 8081, 'lan_access': True}))
+    raw = b'not JSON' if failure == 'malformed' else b'x' * 16385 if failure == 'oversized' else None
+    _, connection, response = endpoint(monkeypatch, data, status={'legacy': 404, 'redirect': 302}.get(failure, 200), raw=raw)
+    if failure == 'timeout':
+        connection.request.side_effect = TimeoutError()
+    text = connect.dashboard_addresses()
+    assert data['origin'] in text and data['loopback'] in text
+    assert 'Wi-Fi/LAN : adresses indisponibles.' in text
+    assert 'non exposé' not in text and data['lan_urls'][0] not in text
+    connection.close.assert_called_once()
+    if failure in {'legacy', 'redirect'}:
+        response.read.assert_not_called()  # No redirect following or arbitrary response body.
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_explicit_disabled_and_no_current_private_address_are_distinct(monkeypatch, address_manifest, enabled):
+    data = address_payload()
+    data.update(lan_enabled=enabled, lan_urls=[])
+    endpoint(monkeypatch, data)
+    address_manifest.write_text(json.dumps({'origin': data['origin'], 'port': 8081, 'lan_access': True}))
+    expected = 'aucune adresse actuelle' if enabled else 'accès non activé'
+    assert expected in connect.dashboard_addresses()
+
+
+def test_mock_connect_finishes_on_tailnet_lan_and_pi_addresses_without_activation(monkeypatch, address_manifest):
+    data = address_payload()
+    endpoint(monkeypatch, data)
+    address_manifest.write_text(json.dumps({'origin': data['origin'], 'port': 8081, 'lan_access': True}))
+    monkeypatch.setattr(hack, 'verified_state', Mock(return_value=envelope()))
+    activate = Mock(side_effect=AssertionError('No real activation in mock mode'))
+    monkeypatch.setattr(connect, 'activate', activate)
+    uart = VisibleUART(submitted('OUI'))
+    term = chat.Term(uart)
+    terminal_display.View(term, 'SIMULATION\nPHOTO SUMMARY').install()
+    assert connect.confirm(term, Mock()) == (None, 'done')
+    page = ''.join(term.view.pages[term.view.page])
+    assert all(url in page for url in [data['origin'], data['loopback'], *data['lan_urls']])
+    assert 'SIMULATION' in term.view.notice and term.view.text.startswith('SIMULATION\nPHOTO SUMMARY')
+    assert_gray_input(uart)
+    activate.assert_not_called()

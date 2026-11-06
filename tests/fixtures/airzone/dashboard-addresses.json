@@ -1,0 +1,8 @@
+{
+  "origin": "https://pi.family.ts.net:8443",
+  "loopback": "http://127.0.0.1:8081",
+  "lan_enabled": true,
+  "lan_urls": [
+    "http://192.168.1.42:8081"
+  ]
+}
