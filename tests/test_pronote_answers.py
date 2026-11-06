@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import pytest
 from test_terminal_startup import FakeSerial, fn, screen_text
 
 from services import admin_ui as admin
@@ -22,6 +23,29 @@ def final(text="Maths : exercice 2 pour demain."):
 def call(name="pronote_get_homework", identifier="call-1", arguments=None):
     return {"type": "function.call", "name": name, "tool_call_id": identifier,
             "arguments": arguments or {"child": "Alex", "from": "2026-10-12", "to": "2026-10-12"}}
+
+
+@pytest.mark.parametrize("question", [
+    "Quels sont les devoirs d'Alex pour demain ?", "Les notes d'Élodie", "Notes de Elodie",
+    "Montre le bulletin d'Alex", "Emploi du temps Alex", "Les moyennes de Alex",
+    "Peux-tu me dire les devoirs d'Alex", "Show Alex's grades", "Alex's homework tomorrow?",
+    "Check Élodie's timetable", "PRONOTE pour Alex : résume la journée",
+])
+def test_school_tools_require_explicit_current_query_and_registered_alias(question):
+    assert pa.school_tool_request(question, {"Alex": {}, "Élodie": {}})
+
+
+@pytest.mark.parametrize("question", [
+    "Bonjour", "Alex aime les échecs", "Parle-moi d'Élodie", "Et demain ?", "Et ses notes ?",
+    "Devoirs demain ?", "Quelles sont les notes de Sam ?", "What is a good school?",
+    "Alex a eu de bonnes notes", "Montre les notes de musique d'Alex", "Alex's musical notes?",
+    "Montre les notes de lecture d'Alex", "Quelles sont les notes d'Alexandre ?",
+    "Peux-tu aider Alex avec ses devoirs ?", "Help Alex with his homework?",
+    "Explique à Alex comment calculer une moyenne ?", "Explain school grades to Alex?",
+    "Sans PRONOTE, quelles notes pourrait avoir Alex ?", "Check Alex's grades without PRONOTE",
+])
+def test_other_requests_do_not_offer_school_tools(question):
+    assert not pa.school_tool_request(question, {"Alex": {}, "Élodie": {}})
 
 
 class SchoolMemoryRoutingTests(unittest.TestCase):
@@ -56,7 +80,7 @@ class SchoolMemoryRoutingTests(unittest.TestCase):
         for pending in (None, {"choices": ["some-saved-note"]}):
             self.memory.pending = pending
             for question in ("Montre moi les notes de Alex", 'Quels sont les devoirs de "Alex"',
-                             "Montre-moi les notes d'Élodie", "Les notes de Elodie", "Devoirs demain ?"):
+                             "Montre-moi les notes d'Élodie", "Notes de Elodie", "Devoirs Alex demain ?"):
                 with self.subTest(question=question, pending=bool(pending)):
                     _, saved, context, answer = self.ask(question)
                     saved.assert_not_called()
@@ -84,6 +108,12 @@ class SchoolMemoryRoutingTests(unittest.TestCase):
         _, saved, _, answer = self.ask("Montre moi les notes de Alex")
         saved.assert_called_once()
         answer.assert_not_called()
+
+    def test_ordinary_question_does_not_offer_or_build_school_tools(self):
+        _, saved, _, answer = self.ask("Parle-moi des étoiles")
+        saved.assert_not_called()
+        self.assertNotIn("pronote", answer.call_args.kwargs)
+        self.backend.tools.assert_not_called()
 
 
 class LocalAnswerTests(unittest.TestCase):
@@ -128,22 +158,54 @@ class LocalAnswerTests(unittest.TestCase):
         self.assertIn("2026-10-11T20:00:00+02:00", pa.footer(result, "fr"))
         self.local.execute.assert_called_once()
 
+    def test_school_lookup_does_not_replay_old_public_or_school_turns(self):
+        history = [{"role": "user", "content": "OLD SCHOOL QUESTION"},
+                   {"role": "assistant", "content": "OLD PRIVATE RECORD", "private": True},
+                   {"role": "user", "content": "OLD PUBLIC QUESTION"},
+                   {"role": "assistant", "content": "OLD PUBLIC ANSWER"},
+                   {"role": "user", "content": "Devoirs d'Alex demain ?"}]
+        _, calls = self.request([{"outputs": [call()]}, final()], history)
+        self.assertEqual(calls[0].kwargs["json"]["inputs"], [history[-1]])
+        self.assertNotIn("OLD", json.dumps(calls[1].kwargs["json"]["inputs"]))
+
+    def test_failed_school_request_cannot_capture_next_ordinary_turn(self):
+        failed = Mock()
+        failed.status_code = 422
+        error = engine.requests.HTTPError(response=failed)
+        failed.raise_for_status.side_effect = error
+        response = Mock()
+        response.json.return_value = final("Ordinary answer")
+        history = [{"role": "user", "content": "OLD SCHOOL QUESTION"},
+                   {"role": "assistant", "content": "OLD PRIVATE RECORD", "private": True}]
+        with patch.object(engine.requests, "post", side_effect=[failed, response]) as post:
+            with self.assertRaises(engine.requests.HTTPError):
+                engine.answer(history + [{"role": "user", "content": "Notes Alex ?"}],
+                              "fr", "synthetic", "model", pronote=self.local)
+            result = engine.answer(history + [{"role": "user", "content": "Parle-moi des étoiles"}],
+                                   "fr", "synthetic", "model", pronote=self.local)
+        self.assertEqual(result["text"], "Ordinary answer")
+        self.assertEqual(post.call_count, 2)
+        public = post.call_args.kwargs["json"]
+        self.assertEqual(public["tools"], [{"type": "web_search"}])
+        self.assertNotIn("OLD", json.dumps(public))
+        self.local.execute.assert_not_called()
+
     def test_public_search_excludes_private_question_answer_and_tools(self):
         history = [{"role": "user", "content": "PRIVATE CHILD QUESTION"},
                    {"role": "assistant", "content": "PRIVATE GRADES", "private": True},
                    {"role": "user", "content": "Search today's public news"}]
-        result, requests = self.request([final("Public planning"), final("Public factual answer")], history)
+        result, requests = self.request([final("Public factual answer")], history)
+        self.assertEqual(len(requests), 1)
         public = requests[-1].kwargs["json"]
         self.assertEqual(public["tools"], [{"type": "web_search"}])
         self.assertNotIn("PRIVATE", json.dumps(public))
         self.assertEqual(public["inputs"], [history[-1]])
-        self.assertNotIn("MF-83", requests[0].kwargs["json"]["instructions"])
         self.assertTrue(public["instructions"].startswith(
             engine.CHAT_PROMPT_FILE.read_text(encoding="utf-8").strip()))
         self.local.execute.assert_not_called()
         self.assertNotIn("private", result)
 
-    def test_public_followup_planner_can_echo_a_prior_verified_citation(self):
+    def test_public_followup_skips_school_planner_and_keeps_prior_verified_citation(self):
         citation = {"type": "tool_reference", "tool": "web_search", "title": "Price source",
                     "url": "https://example.org/price"}
         history = [{"role": "user", "content": "Price of a bicycle?"},
@@ -151,13 +213,12 @@ class LocalAnswerTests(unittest.TestCase):
                        {"type": "text", "text": "2 000 EUR"}, citation],
                     "references": [{"title": citation["title"], "url": citation["url"]}]},
                    {"role": "user", "content": "What about the warranty?"}]
-        planner = final([{"type": "text", "text": "Public follow-up "}, citation])
-        result, calls = self.request([planner, final("Warranty details")], history)
+        result, calls = self.request([final("Warranty details")], history)
         self.assertEqual(result["text"], "Warranty details")
         self.assertNotIn("private", result)
-        self.assertEqual(len(calls), 2)
-        self.assertNotIn("web_search", json.dumps(calls[0].kwargs["json"]["tools"]))
-        self.assertEqual(calls[1].kwargs["json"]["tools"], [{"type": "web_search"}])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].kwargs["json"]["tools"], [{"type": "web_search"}])
+        self.assertIn(citation, calls[0].kwargs["json"]["inputs"][1]["content"])
         self.local.execute.assert_not_called()
 
     def test_no_private_history_reaches_web_after_feature_is_disabled(self):

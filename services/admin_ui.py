@@ -672,7 +672,8 @@ def llm_answer(system_prompt, user_message, knowledge="", selected=None):
     if options[0] == "conversations":
         result = mistral_answers.answer(history, "fr", key, mistral_model(),
                                         options[1], options[2], knowledge,
-                                        **({"pronote": school} if school.tools() else {}),
+                                        **({"pronote": school} if pronote_answers.school_tool_request(
+                                            user_message, school.config()["children"]) and school.tools() else {}),
                                         **({"session_context": session_context} if session_context else {}))
         if selected is not None:
             selected.private_turn = bool(result.get("private"))

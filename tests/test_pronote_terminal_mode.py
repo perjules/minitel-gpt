@@ -185,8 +185,8 @@ class TerminalModeTests(unittest.TestCase):
 
         def answer(history, *args, **kwargs):
             seen.append([dict(t) for t in history])
-            self.assertIs(kwargs.get("pronote"), backend)
             private = history[-1]["content"] == "Notes de Alex"
+            self.assertIs(kwargs.get("pronote"), backend if private else None)
             return {"status": "ordinary", "text": "PRIVATE RECORD" if private else "Public answer",
                     "chunks": [], "references": [], "private": private}
 

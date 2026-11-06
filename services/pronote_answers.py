@@ -61,12 +61,51 @@ def school_record_request(question, aliases):
     )
 
 
+def school_tool_request(question, aliases):
+    """Offer school tools only for a current, explicit query naming a known child.
+
+    This is deliberately narrower than learning/privacy exclusions. Earlier turns,
+    a child's name alone, and generic school discussion never enable tools.
+    """
+    question = unicodedata.normalize("NFKD", question.casefold()).encode("ascii", "ignore").decode()
+    if not any(re.search(r"(?<!\w)" + re.escape(
+            unicodedata.normalize("NFKD", alias.casefold()).encode("ascii", "ignore").decode()
+            ) + r"(?!\w)", question) for alias in aliases if alias):
+        return False
+    if re.search(r"\b(?:notes? de (?:lecture|musique|frais|service)|musical notes?|lecture notes?)\b", question):
+        return False
+    if re.search(r"\b(?:sans (?:utiliser )?pronote|without pronote|n'utilise pas pronote)\b", question):
+        return False
+    if (not re.search(r"\bpronote\b", question)
+            and re.search(r"\b(?:aide\w*|help|explique\w*|explain|teach|apprends?)\b", question)):
+        return False  # Homework help/general explanations are not record lookups.
+    topic = (r"pronote|devoirs?|homework|grades?|notes?|moyennes?|averages?|bulletins?|report cards?|"
+             r"emploi du temps|timetables?|absences?|retards?|lateness|sanctions?|punishments?|"
+             r"punitions?|cantine|menus?|controles?|tests?|competences?|evaluations?|"
+             r"annonces?|announcements?|infos? scolaires?|bilan scolaire|school briefing")
+    if not re.search(r"\b(?:" + topic + r")\b", question):
+        return False
+    return bool(
+        "?" in question
+        or re.search(r"\b(?:quels?|quelles?|quand|combien|comment|what|when|how|does|has|is|are|"
+                     r"montre\w*|affiche\w*|donne\w*|consulte\w*|cherche\w*|verifie\w*|"
+                     r"show|check|list|get|read|fetch|tell|dis|dites|lis|summari[sz]e|resume\w*|"
+                     r"can you|could you|peux[- ]tu|pourrais[- ]tu|pouvez[- ]vous)\b", question)
+        or re.match(r"^(?:(?:les?|la|the)\s+)?(?:" + topic + r")\b", question.strip())
+    )
+
+
 def answer(history, language, key, model, web_search, timeout, knowledge, backend, *, session_context=""):
+    if not school_tool_request(history[-1]["content"], backend.config()["children"]):
+        return engine.answer(public_history(history), language, key, model, web_search, timeout, knowledge,
+                             **({"session_context": session_context} if session_context else {}))
     if not key or key == "...":
         raise ValueError("Mistral key missing")
     deadline = time.monotonic() + timeout
     tools = backend.tools()
-    payload = engine.request_payload(history, language, model, False, knowledge, character=False,
+    # Each school lookup starts from the explicit current request. Do not feed
+    # public citations or old school discussions back into the tool planner.
+    payload = engine.request_payload([history[-1]], language, model, False, knowledge, character=False,
                                      session_context=session_context)
     payload["tools"] = tools
     payload["instructions"] += (
@@ -128,11 +167,6 @@ def answer(history, language, key, model, web_search, timeout, knowledge, backen
             if result["search"]:
                 raise ValueError("Unexpected web search in private request")
             if not calls_count:
-                is_school = school_question(history, backend.config()["children"])
-                if not is_school:
-                    return engine.answer(public_history(history), language, key, model,
-                                         web_search, max(.01, deadline - time.monotonic()), knowledge,
-                                         **({"session_context": session_context} if session_context else {}))
                 # No tool read: don't turn the planner's guesses into school facts.
                 result = engine.parse_response({"outputs": [{"type": "message.output", "content": (
                     "Aucune donnee PRONOTE consultee. Precisez l'enfant et la rubrique souhaitee."

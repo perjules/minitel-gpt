@@ -64,7 +64,7 @@ def test_actual_answer_payloads_add_recall_voice_keep_attribution_and_make_one_r
         visitor.close()
 
 
-def test_school_planner_omits_voice_and_public_fallback_restores_it(monkeypatch):
+def test_public_request_skips_school_planner_and_keeps_voice(monkeypatch):
     response = Mock()
     response.json.return_value = ordinary("Synthetic public answer.")
     post = Mock(return_value=response)
@@ -75,11 +75,10 @@ def test_school_planner_omits_voice_and_public_fallback_restores_it(monkeypatch)
     pronote_answers.answer([{"role": "user", "content": "Parle-moi d'Alice"}], "fr", "synthetic-key",
                            "synthetic-model", False, 30, "Quoted recollection", backend,
                            session_context="Selected user: MinitelGPT; profile_id=1. Anonymous visitor.")
-    assert post.call_count == 2  # The existing public fallback, not an extra styling call.
-    first, second = [c.kwargs["json"]["instructions"] for c in post.call_args_list]
-    assert engine.RECALL_PRESENTATION not in first
-    assert engine.RECALL_PRESENTATION in second
-    assert "profile_id=1" in first and "profile_id=1" in second
+    post.assert_called_once()
+    instructions = post.call_args.kwargs["json"]["instructions"]
+    assert engine.RECALL_PRESENTATION in instructions
+    assert "profile_id=1" in instructions
     backend.execute.assert_not_called()
 
 
@@ -90,8 +89,8 @@ def test_private_school_final_answer_never_receives_recall_theatre(monkeypatch):
     monkeypatch.setattr(engine.requests, "post", post)
     backend = Mock()
     backend.tools.return_value = [{"type": "function", "function": {"name": "pronote_list_children"}}]
-    backend.config.return_value = {"children": {}}
-    result = pronote_answers.answer([{"role": "user", "content": "Quels devoirs ?"}], "fr", "synthetic-key",
+    backend.config.return_value = {"children": {"Alex": {}}}
+    result = pronote_answers.answer([{"role": "user", "content": "Quels devoirs pour Alex ?"}], "fr", "synthetic-key",
                                     "synthetic-model", False, 30, "", backend)
     assert result["private"]
     post.assert_called_once()

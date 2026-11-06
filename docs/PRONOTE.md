@@ -68,6 +68,15 @@ Do not upgrade only the package: the adapter's strict version check must match.
    An ambiguous child prompts a choice instead of selecting the first child.
    Function keys remain **ENVOI, SUITE, SOMMAIRE**, in either language.
 
+In ordinary chat, school tools are offered only when the **current request**
+explicitly asks for school information and names a registered, authorized child
+alias, e.g. `Les notes d'Alex` or `Quels sont les devoirs d'Élodie ?`.
+A child's name alone, general discussion about school, and follow-ups such as
+`Et demain ?` do not enable PRONOTE; repeat the child and the requested records.
+No school-planning API call runs for ordinary questions. Each eligible lookup
+starts from that request alone, without replaying prior school or public turns.
+The separate direct `PRONOTE` mode keeps its selected-child commands and context.
+
 Without a custom `FLASK_SECRET`, the admin now generates a private persistent
 session-signing key rather than using the old public default. That change
 invalidates old admin sessions once; sign in again with your existing password.

@@ -770,9 +770,9 @@ def call_answer(system_prompt, history, language, options, knowledge,
         school = user_services.ProfileSchool(school, memory.user, memory.registry)
         if not explicit_memory and not note_request and '@' not in question and school.denied(question):
             return {'display':'PRONOTE: aucun accès attribué à ce profil.', 'turn':None}
-    school_enabled = school is not None and bool(school.tools())
-    school_request = (school_enabled and not explicit_memory and not note_request
-                      and pronote_answers.school_record_request(question, school.config().get("children", {})))
+    school_request = (school is not None and not explicit_memory and not note_request
+                      and pronote_answers.school_tool_request(question, school.config().get("children", {}))
+                      and bool(school.tools()))
     recipient_address = (mail is not None and mail.composition
                          and not mail.composition.get("instruction_needed")
                          and re.fullmatch(r"[^\s<>@]+@[^\s<>@]+", question.strip()))
@@ -812,7 +812,7 @@ def call_answer(system_prompt, history, language, options, knowledge,
     if PROVIDER == "mistral" and api == "conversations":
         result = mistral_answers.answer(history, language, MISTRAL_KEY,
                                         MISTRAL_MODEL, web_search, timeout, knowledge,
-                                        **({"pronote": school} if school_enabled else {}),
+                                        **({"pronote": school} if school_request else {}),
                                         **({"session_context": session_context} if session_context else {}))
         if memory is not None:
             memory.active()

@@ -162,7 +162,7 @@ class AnswerTests(unittest.TestCase):
         first = engine.parse_response(fixture())
         followup = ordinary([{"type": "text", "text": "The previously quoted price "}, first["chunks"][1]])
         responses = []
-        for data in (ordinary("Public"), fixture(), followup, followup, ordinary("Public"), ordinary("Other answer")):
+        for data in (fixture(), followup, ordinary("Other answer")):
             response = Mock()
             response.json.return_value = data
             responses.append(response)
@@ -175,7 +175,7 @@ class AnswerTests(unittest.TestCase):
                 self.assertFalse(engine.notice(result["status"], "fr"))
                 history = engine.bound_history(candidate + [{"role": "assistant", "content": result["text"],
                                                              "chunks": result["chunks"], "references": result["references"]}])
-        self.assertEqual(post.call_count, 6)
+        self.assertEqual(post.call_count, 3)
         self.assertEqual(history[-1]["content"], "Other answer")
         backend.execute.assert_not_called()
 

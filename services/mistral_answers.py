@@ -200,13 +200,15 @@ def request_payload(history, language, model, web_search=True, knowledge="", *, 
 
 def answer(history, language, key, model, web_search=True, timeout=60, knowledge="", pronote=None, *, session_context=""):
     """One complete request; no retry, stored session or endpoint fallback."""
-    if pronote is not None and pronote.tools():
+    if pronote is not None:
         try:
             from . import pronote_answers
         except ImportError:
             import pronote_answers
-        return pronote_answers.answer(history, language, key, model, web_search, timeout, knowledge, pronote,
-                                      **({"session_context": session_context} if session_context else {}))
+        if (pronote_answers.school_tool_request(history[-1]["content"], pronote.config()["children"])
+                and pronote.tools()):
+            return pronote_answers.answer(history, language, key, model, web_search, timeout, knowledge, pronote,
+                                          **({"session_context": session_context} if session_context else {}))
     if any(turn.get("private") for turn in history):
         try:
             from .pronote_answers import public_history
