@@ -500,3 +500,15 @@ without AccountTokenSource are refused before stopping services. The credential
 drop-in selects the bundle for systemd delivery; the helper returns one account
 only. sqlite3 is checked during preparation. Migration leaves the legacy encrypted
 file untouched and requires explicit assignment; code rollback does not migrate data.
+
+
+## Explicit monitoring/streaming sources
+
+[Owned scrolling producers](STREAM_SOURCES.md) have no task/idle duration limit.
+They are separate from the bounded _pending API worker and maintenance subprocess
+helpers described above. A silent monitor is cancelled explicitly, not expired.
+Each producer has a dedicated process group and bounded TERM/KILL/reap cleanup
+on ANNULATION, exit and errors; none may continue in the background. The blocking
+HTTP stream uses the same killable worker, ten-second connect budget and no read
+or total deadline. Credentials use anonymous stdin, never command arguments.
+No systemd, dependency, deployment or existing bounded-request policy changed.

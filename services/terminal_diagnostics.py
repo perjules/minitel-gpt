@@ -13,6 +13,10 @@ def scroll_command(text):
     return " ".join(text.split()).casefold() == "test scroll"
 
 
+def stream_command(text):
+    return " ".join(text.split()).casefold() == "test stream"
+
+
 def test_scroll():
     """Three loaded pages; no inference, persistence or external operation."""
     return {"display": "\n".join(f"Journal {number:02d} : été au central MF-83." for number in range(1, 55)),
@@ -45,4 +49,11 @@ def test_unicode():
 
 
 if __name__ == "__main__":
-    print(test_unicode()["display"])
+    import sys
+    import time
+    if sys.argv[1:] == ["--stream-demo"]:
+        for number in range(1, 55):
+            print(f"Moniteur {number:02d}/54 : été au central.", flush=True)
+            time.sleep(1)  # Producer cadence, never an artificial UI pause.
+    else:
+        print(test_unicode()["display"])

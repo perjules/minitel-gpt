@@ -159,3 +159,13 @@ shared/private readers, no secret echo, uppercase fallback, encoded byte budgets
 console key round trips and white-on-gray C2 zone preservation through editing,
 CAN and paging. Historical byte-stripping test helpers now decode SS2 rather
 than treating its selector B as visible text. No live UART/API is used.
+
+
+## Owned streaming sources
+
+Tests test_stream_sources.py and test_stream_lifecycle.py cover process pipes/UTF-8,
+TERM/KILL and descendants, quiet/blocked sources, fragmented SSE, Mistral final
+validation/citations, hidden reasoning exclusion, partial/failure paths and terminal
+recovery. HTTP integration uses only a synthetic loopback server, never a real
+provider. Source/stream commands bypass ordinary history, memory and local tools.
+See [STREAM_SOURCES.md](STREAM_SOURCES.md) for physical checks.

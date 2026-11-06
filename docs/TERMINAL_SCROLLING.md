@@ -127,3 +127,11 @@ rebuilding a dense page still takes the normal serial transmission time.
 Offline acceptance completed: 1,495 tests and 400 subtests pass, Ruff passes,
 and locked dependency exports match. Physical Matra scrolling acceptance is
 pending; the software test result does not establish hardware acceptance.
+
+
+## Owned streams follow-up
+
+Actual API/script producers are now implemented in [STREAM_SOURCES.md](STREAM_SOURCES.md).
+Its lifecycle supersedes the prototype queue-only/nonblocking-callback limitation:
+ANNULATION closes the API worker or terminates/kills and reaps a script process group.
+There is no background continuation. The static TEST SCROLL behavior is unchanged.

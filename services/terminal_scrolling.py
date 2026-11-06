@@ -44,7 +44,7 @@ class _Rows:
 
 
 def _cancel(callback):
-    """A caller must supply a nonblocking stop request, never a blocking join."""
+    """A stop may use a short bounded TERM/KILL grace, never an unbounded join."""
     if callback is None:
         return False
     try:
@@ -156,8 +156,12 @@ def _show(term, source, language, *, cancel):
             text = "".join(parts)
             notice = "Journal terminé - dernière page"
             if not static and interrupted:
+                stop_message = getattr(source, "stop_message", "[Flux arrêté.]")
+                if not isinstance(stop_message, str):
+                    stop_message = "[Flux arrêté.]"
                 marker = ("[Flux interrompu : erreur de source.]" if failed else
-                          "[Flux arrêté.]" if confirmed else "[Arrêt demandé; source non confirmée.]")
+                          stop_message if confirmed else
+                          "[Arrêt demandé; source non confirmée.]")
                 text += "\n\n" + marker
                 notice = "Journal interrompu - dernière page"
             elif stopped:

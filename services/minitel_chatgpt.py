@@ -30,6 +30,7 @@ try:  # Support both systemd's direct script and package imports in tests.
         deployment,
         gmail_mail,
         io_limits,
+        llm_streaming,
         mainframe_update,
         memory_session,
         mistral_answers,
@@ -37,6 +38,7 @@ try:  # Support both systemd's direct script and package imports in tests.
         pronote,
         pronote_answers,
         pronote_mode,
+        stream_sources,
         terminal_diagnostics,
         terminal_display,
         terminal_link,
@@ -53,6 +55,7 @@ except ImportError:
         deployment,
         gmail_mail,
         io_limits,
+        llm_streaming,
         mainframe_update,
         memory_session,
         mistral_answers,
@@ -60,6 +63,7 @@ except ImportError:
         pronote,
         pronote_answers,
         pronote_mode,
+        stream_sources,
         terminal_diagnostics,
         terminal_display,
         terminal_link,
@@ -1684,6 +1688,39 @@ def run_session(t):
             if recall_eligible and terminal_diagnostics.scroll_command(question):
                 diagnostic = terminal_diagnostics.test_scroll()
                 result = terminal_scrolling.show(t, diagnostic["display"], language)
+                if result == "guide":
+                    show_guide(t, language)
+                if result != "done":
+                    action = result
+                    break
+                continue
+
+            stream_test = recall_eligible and terminal_diagnostics.stream_command(question)
+            stream_request = llm_streaming.command(question) if recall_eligible else None
+            if stream_test or stream_request is not None:
+                if pending is not None and pending[0].is_alive():
+                    show_response(t, "Requête précédente en cours. Réessayez bientôt.", language)
+                    continue
+                if stream_test:
+                    source = stream_sources.ProcessSource(
+                        [sys.executable, "-u", "-m", "services.terminal_diagnostics", "--stream-demo"],
+                        cwd=Path(__file__).resolve().parents[1])
+                elif not stream_request["prompt"]:
+                    show_response(t, "STREAM votre question\nSTREAM WEB votre recherche\nTEST STREAM : moniteur local", language)
+                    continue
+                elif PROVIDER != "mistral" or not MISTRAL_KEY or MISTRAL_KEY == "...":
+                    show_response(t, "Flux API indisponible : Mistral doit être configuré.", language)
+                    continue
+                elif stream_request["web"] and (options[0] != "conversations" or not options[1]):
+                    show_response(t, "Recherche web en flux désactivée dans la configuration.", language)
+                    continue
+                else:
+                    # Isolated public prompt: no personal history, recall, local
+                    # tools, memory writes or retry of a submitted paid request.
+                    source = llm_streaming.mistral(
+                        [{"role": "user", "content": stream_request["prompt"]}], language,
+                        MISTRAL_KEY, MISTRAL_MODEL, api=options[0], web_search=stream_request["web"])
+                result = stream_sources.show(t, source, language)
                 if result == "guide":
                     show_guide(t, language)
                 if result != "done":
