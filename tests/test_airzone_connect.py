@@ -559,3 +559,39 @@ def test_real_connect_worker_references_reach_view_and_qr_stays_out_of_chat(monk
     assert show.call_args.kwargs['references'] == references
     assert [call[1][-1]['content'] for call in calls] == ['FOLLOW UP']
     assert 'hack airzone' not in str(helper.memories[0].record.mock_calls)
+
+
+def test_install_lock_accepts_sticky_directory_and_rejects_unsafe_entries(tmp_path, monkeypatch):
+    directory = tmp_path / 'lock'
+    directory.mkdir()
+    path = directory / 'aizone-install.lock'
+    monkeypatch.setattr(root, 'LOCK', path)
+    monkeypatch.setattr(root, 'trusted', Mock())
+    lstat, fstat = Path.lstat, root.os.fstat
+
+    def directory_info(self):
+        info = lstat(self)
+        return SimpleNamespace(st_uid=0, st_mode=info.st_mode) if self == directory else info
+
+    def file_info(fd):
+        info = fstat(fd)
+        return SimpleNamespace(st_uid=0, st_mode=info.st_mode, st_nlink=info.st_nlink)
+
+    monkeypatch.setattr(Path, 'lstat', directory_info)
+    monkeypatch.setattr(root.os, 'fstat', file_info)
+    directory.chmod(0o777)
+    with pytest.raises(ValueError, match='untrusted_lock_directory'):
+        root.open_install_lock()
+    assert not path.exists()
+
+    directory.chmod(0o1777)
+    with root.open_install_lock(), pytest.raises(BlockingIOError):
+        root.open_install_lock()
+
+    path.chmod(0o666)
+    with pytest.raises(ValueError, match='untrusted_lock'):
+        root.open_install_lock()
+    path.unlink()
+    path.symlink_to(tmp_path / 'missing')
+    with pytest.raises(OSError):
+        root.open_install_lock()

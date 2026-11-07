@@ -10,6 +10,7 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -189,6 +190,26 @@ def connect(request):
         return {'ok': False, 'error': 'activation_failed', 'rollback': True}
 
 
+def open_install_lock():
+    trusted(LOCK.parent.parent)
+    parent = LOCK.parent.lstat()
+    # A root-owned sticky directory protects root-owned entries from replacement.
+    if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0
+            or (parent.st_mode & 0o022 and not parent.st_mode & stat.S_ISVTX)):
+        raise ValueError('untrusted_lock_directory')
+    lock = os.fdopen(os.open(LOCK, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600), 'r+')
+    try:
+        info = os.fstat(lock.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                or info.st_mode & 0o022 or info.st_nlink != 1):
+            raise ValueError('untrusted_lock')
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (OSError, ValueError):
+        lock.close()
+        raise
+    return lock
+
+
 def main():
     try:
         if os.geteuid() != 0 or sys.argv[1:] not in ([], ['rollback']):
@@ -198,15 +219,7 @@ def main():
         os.environ.update(PATH='/usr/sbin:/usr/bin:/sbin:/bin', HOME='/root', LANG='C.UTF-8')
         if json.loads(read(STATE / 'runtime.json'))['branch'] != BRANCH:
             raise ValueError('wrong_branch')
-        trusted(LOCK.parent.parent)
-        parent = LOCK.parent.lstat()
-        if LOCK.parent.is_symlink() or parent.st_uid != 0 or parent.st_mode & 0o002:
-            raise ValueError('untrusted_lock_directory')
-        with os.fdopen(os.open(LOCK, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600), 'r+') as lock:
-            info = os.fstat(lock.fileno())
-            if info.st_uid != 0 or info.st_mode & 0o022:
-                raise ValueError('untrusted_lock')
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with open_install_lock():
             signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError()))
             signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(InterruptedError()))
             signal.signal(signal.SIGHUP, lambda *_: (_ for _ in ()).throw(InterruptedError()))
