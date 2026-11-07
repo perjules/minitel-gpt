@@ -1,7 +1,7 @@
 # HACK AIRZONE — dashboard commissioning
 
 The exact local terminal command `HACK AIRZONE` runs the existing scrolling
-discover → probe → state sequence, then asks **Activer le dashboard réel ? OUI/NON**.
+discover → probe → state sequence, then asks **Activer les commandes ? OUI/NON**.
 Dashboard activation requires local confirmation and is never an LLM tool.
 Mock OUI reports simulation; no sudo, config, service or .env changes occur.
 ANNULATION kills diagnostics as usual. NON/empty/exit makes no service change.
@@ -10,9 +10,8 @@ ANNULATION kills diagnostics as usual. NON/empty/exit makes no service change.
 
 After confirmed success, **HACK AIRZONE automatically displays the current LAN
 dashboard as a QR code**. Scan the CRT with a phone on the same Wi-Fi to open the
-dashboard. If no LAN URL is available, it opens the configured Tailnet URL instead;
-the phone then needs Tailscale access. URLs are entry points, not a claim that
-physical HVAC compatibility or phone connectivity has been independently verified.
+dashboard. If no LAN URL is available, the address page stays visible. Tailnet
+remains available through its numbered LINK command.
 
 This reuses the [physically validated QR viewer](TERMINAL_QR.md); no encoder,
 shortener, remote QR service, listener or dependency is added. Numbered link
@@ -61,7 +60,7 @@ that a phone has successfully reached them.
 
 The Airzone dashboard project owns LAN listening/access rules; this integration
 makes no listener, firewall, Serve or router changes. Its commissioning helper
-preserves the `lan_access` deployment key and still forces real HVAC writes off.
+preserves the `lan_access` deployment key and the configured control permissions.
 Diagnostic/photo pages remain available with RETOUR/SUITE, with normal chat input
 immediately available. Normal Pi installations show Tailnet, LAN and Pi URLs together
 on the final page; additional interface addresses paginate normally.
@@ -113,15 +112,17 @@ failure stop before config changes. Photos/old reports cannot authorize activati
 
 It privately backs up config/unit/deployment manifest, then atomically updates
 `/etc/aizone/config.json` with the verified host/port/system. Other settings remain,
-with deliberate exceptions: preserve the deployment origin, force
-`allow_commands:false`, `zone_controls:{}`, `master_zone_id:null`,
-`supported_modes:[]` and `expected_zone_ids:[]`. Discovery does not verify complete
-physical room/master mapping or safe write capabilities.
+including the verified per-zone controls, expected zones, master and mode mappings.
+Confirmation enables `allow_commands`. Existing control mappings must belong to the
+same host, port and system. Configure verified capabilities in the dashboard
+configuration before commissioning. The dashboard applies its own zone health checks.
+The summary reports how many zones expose controls. Commissioning uses GET to
+check the dashboard state and sends no HVAC command.
 
 It renders the **installed Airzone service template** for real mode, reusing the
 installed release, venv and backend port; reloads/restarts only Aizone; verifies
 health revision/non-demo mode; and does one dashboard GET state requiring online,
-available zones with commands disabled. Only then does its deployment manifest
+available zones with commands enabled. Only then does its deployment manifest
 record real mode for Airzone's updater. Minitel saves/applies AIRZONE_GATEWAY after
 success; a failed .env save is reported separately from dashboard activation.
 
@@ -165,4 +166,4 @@ all phases simulated, OUI causes no config/service change, photo summary remains
 available, ordinary chat still works. Check the phone's existing demo URL. On site,
 with mock=0, confirm a real state read, OUI, then check the phone page has no demo
 banner and matches thermostats. Verify remote HTTPS/SSH after reboot. This proves
-the read-only integration; physical compressor operation and writes remain untested.
+real dashboard reads. Verify thermostat actions separately.

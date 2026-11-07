@@ -117,7 +117,7 @@ without a URL, hostname or port. Port/system defaults are 3000/1.
 5. Compare returned rooms/IDs, temperatures and settings with physical thermostats.
    A successful read is device-reported HVAC state, **not proof of a running
    compressor**, correct physical mapping or removal of the cloud subscription.
-   Answer OUI to activate the read-only dashboard, save the verified gateway in
+   Answer OUI to activate the dashboard with configured controls, save the verified gateway in
    Minitel's `.env`, and show the dashboard QR. NON/empty input cancels activation.
    Capture both Git revisions and the observation time in private on-site notes.
    Real hardware and live model wording remain acceptance tests, not fixture claims.

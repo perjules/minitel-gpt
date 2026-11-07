@@ -39,8 +39,8 @@ def installed(tmp_path, monkeypatch):
     state.mkdir()
     config = tmp_path / 'etc/aizone/config.json'
     config.parent.mkdir(parents=True)
-    config.write_text(json.dumps({'airzone_host': '192.168.1.99', 'public_origin': 'https://pi.example:8443',
-                                 'allow_commands': True, 'zone_controls': {'1': {'on': True}},
+    config.write_text(json.dumps({'airzone_host': TARGET['host'], 'public_origin': 'https://pi.example:8443',
+                                 'allow_commands': True, 'zone_controls': {'1': ['on', 'setpoint']},
                                  'master_zone_id': 1, 'supported_modes': [2], 'expected_zone_ids': [1],
                                  'operator_setting': 'keep'}))
     config.chmod(0o640)
@@ -66,14 +66,16 @@ def installed(tmp_path, monkeypatch):
     return SimpleNamespace(base=base, config=config, unit=unit, state=state, before=before, release=release)
 
 
-def test_success_switches_mode_preserves_url_and_turns_off_all_writes(installed):
+def test_success_enables_commands_and_preserves_configured_controls(installed):
     result = root.connect(TARGET)
-    assert result == {'ok': True, 'origin': 'https://pi.example:8443', 'host': TARGET['host'], 'zones': 1}
+    assert result == {'ok': True, 'origin': 'https://pi.example:8443', 'host': TARGET['host'],
+                      'zones': 1, 'controlled_zones': 0, 'mode_enabled': False}
     settings = json.loads(installed.config.read_text())
     assert settings['airzone_host'] == TARGET['host'] and settings['operator_setting'] == 'keep'
-    assert settings['allow_commands'] is False and settings['zone_controls'] == {}
-    assert settings['master_zone_id'] is None and settings['supported_modes'] == []
-    assert settings['expected_zone_ids'] == []  # Observed IDs do not prove complete physical mapping.
+    assert settings['allow_commands'] is True
+    assert settings['zone_controls'] == {'1': ['on', 'setpoint']}
+    assert settings['master_zone_id'] == 1 and settings['supported_modes'] == [2]
+    assert settings['expected_zone_ids'] == [1]
     assert settings['public_origin'] == result['origin']
     assert '--config /etc/aizone/config.json --port 8081' in installed.unit.read_text()
     assert '--mock' not in installed.unit.read_text()
@@ -127,6 +129,13 @@ def test_invalid_targets_never_change_configuration(installed, target):
     assert root.snapshot() == installed.before
 
 
+def test_existing_control_permissions_are_not_applied_to_another_gateway(installed):
+    with pytest.raises(root.PreflightError, match='config') as failure:
+        root.connect(dict(TARGET, host='192.168.1.99'))
+    assert str(failure.value.__cause__) == 'control_target_mismatch'
+    assert root.snapshot() == installed.before
+
+
 def test_failed_fresh_read_leaves_even_old_backup_alone(installed):
     path = installed.state / 'airzone-before-connect.json'
     path.write_text('prior rollback')
@@ -176,7 +185,7 @@ def test_helper_is_fixed_and_writes_env_only_on_confirmed_success(tmp_path, monk
     monkeypatch.setattr(connect.subprocess, 'run', run)
     monkeypatch.setattr(hack, 'ROOT', tmp_path)
     text = connect.activate(TARGET)['display']
-    assert '6 zones' in text and 'Commandes HVAC désactivées' in text
+    assert '6 zones' in text and 'Commandes HVAC : état non vérifié.' in text
     assert 'Tailnet (URL configurée)' in text and origin in text and 'http://127.0.0.1:8081' in text
     assert 'http://192.168.1.50:8081' not in text
     assert 'AIRZONE_GATEWAY=192.168.1.50' in (tmp_path / '.env').read_text()
@@ -259,14 +268,14 @@ def test_no_freeform_connect_action_or_privileged_arguments():
     assert 'ALL=(ALL)' not in sudoers and '*' not in sudoers
 
 
-@pytest.mark.parametrize('bad', [None, 'mock', 'enabled', 'offline', 'empty'])
+@pytest.mark.parametrize('bad', [None, 'mock', 'disabled', 'offline', 'empty'])
 def test_dashboard_check_uses_get_loopback_and_rejects_unusable_or_simulated_state(monkeypatch, bad):
-    payload = {'demo': False, 'connection': 'online', 'commands_enabled': False,
+    payload = {'demo': False, 'connection': 'online', 'commands_enabled': True,
                'zones': [{'id': 1, 'available': True}]}
     if bad == 'mock':
         payload['demo'] = True
-    elif bad == 'enabled':
-        payload['commands_enabled'] = True
+    elif bad == 'disabled':
+        payload['commands_enabled'] = False
     elif bad == 'offline':
         payload['connection'] = 'offline'
     elif bad == 'empty':
@@ -511,6 +520,15 @@ def test_no_lan_falls_back_only_to_a_phone_usable_configured_url(address_manifes
     assert 'http://127.0.0.1:8081' in report['display']
 
 
+def test_tailnet_link_remains_manual_when_lan_is_missing():
+    term = chat.Term(VisibleUART())
+    refs = [{'url': 'https://pi.family.ts.net:8443', 'title': 'Airzone Tailnet'}]
+    connect.show_summary(term, connect.ADDRESSES_HEADING, references=refs)
+    assert term.view.qr is None
+    term.view.open_link(1)
+    assert term.view.qr is not None
+
+
 def test_duplicate_dashboard_urls_have_one_stable_qr_number(monkeypatch, address_manifest):
     data = address_payload()
     data['origin'] = data['lan_urls'][0]
@@ -547,7 +565,7 @@ def test_oversized_qr_destination_keeps_exact_link_and_text_fallback():
     term = chat.Term(uart)
     url = 'https://pi.family.ts.net/' + 'long' * 300
     connect.show_summary(term, 'BILAN FACTUEL\n' + connect.ADDRESSES_HEADING + '\n' + url,
-                         references=[{'url': url, 'title': 'Airzone Tailnet'}])
+                         references=[{'url': url, 'title': connect.LAN_LINK_TITLE}])
     assert term.view.qr is None and 'trop long' in term.view.notice
     assert url in term.view.text and term.view.references[0]['url'] == url
     assert_gray_input(uart)

@@ -159,7 +159,7 @@ does not mean successfully applied. The job is independent of the admin process.
 
 On the Airzone demonstration branch, the runtime also installs a root-owned
 `minitel-airzone-connect` helper and fixed sudoers rule. It can commission an
-already installed Airzone dashboard in read-only real mode, or restore its saved
+already installed Airzone dashboard in real mode, or restore its saved
 config/mode; it cannot run arbitrary commands, Git, packages or checkout code.
 It checks the installed branch itself. First rollout needs the new runtime
 installer once; terminal `MAJ` in older releases does not know these protected

@@ -17,6 +17,7 @@ from . import airzone_demo, airzone_hack, config_store, rose_terminal, terminal_
 
 DASHBOARD_DEPLOYMENT = Path('/opt/aizone/deployment.json')
 ADDRESSES_HEADING = '=== ADRESSES DU DASHBOARD ==='
+LAN_LINK_TITLE = 'Airzone Wi-Fi/LAN'
 FAILURE_HEADING = '=== CONNEXION AIRZONE ÉCHOUÉE ==='
 PREFLIGHT_LABELS = {
     'runtime': 'Runtime Minitel ou branche installée.',
@@ -32,6 +33,7 @@ PREFLIGHT_LABELS = {
 PREFLIGHT_DETAILS = {
     'unsupported_service_template': 'Marqueurs ARGS / REVISION absents.',
     'untrusted_installation': 'Propriétaire, droits ou lien refusés.',
+    'control_target_mismatch': 'Droits liés à une autre passerelle.',
     'oversized_file': 'Fichier supérieur à 1 Mio.',
 }
 
@@ -136,7 +138,7 @@ def dashboard_report(origin=None):
     # The family standing beside the Minitel can open LAN without Tailscale.
     if current:
         for value in current['lan_urls']:
-            add_link(value, 'Airzone Wi-Fi/LAN')
+            add_link(value, LAN_LINK_TITLE)
     if origin:
         add_link(origin, 'Airzone Tailnet' if tailnet else 'Airzone dashboard')
 
@@ -193,7 +195,7 @@ def show_summary(term, text, language='fr', *, references=(), simulated=False):
     if simulated:
         view.notice = 'SIMULATION : aucun service modifié.'
     view.install()
-    if references:
+    if references and references[0].get('title') == LAN_LINK_TITLE:
         view.open_link(1)
         if view.qr is not None:
             view.status('SIMULATION / QR [1] : scannez' if simulated else 'Airzone [1] : scannez le QR')
@@ -224,9 +226,17 @@ def activate(target):
                 paired = 'Dashboard actif; sauvegarde .env échouée.'
             addresses = dashboard_report(data['origin'])
             references = addresses['references']
+            controlled = data.get('controlled_zones')
+            controls = 'Commandes HVAC : état non vérifié.'
+            if type(controlled) is int and 0 <= controlled <= data['zones']:
+                controls = f'Zones pilotables : {controlled}/{data["zones"]}.'
+                if data.get('mode_enabled') is True:
+                    controls += '\nMode central disponible.'
+                if controlled == 0:
+                    controls += '\nVérifiez les droits et les alertes.'
             text = (f"=== AIRZONE CONNECTÉ ===\nLecture réelle : {data['zones']} zones.\n"
                     f"Passerelle : {target['host']}\n{paired}\n"
-                    'Commandes HVAC désactivées.\nCompresseur physique non vérifié.\n\n'
+                    f'{controls}\nCompresseur physique non vérifié.\n\n'
                     + addresses['display'])
         elif data.get('rollback') is True:
             text = 'Connexion échouée. Configuration et mode précédents restaurés. Vérifiez par SSH.'
@@ -259,7 +269,7 @@ def confirm(term, current):
         return None, 'done'
     chat = rose_terminal.api()
     while True:
-        term.view.status('Activer le dashboard réel ? OUI/NON' if not result['demo'] else 'SIMULATION : connecter ? OUI/NON')
+        term.view.status('Activer les commandes ? OUI/NON' if not result['demo'] else 'SIMULATION : connecter ? OUI/NON')
         answer, action = chat.read_question(term, allow_empty=True)
         if action in {'sommaire', 'guide'}:
             return None, action

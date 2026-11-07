@@ -101,7 +101,7 @@ def dashboard(port, origin, revision, *, state=False):
     if result.get('demo') is not False:
         raise ValueError('dashboard_still_mock')
     if state:
-        if (result.get('connection') != 'online' or result.get('commands_enabled') is not False
+        if (result.get('connection') != 'online' or result.get('commands_enabled') is not True
                 or not result.get('zones') or any(z.get('available') is not True for z in result['zones'])):
             raise ValueError('dashboard_state_failed')
     elif result.get('status') != 'ok' or result.get('revision') != revision:
@@ -172,9 +172,13 @@ def connect(request):
         receipt(release, host, port, system)
     with preflight('config'):
         settings = json.loads(saved[0]['content'])
+        if (settings.get('zone_controls') or settings.get('master_zone_id') is not None):
+            configured_target = (settings.get('airzone_host'), settings.get('airzone_port', 3000),
+                                 settings.get('system_id', 1))
+            if configured_target != (host, port, system):
+                raise ValueError('control_target_mismatch')
         settings.update(airzone_host=host, airzone_port=port, system_id=system,
-                        public_origin=origin, allow_commands=False, zone_controls={},
-                        master_zone_id=None, supported_modes=[], expected_zone_ids=[])
+                        public_origin=origin, allow_commands=True)
     with preflight('template'):
         template = read(release / 'aizone.service').decode()
         if '@@ARGS@@' not in template or '@@REVISION@@' not in template:
@@ -200,7 +204,12 @@ def connect(request):
         command('/usr/bin/systemctl', 'is-active', '--quiet', 'aizone.service')
         metadata['mode'] = 'real'
         replace(BASE / 'deployment.json', (json.dumps(metadata, indent=2) + '\n').encode(), 0o644)
-        return {'ok': True, 'origin': origin, 'host': host, 'zones': len(result['zones'])}
+        controlled = sum(
+            any(zone.get('controls', {}).get(key) is True for key in ('on', 'setpoint'))
+            for zone in result['zones']
+        )
+        return {'ok': True, 'origin': origin, 'host': host, 'zones': len(result['zones']),
+                'controlled_zones': controlled, 'mode_enabled': result.get('mode_enabled') is True}
     except BaseException:  # noqa: BLE001 - Restore the transaction on interruption too.
         # Finish restoration even if the activation budget or SSH session expires.
         signal.alarm(0)
@@ -260,7 +269,7 @@ def main():
         if isinstance(cause, OSError) and cause.errno is not None:
             result['errno'] = cause.errno
         elif isinstance(cause, ValueError) and cause.args and isinstance(cause.args[0], str) and cause.args[0] in {
-                'unsupported_service_template', 'untrusted_installation', 'oversized_file'}:
+                'unsupported_service_template', 'untrusted_installation', 'oversized_file', 'control_target_mismatch'}:
             result['reason'] = cause.args[0]
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         result = {'ok': False, 'error': 'preflight_failed', 'stage': stage}
