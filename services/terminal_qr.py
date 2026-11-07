@@ -10,8 +10,6 @@ from urllib.parse import urlsplit
 
 import segno
 
-DEMO_URL = "https://example.org"
-
 
 def command(text):
     """None means ordinary input; zero means a malformed local LINK command."""

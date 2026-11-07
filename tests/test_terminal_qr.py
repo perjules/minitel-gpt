@@ -16,7 +16,7 @@ from services import terminal_display as display
 from services import terminal_qr as qr
 from services.console_terminal import Screen
 
-REFS = [{"url": qr.DEMO_URL, "title": "First"}, {"url": "https://example.net/?a=1&b=2#part", "title": "Second"}]
+REFS = [{"url": "https://example.org", "title": "First"}, {"url": "https://example.net/?a=1&b=2#part", "title": "Second"}]
 hardware = terminal_tests.hardware
 paced = timing_tests.paced
 
@@ -167,7 +167,7 @@ def test_malformed_link_stays_local_and_does_not_reuse_prior_sources(hardware):
     assert term.view.qr is None
 
 
-def test_main_loop_keeps_source_order_and_never_sends_link_or_test_qr_to_api():
+def test_main_loop_keeps_source_order_and_never_sends_link_commands_to_api():
     calls = []
     def answer(history, *args, **kwargs):
         calls.append(history)
@@ -179,7 +179,7 @@ def test_main_loop_keeps_source_order_and_never_sends_link_or_test_qr_to_api():
                            {"type": "tool_reference", **REFS[1]}], "references": REFS}
     helper = startup.StartupTests()
     helper.run_session(login_keys("fr") + submitted("first question") + submitted("LINK 2")
-                       + fn(chat.K_RETOUR) + submitted("TEST QR") + fn(chat.K_ENVOI)
+                       + fn(chat.K_RETOUR) + submitted("LIEN 1")
                        + fn(chat.K_RETOUR) + submitted("second question"), factual_reply=answer)
     assert len(calls) == 2
     assert calls[1][-1]["content"] == "second question"

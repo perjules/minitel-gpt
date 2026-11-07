@@ -29,40 +29,29 @@ follows the displayed transcript's arrival order, separately from the canonical
 final answer ordering. Failed/cancelled streams do not expose provisional links.
 Generic process output and Chat Completions text do not supply structured sources.
 
-## Hardware trial (required before merging)
+## Physical validation: accepted 7 November 2026
 
-Use the feature branch through the normal updater/runtime workflow. Segno is a
-new core dependency, so copying Python files alone is insufficient. Do not run a
-second process against `/dev/ttyUSB0`; these checks run **inside ordinary chat**.
+The owner confirmed successful phone scans on the Matra Minitel 1:
 
-1. Enter `TEST QR`, then ENVOI. This installs a synthetic answer and pre-fills
-   `LINK 1`; press ENVOI again. There is no API call or data persistence.
-2. Scan the QR using the phone camera. It must offer exactly
-   `https://example.org`. Opening the website is optional: inspect the URL first.
-   Allow the drawing to finish before judging the pattern.
-3. RETOUR must restore the diagnostic text and gray input field without mosaic
-   fragments. Type a few characters, CORRECTION, ANNULATION; then `LINK 1` + ENVOI
-   to repeat. SOMMAIRE must leave cleanly.
-4. Ask an ordinary web-search question (this step uses the configured API), find
-   a numbered source, then `LINK n` + ENVOI. Scan it and compare the destination
-   with that source. RETOUR must restore exactly the page you were reading;
-   SUITE/RETOUR must then continue paging. Test a second source and a normal
-   follow-up prompt. Invalid `LINK 999` must not call the model.
-5. If a real URL requires full-screen mode, check its bottom return instruction,
-   scan, return and type again. Very long URLs should report the capacity limit.
+- The local validation URL decoded exactly to `https://example.org`.
+- A real web-search source decoded exactly to
+  `https://www.marabout.com/livre/ce-que-cecile-sait-9782501189651/`.
+- The owner approved the feature for integration into `develop`.
 
-Record phone model/camera app, whether each scan succeeds, decoded URL accuracy,
-return/edit/navigation behavior and approximate draw time. If scanning fails,
-photograph the entire screen straight-on with `TEST QR` identified; include the
-white border. Try a little farther away and moderate CRT brightness to distinguish
-focus/bloom from geometry. A code that looks right in the console is not a
-hardware pass. Native G1 rendering and phone scanning on this Matra remain
-**unvalidated** until these observations arrive.
+The [validation record and three original screenshots](hardware/qr-2026-11-07/README.md)
+are retained in the repository. These demonstrate output-field QR codes;
+maximum-capacity full-screen codes and Unicode URL scanning remain software-tested
+rather than separately confirmed on the CRT.
 
-Go/no-go: exact destination + reliable scanning + clean return/input are required
-for acceptance. If the camera cannot resolve the coarse raster, keep the feature
-branch for a larger-module/layout experiment; do not silently shorten URLs or
-change the main display geometry.
+The temporary `TEST QR` chat command and its runtime fixture were removed after
+acceptance. Automated synthetic fixtures remain under `tests/`. Normal operation
+uses `LINK n` or `LIEN n` against the current answer's structured sources.
+
+For future physical regressions, request an ordinary web-search answer, display
+`LINK n`, compare the camera's decoded destination to that source, then RETOUR
+and check paging/editing. Do not run a second process against `/dev/ttyUSB0` while
+the production service is active. A console preview does not prove optical scan
+quality on the CRT.
 
 ## Encoding and limits
 
@@ -84,7 +73,7 @@ encoder before display sanitization. At one module per mosaic block:
 | 39 × 23 temporary cells | 78 × 69 | Version 11: 69 × 69 |
 
 Capacity depends on QR encoding mode and the actual URL; it is not a character
-count cutoff. The demo QR rectangle is 343 UART bytes (about 2.9 seconds at
+count cutoff. The 19-byte validation URL uses 343 UART bytes (about 2.9 seconds at
 1200/7E1), excluding clearing and UI updates. Full-screen Version 11 uses 1065
 bytes for the graphics rectangle. No artificial drawing delay is added.
 
@@ -109,4 +98,4 @@ During development, ZXing-C++ independently decoded the actual emulated G1 raste
 for five URLs (19, 36, 120, 150 and 250 UTF-8 bytes), including an accented URL,
 at square and 9:7 rectangular pixel ratios. Every decoded URL matched exactly.
 ZXing/Pillow were temporary development tools, not added runtime dependencies.
-This is software evidence only; no physical scan result is claimed.
+These raster checks are software evidence; the separate physical results are recorded above.

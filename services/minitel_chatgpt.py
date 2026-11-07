@@ -1676,14 +1676,6 @@ def run_session(t):
 
             # Deterministic local tool: use the ordinary answer display path,
             # but never send the fixture to a model, memory, history or printer.
-            if recall_eligible and terminal_diagnostics.qr_command(question):
-                diagnostic = terminal_diagnostics.test_qr()
-                show_response(t, diagnostic["display"], language, references=diagnostic["references"])
-                # Draw only after the ordinary reader has disabled local echo.
-                t.view.pending_input = list("LINK 1")
-                t.view.status("TEST QR - ENVOI pour afficher le QR")
-                continue
-
             if recall_eligible and terminal_diagnostics.unicode_command(question):
                 diagnostic = terminal_diagnostics.test_unicode()
                 show_response(t, diagnostic["display"], language)

@@ -166,8 +166,7 @@ numérotée du résultat chargé. Aucun appel API supplémentaire. RETOUR restau
 la même page ; le champ de saisie reste utilisable. Les grands codes utilisent
 un écran temporaire ; RETOUR ou la première touche de saisie restaure le cadre.
 
-**TEST QR** + ENVOI charge un exemple local, puis un second ENVOI affiche le QR
-prérempli (`LINK 1`). La caméra doit lire exactement `https://example.org`.
-La console utilise les blocs Unicode sextants G1 : la police doit les posséder.
-La validation du scan sur le CRT reste indispensable ; procédure et limites dans
-[TERMINAL_QR.md](TERMINAL_QR.md).
+Le QR utilise les blocs Unicode sextants G1 : la police de la console doit les
+posséder. Le scan sur le CRT Matra a été validé le 7 novembre 2026 avec le lien
+local et une vraie source web. Le diagnostic temporaire TEST QR a été retiré.
+Procédure, limites et photos dans [TERMINAL_QR.md](TERMINAL_QR.md).
