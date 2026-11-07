@@ -4,7 +4,6 @@ Run from SSH with: python -m services.terminal_diagnostics
 On the Minitel, type TEST UNICODE in ordinary chat, then ENVOI.
 """
 
-
 def unicode_command(text):
     return " ".join(text.split()).casefold() == "test unicode"
 

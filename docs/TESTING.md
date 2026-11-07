@@ -169,3 +169,23 @@ validation/citations, hidden reasoning exclusion, partial/failure paths and term
 recovery. HTTP integration uses only a synthetic loopback server, never a real
 provider. Source/stream commands bypass ordinary history, memory and local tools.
 See [STREAM_SOURCES.md](STREAM_SOURCES.md) for physical checks.
+
+## Source QR codes
+
+`tests/test_terminal_qr.py` covers QR/G1 raster and quiet-zone fidelity, exact
+structured source URLs/numbering, local LINK/LIEN commands, no model
+re-entry, page/input/review preservation, full-screen capacity/recovery, native
+echo and 1200/7E1 backpressure, and streamed transcript source numbering. Segno is
+a locked core dependency; tests do not fetch URLs or call an external QR service.
+The console supports all 64 joined G1 shapes. Physical scans of a local fixture
+and a real web-search source were accepted on 7 November 2026; photos are linked
+from [TERMINAL_QR.md](TERMINAL_QR.md). The temporary TEST QR runtime command was
+removed after acceptance; synthetic automated regressions remain.
+
+Deployment compatibility regressions in `tests/test_runtime.py` use real temporary
+Git repositories to stage a plain target from a helper with Airzone-only files.
+They verify target-manifest selection without execution, obsolete policy removal,
+rejection of unknown privileged paths before staging/stopping, rollback gating,
+and safe failure step/path reporting without leaking argv or captured data.
+`tests/test_admin_maintenance.py` checks that Maintenance displays that diagnostic.
+No Pi installer, real root command or systemd transaction runs in these tests.

@@ -176,7 +176,10 @@ def show(term, source, language="fr"):
     """No producer survives return, user exit, serial failure or an exception."""
     from . import terminal_scrolling
     with source:
-        return terminal_scrolling.show(term, source, language, cancel=source.cancel)
+        outcome = terminal_scrolling.show(term, source, language, cancel=source.cancel)
+        if outcome == "done" and source.result is not None and term.view is not None:
+            term.view.references = tuple(source.result.get("display_references", ()))
+        return outcome
 
 
 def _api_worker():

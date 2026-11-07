@@ -158,3 +158,15 @@ Ctrl-U / ANNULATION arrête réellement le producteur local, puis le cadre habit
 revient sur la dernière page. Ctrl-R / RETOUR et Ctrl-N / SUITE paginent le texte
 reçu. Les deux commandes STREAM sont de vrais appels API facturés ; TEST STREAM
 reste local. Voir [STREAM_SOURCES.md](STREAM_SOURCES.md).
+
+## Liens sources en QR
+
+**LINK n** (ou **LIEN n**) + ENVOI remplace le contenu par le QR de la source
+numérotée du résultat chargé. Aucun appel API supplémentaire. RETOUR restaure
+la même page ; le champ de saisie reste utilisable. Les grands codes utilisent
+un écran temporaire ; RETOUR ou la première touche de saisie restaure le cadre.
+
+Le QR utilise les blocs Unicode sextants G1 : la police de la console doit les
+posséder. Le scan sur le CRT Matra a été validé le 7 novembre 2026 avec le lien
+local et une vraie source web. Le diagnostic temporaire TEST QR a été retiré.
+Procédure, limites et photos dans [TERMINAL_QR.md](TERMINAL_QR.md).
