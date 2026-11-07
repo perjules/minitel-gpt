@@ -169,3 +169,13 @@ validation/citations, hidden reasoning exclusion, partial/failure paths and term
 recovery. HTTP integration uses only a synthetic loopback server, never a real
 provider. Source/stream commands bypass ordinary history, memory and local tools.
 See [STREAM_SOURCES.md](STREAM_SOURCES.md) for physical checks.
+
+## Source QR codes
+
+`tests/test_terminal_qr.py` covers QR/G1 raster and quiet-zone fidelity, exact
+structured source URLs/numbering, local LINK/LIEN and TEST QR commands, no model
+re-entry, page/input/review preservation, full-screen capacity/recovery, native
+echo and 1200/7E1 backpressure, and streamed transcript source numbering. Segno is
+a locked core dependency; tests do not fetch URLs or call an external QR service.
+The console supports all 64 joined G1 shapes. Physical scan acceptance remains
+pending in [TERMINAL_QR.md](TERMINAL_QR.md).

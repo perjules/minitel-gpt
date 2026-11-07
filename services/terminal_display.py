@@ -7,7 +7,7 @@ calls. The only mutable state is the loaded view, row cache and current input.
 from contextlib import nullcontext
 from dataclasses import dataclass
 
-from . import io_limits, rose_terminal, videotex
+from . import io_limits, rose_terminal, terminal_qr, videotex
 
 
 @dataclass(frozen=True)
@@ -126,7 +126,7 @@ class PromptHistory:
 class View:
     """Complete loaded text and display-only paging, independent of feature state."""
 
-    def __init__(self, term, text, language="fr", *, title="3615 IA", reviewed=None, check=None):
+    def __init__(self, term, text, language="fr", *, title="3615 IA", reviewed=None, check=None, references=()):
         chat = rose_terminal.api()
         self.term, self.geometry, self.language = term, getattr(term, "geometry", STANDARD), language
         term.geometry = self.geometry
@@ -151,6 +151,11 @@ class View:
         self.input_limit = io_limits.MAX_QUESTION_CHARS
         self.feature_navigation = False
         self.processing = False
+        # Keep numbering exactly as rendered, independently of lossy screen text.
+        self.references = tuple(dict(ref) for ref in references)
+        self.qr = None
+        self.graphics = False
+        self.qr_notice = ""
 
     def active(self):
         if self.check is not None:
@@ -200,6 +205,9 @@ class View:
             self._blank_cache()
         else:
             self.cache = dict(previous.cache)
+            self.graphics = previous.graphics
+            if previous.qr is not None and previous.qr.full_screen:
+                self.cache.clear()  # Full-screen graphics also replaced the frame.
         self.term.w(NORMAL)
         self.term.view = self
         if previous is not None:
@@ -215,6 +223,17 @@ class View:
 
     def draw(self):
         self.active()
+        if self.qr is not None:
+            if not self.graphics:
+                self.graphics = True
+                terminal_qr.draw(self.term, self.qr)
+            if self.qr.full_screen:
+                self.row(self.geometry.rows, "QR - RETOUR: reponse / autre: saisir")
+                self.term.w(b"\x14")
+            else:
+                self._frame()
+            self.active()
+            return  # Graphics never acknowledge unseen document pages.
         self.row(1, self.heading)
         if self.processing:
             self._frame()
@@ -237,20 +256,24 @@ class View:
         self.row(1, self.heading)
         navigation = {"grades": "SUITE:note+ RETOUR:note-", "exit": "SUITE:page RETOUR:quitter",
                       "catalogue": "SUITE:catalogue RETOUR:quitter"}.get(
-            self.feature_navigation, "SUITE:suiv RETOUR:prec")
-        self.row(self.geometry.navigation_row, "Requete en cours..." if self.processing else
+            self.feature_navigation, "SUITE/RETOUR | LINK n:QR" if self.references else "SUITE:suiv RETOUR:prec")
+        self.row(self.geometry.navigation_row, "QR | RETOUR: reponse / LINK n" if self.qr else
+                 "Requete en cours..." if self.processing else
                  f"Page {self.page + 1}/{len(self.pages)} | {navigation}")
         self.status(self.notice)
         self.input()
 
     def status(self, text=""):
         self.notice = text
+        if self.qr is not None and self.qr.full_screen:
+            return
         fallback = "Commande + ENVOI / SOMMAIRE" if self.language == "fr" else "Command + ENVOI / SOMMAIRE"
         self.row(self.geometry.status_row, text or fallback)
 
     def busy(self, message):
         """Accept input, show waiting status, then clear the previous answer."""
         self.active()
+        self.close_qr(redraw=False)
         chat = rose_terminal.api()
         label = chat.safe_display(message).replace("\n", " ").replace("\t", " ")
         if len(label) > self.geometry.width:
@@ -284,17 +307,18 @@ class View:
             self._frame()
         else:
             for row in reversed(rows):
-                self._erase_row(row)
+                self._erase_row(row, force=self.graphics)
+        self.graphics = False
         self.active()
 
-    def _erase_row(self, row, column=1):
+    def _erase_row(self, row, column=1, *, force=False):
         """Clear a row tail with validated CAN; cursor stays at its start.
 
         Rows are visited bottom-to-top by callers. CAN clears through physical
         C40 with the selected attributes and never causes a wrap.
         """
         old, inverse, foreground, background = self.cache.get(row, (" " * self.geometry.width, False, 7, 0))
-        if not old[column - 1:].strip():
+        if not force and not old[column - 1:].strip():
             return
         self.term.w(self.geometry.position(row, column))
         self.term.w((INVERSE if inverse else POSITIVE) + bytes([0x1B, 0x40 + foreground, 0x1B, 0x50 + background]))
@@ -304,6 +328,8 @@ class View:
                            inverse, foreground, background)
 
     def input(self):
+        if self.qr is not None and self.qr.full_screen:
+            return
         text = "".join(self.buffer)
         # A three-row viewport, with one cell reserved for the cursor. Move in
         # chunks rather than repainting three rows for every long-input key.
@@ -326,6 +352,9 @@ class View:
                                           len(visible) % width + 3))
 
     def move(self, step):
+        if self.qr is not None:
+            self.close_qr()
+            return
         page = max(0, min(len(self.pages) - 1, self.page + step))
         if page == self.page:
             self.input()
@@ -333,6 +362,49 @@ class View:
         self.page = page
         self._clear_content()
         self.draw()
+        self.term.w(b"\x11")
+
+    def open_link(self, number):
+        """Local overlay; no AI call, refetch, history entry or page change."""
+        self.active()
+        try:
+            if not 1 <= number <= len(self.references):
+                raise ValueError("Source absente. Utilisez LINK n")
+            code = terminal_qr.make(self.references[number - 1].get("url"), self.geometry)
+        except ValueError as error:
+            self.close_qr()
+            self.status(str(error))
+            self.input()
+            return
+        self.close_qr(redraw=False)
+        self.qr_notice = self.notice
+        if code.full_screen:
+            self.term.w(b"\x14\x0c\x1e" + NORMAL)
+            self._blank_cache()
+        else:
+            self._clear_content()
+        self.qr = code
+        self.status(f"Source [{number}] - scannez le QR")
+        self.draw()
+        if not code.full_screen:
+            self.term.w(b"\x11")
+
+    def close_qr(self, *, redraw=True):
+        if self.qr is None:
+            return
+        full_screen = self.qr.full_screen
+        self.qr = None
+        self.notice = self.qr_notice
+        if full_screen:
+            self.term.w(b"\x14\x0c\x1e" + NORMAL)
+            self._blank_cache()
+            self.graphics = False
+        else:
+            self._clear_content()
+        if redraw:
+            self.draw()
+        else:
+            self._frame()
         self.term.w(b"\x11")
 
     def read(self, *, allow_empty=False, calculator_mode=False, navigation_mode=False,
@@ -353,7 +425,8 @@ class View:
         self.carry_input = False
         overflow = False
         self.draw()
-        self.term.w(b"\x11")  # Input is ready; keep the caret inside its region.
+        if self.qr is None or not self.qr.full_screen:
+            self.term.w(b"\x11")  # Input is ready; keep the caret inside its region.
         while True:
             self.active()
             kind, code = self.term.read_key(0.2 if self.check is not None else chat.IDLE_TIMEOUT)
@@ -364,6 +437,10 @@ class View:
                 return None, "timeout"
             if touch is not None:
                 touch()
+            if self.qr is not None and self.qr.full_screen:
+                self.close_qr()
+                if kind == "fn" and code in (chat.K_RETOUR, chat.K_SUITE, chat.K_ANNUL, chat.K_ENVOI):
+                    continue
             submitted = (kind == "fn" and code == chat.K_ENVOI) or (
                 kind == "char" and code in (chat.CR, chat.LF))
             if submitted:
@@ -376,10 +453,16 @@ class View:
                 elif self.buffer or allow_empty:
                     text = "".join(self.buffer)
                     word = text.strip().upper()
-                    if not navigation_mode and word in ("SUIVANT", "SUITE", "PRECEDENT"):
+                    link = terminal_qr.command(text)
+                    if link is not None:
+                        self.buffer.clear()
+                        self.input()
+                        self.open_link(link)
+                    elif not navigation_mode and word in ("SUIVANT", "SUITE", "PRECEDENT"):
                         self.buffer.clear()
                         self.move(-1 if word == "PRECEDENT" else 1)
                     else:
+                        self.close_qr(redraw=False)
                         return text, "envoi"
                 continue
             if kind == "fn":
@@ -398,6 +481,9 @@ class View:
                 if code == chat.K_GUIDE:
                     return None, "guide"
                 if code in (chat.K_SUITE, chat.K_RETOUR):
+                    if self.qr is not None:
+                        self.close_qr()
+                        continue
                     if navigation_mode:
                         self.carry_input = True
                         return "SUIVANT" if code == chat.K_SUITE else "PRECEDENT", "envoi"
@@ -406,6 +492,9 @@ class View:
                     self.move(1 if code == chat.K_SUITE else -1)
                     continue
                 if code == chat.K_ANNUL:
+                    if self.qr is not None:
+                        self.close_qr()
+                        continue
                     self.term.prompt_history.edited()
                     self.buffer.clear()
                     overflow = False

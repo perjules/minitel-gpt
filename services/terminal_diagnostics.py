@@ -4,6 +4,19 @@ Run from SSH with: python -m services.terminal_diagnostics
 On the Minitel, type TEST UNICODE in ordinary chat, then ENVOI.
 """
 
+from .terminal_qr import DEMO_URL
+
+
+def qr_command(text):
+    return " ".join(text.split()).casefold() == "test qr"
+
+
+def test_qr():
+    return {"display": "TEST QR - sans API\n\n[1] " + DEMO_URL +
+            "\n\nENVOI: afficher le QR.\nScannez avec votre telephone.\nRETOUR: retrouver cette page.\n"
+            "LINK 1 permet de le revoir.",
+            "references": [{"url": DEMO_URL, "title": "QR de demonstration"}], "turn": None}
+
 
 def unicode_command(text):
     return " ".join(text.split()).casefold() == "test unicode"

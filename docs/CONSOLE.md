@@ -158,3 +158,16 @@ Ctrl-U / ANNULATION arrête réellement le producteur local, puis le cadre habit
 revient sur la dernière page. Ctrl-R / RETOUR et Ctrl-N / SUITE paginent le texte
 reçu. Les deux commandes STREAM sont de vrais appels API facturés ; TEST STREAM
 reste local. Voir [STREAM_SOURCES.md](STREAM_SOURCES.md).
+
+## Liens sources en QR
+
+**LINK n** (ou **LIEN n**) + ENVOI remplace le contenu par le QR de la source
+numérotée du résultat chargé. Aucun appel API supplémentaire. RETOUR restaure
+la même page ; le champ de saisie reste utilisable. Les grands codes utilisent
+un écran temporaire ; RETOUR ou la première touche de saisie restaure le cadre.
+
+**TEST QR** + ENVOI charge un exemple local, puis un second ENVOI affiche le QR
+prérempli (`LINK 1`). La caméra doit lire exactement `https://example.org`.
+La console utilise les blocs Unicode sextants G1 : la police doit les posséder.
+La validation du scan sur le CRT reste indispensable ; procédure et limites dans
+[TERMINAL_QR.md](TERMINAL_QR.md).
