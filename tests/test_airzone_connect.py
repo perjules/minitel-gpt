@@ -243,16 +243,17 @@ def test_main_loop_routes_exact_command_and_recovers_to_ordinary_chat(monkeypatc
     confirmation = Mock(return_value=(None, 'done'))
     monkeypatch.setattr(connect, 'confirm', confirmation)
     helper = startup.StartupTests()
-    _, calls = helper.run_session(startup.login_keys('fr') + submitted('connect airzone') + submitted('FOLLOW UP'))
+    _, calls = helper.run_session(startup.login_keys('fr') + submitted('hack airzone') + submitted('FOLLOW UP'))
     assert factory.called is enabled and confirmation.called is enabled
     questions = [call[1][-1]['content'] for call in calls]
-    assert questions == (['FOLLOW UP'] if enabled else ['connect airzone', 'FOLLOW UP'])
+    assert questions == (['FOLLOW UP'] if enabled else ['hack airzone', 'FOLLOW UP'])
 
 
 def test_no_freeform_connect_action_or_privileged_arguments():
-    assert connect.command('CONNECT AIRZONE!')
-    assert not connect.command('connect airzone 192.168.1.1')
-    assert not connect.command('please connect airzone')
+    assert demo.hack_command('HACK AIRZONE!')
+    assert not demo.hack_command('CONNECT AIRZONE')
+    assert not demo.hack_command('hack airzone 192.168.1.1')
+    assert not demo.hack_command('please hack airzone')
     assert set(demo.TOOL['function']['parameters']['properties']['action']['enum']) == {'discover', 'identify', 'probe', 'state'}
     sudoers = (Path(__file__).parents[1] / 'config/minitel-airzone-sudoers').read_text()
     assert 'ALL=(ALL)' not in sudoers and '*' not in sudoers
@@ -294,9 +295,9 @@ def test_confirmed_main_loop_activation_uses_result_and_normal_chat_recovers(mon
     monkeypatch.setattr(chat.stream_sources, 'show', lambda *args: 'done')
     monkeypatch.setattr(connect, 'confirm', lambda *args: (finished_worker({'display': 'ACTUAL CONNECT RESULT'}), 'done'))
     helper = startup.StartupTests()
-    term, calls = helper.run_session(startup.login_keys('fr') + submitted('connect airzone') + submitted('FOLLOW UP'))
+    term, calls = helper.run_session(startup.login_keys('fr') + submitted('hack airzone') + submitted('FOLLOW UP'))
     assert [call[1][-1]['content'] for call in calls] == ['FOLLOW UP']
-    assert 'connect airzone' not in str(helper.memories[0].record.mock_calls)
+    assert 'hack airzone' not in str(helper.memories[0].record.mock_calls)
     assert term is not None
 
 
@@ -553,8 +554,8 @@ def test_real_connect_worker_references_reach_view_and_qr_stays_out_of_chat(monk
     show = Mock(wraps=connect.show_summary)
     monkeypatch.setattr(connect, 'show_summary', show)
     helper = startup.StartupTests()
-    _, calls = helper.run_session(startup.login_keys('fr') + submitted('connect airzone')
+    _, calls = helper.run_session(startup.login_keys('fr') + submitted('hack airzone')
                                   + fn(chat.K_RETOUR) + submitted('FOLLOW UP'))
     assert show.call_args.kwargs['references'] == references
     assert [call[1][-1]['content'] for call in calls] == ['FOLLOW UP']
-    assert 'connect airzone' not in str(helper.memories[0].record.mock_calls)
+    assert 'hack airzone' not in str(helper.memories[0].record.mock_calls)

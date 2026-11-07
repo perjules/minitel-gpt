@@ -122,10 +122,16 @@ def test_scrolling_uses_real_worker_and_restores_last_page_input(installation, m
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("MISTRAL_KEY", "must-not-appear-in-report")
     uart = VisibleUART()
+    uart.write = Mock(wraps=uart.write)
     term = chat.Term(uart)
     source = hack.source()
     assert source.process is None
     assert stream_sources.show(term, source) == "done"
+    writes = [call.args[0] for call in uart.write.call_args_list]
+    theatre = next(data for data in writes if b"MISE EN SC" in data and data.startswith(b"\r\n"))
+    assert theatre.count(b"\r\n") >= 6 and theatre.endswith(b"\r\n\r\n")
+    report = next(data for data in writes if b"BILAN FACTUEL" in data and b"Rapport JSON" in data)
+    assert report.startswith(b"\r\n") and b"\r\n\r\n" not in report[2:]
     assert source.closed and source.process.returncode == 0
     assert "BILAN FACTUEL" in term.view.text and "SIMULATION" in term.view.text
     assert "must-not-appear" not in term.view.text

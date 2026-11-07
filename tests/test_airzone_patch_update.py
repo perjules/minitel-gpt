@@ -1,20 +1,15 @@
 """One-shot gateway pairing and branch-scoped terminal maintenance."""
 import json
-import os
-import stat
 import subprocess
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 from test_airzone_demo import envelope
-from test_rose_echo import submitted
-from test_terminal_display import VisibleUART
 from test_terminal_updates import checked, finished_worker
 
 from services import airzone_hack as hack
 from services import minitel_chatgpt as chat
-from services import terminal_display
 
 
 @pytest.fixture
@@ -28,41 +23,6 @@ def receipt(tmp_path, monkeypatch):
     path = tmp_path / "minitel-last-real.json"
     path.write_text(json.dumps(report))
     return source, report, path
-
-
-@pytest.mark.parametrize("reply", ["OUI", "YES", "NON", "NO", ""])
-def test_actual_frame_pairing_keeps_photo_summary_and_only_yes_saves(receipt, reply):
-    source, _, path = receipt
-    env = path.parent / ".env"
-    env.write_text("# preserve comments\nMISTRAL_KEY=synthetic-secret\nAIRZONE_GATEWAY=\n")
-    uart = VisibleUART()
-    uart.keys.extend(submitted(reply))
-    term = chat.Term(uart)
-    terminal_display.View(term, "BILAN FACTUEL\n192.168.1.50\nSix zones lues.").install()
-    original = term.view.text
-    assert hack.offer_patch(term, source) == "done"
-    assert term.view.text == original
-    paired = reply in {"OUI", "YES"}
-    assert ("AIRZONE_GATEWAY=192.168.1.50" in env.read_text()) is paired
-    assert env.read_text().startswith("# preserve comments\nMISTRAL_KEY=synthetic-secret\n")
-    assert os.environ["AIRZONE_GATEWAY"] == ("192.168.1.50" if paired else "")
-    if paired:
-        assert stat.S_IMODE(env.stat().st_mode) == 0o600
-        assert "192.168.1.50" in term.view.notice
-
-
-def test_mock_pairing_rehearses_yes_without_persisting_fake_gateway(receipt, monkeypatch):
-    source, report, path = receipt
-    path.unlink()
-    report.update(demo=True)
-    report["diagnostics"][0]["result"] = envelope()
-    (path.parent / "minitel-last-mock.json").write_text(json.dumps(report))
-    monkeypatch.setattr(chat, "read_question", Mock(return_value=("OUI", "envoi")))
-    term = Mock()
-    assert hack.offer_patch(term, source) == "done"
-    assert not (path.parent / ".env").exists()
-    assert os.environ["AIRZONE_GATEWAY"] == ""
-    assert "SIMULATION" in term.view.status.call_args.args[0]
 
 
 @pytest.mark.parametrize("reason", ["stale_run", "failed", "cancelled", "schema", "injected_host", "malformed"])
@@ -83,16 +43,8 @@ def test_invalid_old_or_cancelled_receipts_never_offer_configuration(receipt, mo
     path.write_text(json.dumps(report))
     read = Mock()
     monkeypatch.setattr(chat, "read_question", read)
-    assert hack.offer_patch(Mock(), source) == "done"
+    assert hack.verified_state(source) is None
     read.assert_not_called()
-    assert not (path.parent / ".env").exists()
-
-
-@pytest.mark.parametrize("action", ["sommaire", "guide", "timeout"])
-def test_pairing_exit_does_not_save(receipt, monkeypatch, action):
-    source, _, path = receipt
-    monkeypatch.setattr(chat, "read_question", Mock(return_value=(None, action)))
-    assert hack.offer_patch(Mock(), source) == (action if action != "timeout" else "done")
     assert not (path.parent / ".env").exists()
 
 

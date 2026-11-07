@@ -94,6 +94,7 @@ def _show(term, source, language, *, cancel):
         raise TypeError("Scrolling source must be text or a chunk queue")
     parts = [source] if static else []
     rows = deque(chat.wrap(chat.safe_display(source), term.geometry.columns) if static else ())
+    blocks = getattr(source, "blocks", False) is True
     wrapper = _Rows(term.geometry.columns)
     ended, stopped, failed = static, False, False
     action = "done"
@@ -127,7 +128,8 @@ def _show(term, source, language, *, cancel):
                     key(wait=True)
                     continue
                 if rows:
-                    term.w(terminal_display.encode_runs(rows.popleft()) + b"\r\n")
+                    row = rows.popleft()
+                    term.w(row if blocks else terminal_display.encode_runs(row) + b"\r\n")
                 elif ended:
                     # Let the last row reach the CRT before clearing it. No key
                     # wait or minimum display duration after physical delivery.
@@ -142,14 +144,19 @@ def _show(term, source, language, *, cancel):
                         key(wait=True)
                         continue
                     if chunk is None:
-                        rows.extend(wrapper.feed("", final=True))
+                        if not blocks:
+                            rows.extend(wrapper.feed("", final=True))
                         ended = True
                     elif isinstance(chunk, Exception) or not isinstance(chunk, str):
                         failed = ended = True
                         break
                     else:
                         parts.append(chunk)
-                        rows.extend(wrapper.feed(chunk))
+                        if blocks:
+                            lines = chat.wrap(chat.safe_display(chunk.removesuffix("\n")), term.geometry.columns)
+                            rows.append(b"".join(terminal_display.encode_runs(line) + b"\r\n" for line in lines))
+                        else:
+                            rows.extend(wrapper.feed(chunk))
         finally:
             interrupted = stopped or failed or not ended
             confirmed = _cancel(cancel) if not static and interrupted else False

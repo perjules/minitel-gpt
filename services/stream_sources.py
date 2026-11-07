@@ -23,15 +23,17 @@ class ProcessSource:
     block; its producer never receives the terminal or owns the UART.
     """
 
-    def __init__(self, argv, *, cwd=None, env=None, api_job=None):
+    def __init__(self, argv, *, cwd=None, env=None, api_job=None, blocks=False):
         if isinstance(argv, (str, bytes)) or not argv or not all(isinstance(arg, str) for arg in argv):
             raise TypeError("Expected an explicit argument list")
         self.argv = list(argv)
         self.cwd, self.env, self._job = cwd, env, api_job
         self.api = api_job is not None
+        self.blocks = blocks
+        self.framed = self.api or blocks
         self.process = self.result = None
         self.closed = self.eof = self.cancelled = False
-        self._decoder = codecs.getincrementaldecoder("utf-8")("strict" if self.api else "replace")
+        self._decoder = codecs.getincrementaldecoder("utf-8")("strict" if self.framed else "replace")
         self._buffer = self._carriage = ""
         self._complete = False
         self._candidate = None
@@ -62,7 +64,7 @@ class ProcessSource:
                     stdin.seek(0)
                 self.process = subprocess.Popen(
                     self.argv, cwd=self.cwd, env=environment, stdin=stdin or subprocess.DEVNULL,
-                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL if self.api else subprocess.STDOUT,
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL if self.framed else subprocess.STDOUT,
                     start_new_session=True, close_fds=True,
                 )
                 os.set_blocking(self.process.stdout.fileno(), False)
@@ -124,7 +126,7 @@ class ProcessSource:
         if self.closed:
             return None
         try:
-            if self.api and "\n" in self._buffer:
+            if self.framed and "\n" in self._buffer:
                 return self._frame()
             if self.process is None:
                 self._start()
@@ -136,7 +138,7 @@ class ProcessSource:
                 raise Empty from None
             if data:
                 text = self._decoder.decode(data)
-                if self.api:
+                if self.framed:
                     self._buffer += text
                     if len(self._buffer) > MAX_FRAME:
                         raise ValueError("Stream worker frame too large")
@@ -154,7 +156,7 @@ class ProcessSource:
                 self.eof = True
                 tail = self._decoder.decode(b"", final=True) + ("\n" if self._carriage else "")
                 self._carriage = ""
-                if not self.api and tail:
+                if not self.framed and tail:
                     return tail
             code = self.process.poll()
             if code is None:
@@ -163,7 +165,7 @@ class ProcessSource:
             self.process.wait()
             self.process.stdout.close()
             self.closed = True
-            if code != 0 or self.api and (not self._complete or self._buffer):
+            if code != 0 or self.framed and (not self._complete or self._buffer):
                 return RuntimeError("Stream producer failed")
             self.result = self._candidate
             return None

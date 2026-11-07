@@ -180,10 +180,6 @@ def show_summary(term, text, language='fr', *, references=(), simulated=False):
     return 'done'
 
 
-def command(question):
-    return bool(re.fullmatch(r'\s*connect\s+airzone\s*[!.]*\s*', question, re.IGNORECASE))
-
-
 def activate(target):
     """The installed sudo rule accepts this one fixed helper, without arguments."""
     references = []
@@ -248,7 +244,7 @@ def confirm(term, current):
             return None, 'done'
         # Consent may take minutes: revalidate freshness before starting anything.
         if airzone_hack.verified_state(current) is None or not airzone_demo.enabled():
-            term.view.status('Diagnostic expiré. Relancez CONNECT AIRZONE.')
+            term.view.status('Diagnostic expiré. Relancez HACK AIRZONE.')
             return None, 'done'
         target = result['target']
         output = Queue(maxsize=1)

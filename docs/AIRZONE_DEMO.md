@@ -23,7 +23,7 @@ git merge-base --is-ancestor 35d1bf23f13d029445adbcb6e6a33eef06581e07 HEAD
 ```
 
 The standalone CLI requires Python 3.10+ and the standard library only. Diagnostics
-need no dashboard installation. Optional `CONNECT AIRZONE` commissioning below
+need no dashboard installation. Confirmed `HACK AIRZONE` commissioning below
 uses an already installed Aizone service on this same card. Julian has authorized
 this cohabitation; SD migration is his separate operation.
 
@@ -82,9 +82,8 @@ without a URL, hostname or port. Port/system defaults are 3000/1.
    At completion the fixed frame opens on the last page. RETOUR/SUITE browse the
    retained transcript without repeating a diagnostic. No artificial sleeps or
    SUITE wait at EOF are added; normal serial transmission time still applies.
-   After success, the status row asks `Raccorder Airzone au MF-83 ? OUI/NON` while the
-   factual summary stays on screen for a photograph. In mock mode OUI rehearses
-   the confirmation without saving the synthetic gateway.
+   After success, answer OUI to rehearse dashboard activation and show its QR.
+   The simulated gateway is never saved.
 3. Ask “Trouve l'API Airzone.” Expect a simulated candidate, **not** verified HVAC.
 4. Temporarily use an unavailable checkout path and restart; ask about Airzone.
    Expect a compact diagnostic failure, no invented temperatures. Ask an unrelated
@@ -118,9 +117,8 @@ without a URL, hostname or port. Port/system defaults are 3000/1.
 5. Compare returned rooms/IDs, temperatures and settings with physical thermostats.
    A successful read is device-reported HVAC state, **not proof of a running
    compressor**, correct physical mapping or removal of the cloud subscription.
-   Answer OUI to `Raccorder Airzone au MF-83 ? OUI/NON` to save the verified real host as
-   `AIRZONE_GATEWAY` in Minitel's `.env`. It works immediately and survives a
-   restart. NON/empty input leaves configuration unchanged; SOMMAIRE/GUIDE exit.
+   Answer OUI to activate the read-only dashboard, save the verified gateway in
+   Minitel's `.env`, and show the dashboard QR. NON/empty input cancels activation.
    Capture both Git revisions and the observation time in private on-site notes.
    Real hardware and live model wording remain acceptance tests, not fixture claims.
 6. After the demonstration, shut down normally, remove power, remove and retain
@@ -274,7 +272,7 @@ Settings writes and polling benchmarks remain separate Airzone tasks.
 ## Disable or roll back
 
 For optional dashboard activation from the same terminal, see
-[CONNECT AIRZONE](AIRZONE_CONNECT.md). It needs one-time protected-helper setup
+[HACK AIRZONE](AIRZONE_CONNECT.md). It needs one-time protected-helper setup
 and the separately installed Airzone service; diagnostic-only use remains unchanged.
 
 Set `AIRZONE_DEMO_ENABLED=0` in `.env`, then restart `minitel-chatgpt` and `admin-ui`.

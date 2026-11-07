@@ -13,7 +13,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from . import airzone_demo as diagnostic
-from . import config_store, deployment, rose_terminal, stream_sources
+from . import config_store, deployment, stream_sources
 
 ROOT = Path(__file__).resolve().parents[1]
 UPDATE_BRANCH = "feature/airzone-demo"
@@ -40,7 +40,7 @@ def source():
     """Lazy source: no model request, command arguments, credentials or UART in child."""
     identifier = uuid.uuid4().hex
     current = stream_sources.ProcessSource([sys.executable, "-u", "-m", "services.airzone_hack"], cwd=ROOT,
-                                           env={"AIRZONE_HACK_RUN_ID": identifier})
+                                           env={"AIRZONE_HACK_RUN_ID": identifier}, blocks=True)
     current.airzone_run_id = identifier
     current.airzone_evidence_dir = Path(os.environ.get("AIRZONE_EVIDENCE_DIR", str(Path.home() / "airzone-evidence"))).expanduser()
     return current
@@ -70,49 +70,6 @@ def verified_state(current):
         except (OSError, ValueError, TypeError, KeyError, IndexError, config_store.StorageFailure):
             continue
     return None
-
-
-def patch_candidate(current):
-    result = verified_state(current)
-    return (result["target"]["host"], result["demo"]) if result else None
-
-
-def offer_patch(term, current, language="fr"):
-    """Local yes/no; preserve the photo-worthy summary instead of replacing it."""
-    candidate = patch_candidate(current)
-    if candidate is None:
-        return "done"
-    gateway, mock = candidate
-    chat = rose_terminal.api()
-
-    def notice(text):
-        if getattr(term, "view", None) is not None:
-            term.view.status(text)
-        else:
-            term.line(text)
-
-    while True:
-        notice("Raccorder Airzone au MF-83 ? OUI/NON")
-        answer, action = chat.read_question(term, allow_empty=True)
-        if action in {"sommaire", "guide"}:
-            return action
-        answer = (answer or "").strip().upper()
-        if action == "timeout" or answer in {"", "NON", "NO", "ANNULER", "CANCEL"}:
-            notice("Raccordement annulé. Bilan conservé.")
-            return "done"
-        if answer not in {"OUI", "YES"}:
-            continue
-        if mock:
-            notice("SIMULATION : raccordement fictif.")
-            return "done"
-        try:
-            config_store.update_env(ROOT / ".env", {"AIRZONE_GATEWAY": gateway})
-        except (OSError, ValueError, config_store.StorageFailure):
-            notice("Échec d'enregistrement. Vérifier SSH.")
-            return "done"
-        os.environ["AIRZONE_GATEWAY"] = gateway
-        notice("Airzone raccordé : " + gateway)
-        return "done"
 
 
 def update_checkout(project, branch):
@@ -216,9 +173,7 @@ def run(env=None, emit=None):
         if result is None:
             report["phase_in_progress"] = operation
             checkpoint()
-            emit("\nMF-83 / MISE EN SCÈNE")
-            for line in random.choice(ANTICS[operation]):
-                emit("  " + line)
+            emit("\nMF-83 / MISE EN SCÈNE\n" + "\n".join("  " + line for line in random.choice(ANTICS[operation])) + "\n")
             emit("DIAG / " + operation.upper() + " : démarrage")
         else:
             report.pop("phase_in_progress", None)
@@ -229,10 +184,11 @@ def run(env=None, emit=None):
                 status += f" / {len(result['data']['candidates'])} candidat(s), HVAC non vérifié"
             elif result["ok"]:
                 status += f" / {result['data']['zone_count']} zones lues"
-            emit("DIAG / " + operation.upper() + " : " + status)
+            lines = ["DIAG / " + operation.upper() + " : " + status]
             if result["ok"] and operation == "discover":
                 for candidate in result["data"]["candidates"][:8]:
-                    emit(f"DIAG / candidat : {candidate['host']}:{candidate['port']}")
+                    lines.append(f"DIAG / candidat : {candidate['host']}:{candidate['port']}")
+            emit("\n".join(lines))
 
     try:
         backend = diagnostic.Backend(env, progress=progress, owned_group=True)
@@ -241,19 +197,17 @@ def run(env=None, emit=None):
         if not backend.enabled:
             raise diagnostic.DiagnosticError("disabled")
         checkpoint()
-        emit("SIMULATION - aucune connexion réelle" if backend.mock else "DIAGNOSTIC LOCAL - lecture seule")
-        emit("HACK AIRZONE / ALCATEL MF-83")
-        emit("MISE EN SCÈNE : les exploits sont fictifs.")
-        emit("DIAG et BILAN : résultats du script.")
-        emit("ANNULATION : tuer la tentative, pas la clim.")
+        mode = "SIMULATION - aucune connexion réelle" if backend.mock else "DIAGNOSTIC LOCAL - lecture seule"
+        emit(mode + "\nHACK AIRZONE / ALCATEL MF-83\nMISE EN SCÈNE : les exploits sont fictifs.\n"
+             "DIAG et BILAN : résultats du script.\nANNULATION : tuer la tentative, pas la clim.")
         report["revisions"] = {"minitel": revision(ROOT), "airzone": revision(backend.checkout)}
         checkpoint()
         results = backend.execute("airzone_diagnostic", {"action": "state"},
                                   deadline=time.monotonic() + diagnostic.BUDGET, full_diagnostic=True)
         if results[-1]["ok"] and results[-1]["operation"] == "state":
             report["status"] = "complete"
-            emit("\nMF-83 / Aucun pare-feu n'a été humilié.")
-            emit("Nous avons simplement lu une API.\nLaissez-moi rédiger le rapport autrement.")
+            emit("\nMF-83 / Aucun pare-feu n'a été humilié.\nNous avons simplement lu une API.\n"
+                 "Laissez-moi rédiger le rapport autrement.")
         else:
             report.update(status="failed", error=results[-1]["error"]["code"])
     except KeyboardInterrupt:
@@ -265,11 +219,8 @@ def run(env=None, emit=None):
         report["completed_at"] = datetime.now(UTC).isoformat()
         if path:
             checkpoint()
-        emit("\n" + factual_summary(report))
-        if saved:
-            emit("Rapport JSON privé : " + str(path))
-        else:
-            emit("Rapport non enregistré. Photo du bilan possible.")
+        evidence = ("Rapport JSON privé : " + str(path)) if saved else "Rapport non enregistré. Photo du bilan possible."
+        emit("\n" + factual_summary(report) + "\n" + evidence)
     return report
 
 
@@ -278,9 +229,10 @@ def main():
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, stop)
     try:
-        run()
+        run(emit=lambda text: print(json.dumps({"text": text + "\n"}), flush=True))
+        print(json.dumps({"result": {}}), flush=True)
     except Exception:  # noqa: BLE001 - Never expose raw diagnostics, credentials or tracebacks on the CRT.
-        print("HACK AIRZONE : interruption interne. Aucun succès confirmé.", flush=True)
+        print(json.dumps({"text": "HACK AIRZONE : interruption interne. Aucun succès confirmé.\n"}), flush=True)
         return 1
     return 0
 

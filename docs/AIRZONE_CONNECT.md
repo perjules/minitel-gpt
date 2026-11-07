@@ -1,14 +1,14 @@
-# CONNECT AIRZONE — dashboard commissioning
+# HACK AIRZONE — dashboard commissioning
 
-The exact local terminal command `CONNECT AIRZONE` runs the existing scrolling
+The exact local terminal command `HACK AIRZONE` runs the existing scrolling
 discover → probe → state sequence, then asks **Activer le dashboard réel ? OUI/NON**.
-It is never an LLM tool. `HACK AIRZONE` keeps its detection/photo/.env pairing.
+Dashboard activation requires local confirmation and is never an LLM tool.
 Mock OUI reports simulation; no sudo, config, service or .env changes occur.
 ANNULATION kills diagnostics as usual. NON/empty/exit makes no service change.
 
 ## Optical handoff — scan the Minitel
 
-After confirmed success, **CONNECT AIRZONE automatically displays the current LAN
+After confirmed success, **HACK AIRZONE automatically displays the current LAN
 dashboard as a QR code**. Scan the CRT with a phone on the same Wi-Fi to open the
 dashboard. If no LAN URL is available, it opens the configured Tailnet URL instead;
 the phone then needs Tailscale access. URLs are entry points, not a claim that
@@ -29,7 +29,7 @@ simulated diagnostic remains explicitly labelled **SIMULATION**. It does not
 activate the real service or write HVAC settings. Failed real commissioning does
 not present a successful connection QR or inherit old web-search sources.
 
-Smoke test: MAJ, CONNECT AIRZONE, OUI; scan the automatically shown LAN QR, RETOUR,
+Smoke test: MAJ, HACK AIRZONE, OUI; scan the automatically shown LAN QR, RETOUR,
 LINK 2 for Tailnet (if listed), RETOUR, then an ordinary chat question. Compare
 decoded destinations with the numbered address page and confirm simulation/real
 labelling and thermostat readings separately. Existing generic QR scan acceptance
@@ -100,7 +100,7 @@ sudo bash scripts/install_runtime.sh --branch feature/airzone-demo
 
 Wait for `ready` in `/var/lib/minitel-gpt/deployment.json`. No new dependencies.
 Use `AIRZONE_DEMO_ENABLED=1`, `AIRZONE_DEMO_MOCK=1` for rehearsal. At the house,
-set mock to `0`, restart `minitel-chatgpt`, enter CONNECT AIRZONE, then OUI.
+set mock to `0`, restart `minitel-chatgpt`, enter HACK AIRZONE, then OUI.
 
 ## Confirmed activation and recovery
 
@@ -160,7 +160,7 @@ failure restoration, the fixed subprocess invocation, GET-only dashboard checks,
 mock/confirmation/flag gating, protected runtime assets and ordinary chat recovery.
 They never install a service or probe real HVAC. The Airzone repository is unchanged.
 
-Before departure, install the helpers/service and run CONNECT AIRZONE with mock=1:
+Before departure, install the helpers/service and run HACK AIRZONE with mock=1:
 all phases simulated, OUI causes no config/service change, photo summary remains
 available, ordinary chat still works. Check the phone's existing demo URL. On site,
 with mock=0, confirm a real state read, OUI, then check the phone page has no demo
