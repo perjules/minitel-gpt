@@ -16,6 +16,17 @@ from . import airzone_demo, airzone_hack, config_store, rose_terminal, terminal_
 
 DASHBOARD_DEPLOYMENT = Path('/opt/aizone/deployment.json')
 ADDRESSES_HEADING = '=== ADRESSES DU DASHBOARD ==='
+FAILURE_HEADING = '=== CONNEXION AIRZONE ÉCHOUÉE ==='
+PREFLIGHT_LABELS = {
+    'runtime': 'Runtime Minitel ou branche installée.',
+    'lock': 'Verrou Aizone dans /run/lock.',
+    'request': 'Paramètres de la demande.',
+    'installation': 'Installation ou métadonnées Aizone.',
+    'service': 'Service aizone inactif.',
+    'gateway_read': 'Lecture depuis le compte aizone.',
+    'backup': 'Préparation de la sauvegarde.',
+}
+
 
 
 def origin_url(value):
@@ -156,12 +167,13 @@ def dashboard_addresses(origin=None):
 
 def show_summary(term, text, language='fr', *, references=(), simulated=False):
     """End on the addresses; retain the diagnostic/photo pages with ordinary paging."""
+    page_heading = FAILURE_HEADING if text.startswith(FAILURE_HEADING) else ADDRESSES_HEADING
     previous = getattr(term, 'view', None)
     if previous is not None:
         text = previous.text + '\n\n' + text
-    prefix, heading, addresses = text.rpartition(ADDRESSES_HEADING)
+    prefix, heading, addresses = text.rpartition(page_heading)
     if heading:
-        # Keep both addresses together on the final page, including long DNS names.
+        # Start the address or error block on its own page.
         geometry = getattr(term, 'geometry', terminal_display.STANDARD)
         chat = rose_terminal.api()
         prefix = prefix.rstrip('\n')
@@ -212,10 +224,15 @@ def activate(target):
             text = 'Connexion échouée. Configuration et mode précédents restaurés. Vérifiez par SSH.'
         elif data.get('rollback') is False:
             text = 'Connexion ET restauration échouées. Intervention SSH nécessaire. État du dashboard incertain.'
+        elif data.get('error') == 'preflight_failed' and isinstance(data.get('stage'), str):
+            label = PREFLIGHT_LABELS.get(data['stage'], 'Étape de préparation inconnue.')
+            text = f'Vérification refusée.\n{label}\nAucun succès confirmé.'
         else:
             text = 'Connexion indisponible. Vérifiez par SSH le service Aizone installé et le helper Minitel. Aucun succès confirmé.'
     except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError):
         text = 'Connexion non confirmée. Vérifiez le dashboard et son service par SSH avant de recommencer.'
+    if not text.startswith('=== AIRZONE CONNECTÉ ==='):
+        text = FAILURE_HEADING + '\n' + text
     return {'display': text, 'references': references}
 
 

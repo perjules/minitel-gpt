@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
@@ -127,6 +128,19 @@ def restore(saved):
     command('/usr/bin/systemctl', 'is-active', '--quiet', 'aizone.service')
 
 
+class PreflightError(ValueError):
+    pass
+
+
+@contextmanager
+def preflight(stage):
+    try:
+        yield
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+        # Fixed stage names, never exception text or captured gateway output.
+        raise PreflightError(stage) from error
+
+
 def connect(request):
     if not isinstance(request, dict) or set(request) != {'host', 'port', 'system_id'}:
         raise ValueError('invalid_target')
@@ -138,30 +152,34 @@ def connect(request):
             or int(address) & 255 == 255 or type(port) is not int or not 1 <= port <= 65535
             or type(system) is not int or not 1 <= system <= 32):
         raise ValueError('invalid_target')
-    saved = snapshot()  # Also requires an existing, root-owned installation.
-    metadata = json.loads(saved[2]['content'])
-    revision, origin, backend_port = metadata['revision'], metadata['origin'], metadata['port']
-    if (not re.fullmatch('[0-9a-f]{40}', revision) or metadata['mode'] not in {'mock', 'real'}
-            or type(backend_port) is not int or not 1 <= backend_port <= 65535
-            or not re.fullmatch(r'https?://[A-Za-z0-9.-]+(?::[0-9]{1,5})?', origin)):
-        raise ValueError('invalid_deployment')
-    release = (BASE / 'current').resolve(strict=True)
-    if release != BASE / 'releases' / revision:
-        raise ValueError('deployment_mismatch')
-    trusted(release)
+    with preflight('installation'):
+        saved = snapshot()  # Also requires an existing, root-owned installation.
+        metadata = json.loads(saved[2]['content'])
+        revision, origin, backend_port = metadata['revision'], metadata['origin'], metadata['port']
+        if (not re.fullmatch('[0-9a-f]{40}', revision) or metadata['mode'] not in {'mock', 'real'}
+                or type(backend_port) is not int or not 1 <= backend_port <= 65535
+                or not re.fullmatch(r'https?://[A-Za-z0-9.-]+(?::[0-9]{1,5})?', origin)):
+            raise ValueError('invalid_deployment')
+        release = (BASE / 'current').resolve(strict=True)
+        if release != BASE / 'releases' / revision:
+            raise ValueError('deployment_mismatch')
+        trusted(release)
     # Require the installed service to be running before attempting a mode change.
-    command('/usr/bin/systemctl', 'is-active', '--quiet', 'aizone.service')
-    receipt(release, host, port, system)
-    settings = json.loads(saved[0]['content'])
-    settings.update(airzone_host=host, airzone_port=port, system_id=system,
-                    public_origin=origin, allow_commands=False, zone_controls={},
-                    master_zone_id=None, supported_modes=[], expected_zone_ids=[])
-    template = read(release / 'aizone.service').decode()
-    if '@@ARGS@@' not in template or '@@REVISION@@' not in template:
-        raise ValueError('unsupported_service_template')
-    unit = template.replace('@@ARGS@@', f'--config /etc/aizone/config.json --port {backend_port}').replace('@@REVISION@@', revision)
-    backup = STATE / 'airzone-before-connect.json'
-    replace(backup, json.dumps(saved).encode(), 0o600)
+    with preflight('service'):
+        command('/usr/bin/systemctl', 'is-active', '--quiet', 'aizone.service')
+    with preflight('gateway_read'):
+        receipt(release, host, port, system)
+    with preflight('backup'):
+        settings = json.loads(saved[0]['content'])
+        settings.update(airzone_host=host, airzone_port=port, system_id=system,
+                        public_origin=origin, allow_commands=False, zone_controls={},
+                        master_zone_id=None, supported_modes=[], expected_zone_ids=[])
+        template = read(release / 'aizone.service').decode()
+        if '@@ARGS@@' not in template or '@@REVISION@@' not in template:
+            raise ValueError('unsupported_service_template')
+        unit = template.replace('@@ARGS@@', f'--config /etc/aizone/config.json --port {backend_port}').replace('@@REVISION@@', revision)
+        backup = STATE / 'airzone-before-connect.json'
+        replace(backup, json.dumps(saved).encode(), 0o600)
     try:
         replace(CONFIG, (json.dumps(settings, indent=2) + '\n').encode(), 0o640, CONFIG.stat().st_gid)
         replace(UNIT, unit.encode(), 0o644)
@@ -211,6 +229,7 @@ def open_install_lock():
 
 
 def main():
+    stage = 'runtime'
     try:
         if os.geteuid() != 0 or sys.argv[1:] not in ([], ['rollback']):
             raise ValueError('unsupported_operation')
@@ -219,7 +238,9 @@ def main():
         os.environ.update(PATH='/usr/sbin:/usr/bin:/sbin:/bin', HOME='/root', LANG='C.UTF-8')
         if json.loads(read(STATE / 'runtime.json'))['branch'] != BRANCH:
             raise ValueError('wrong_branch')
+        stage = 'lock'
         with open_install_lock():
+            stage = 'request'
             signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(TimeoutError()))
             signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(InterruptedError()))
             signal.signal(signal.SIGHUP, lambda *_: (_ for _ in ()).throw(InterruptedError()))
@@ -230,8 +251,10 @@ def main():
             else:
                 result = connect(json.loads(sys.stdin.buffer.read(1025)))
         signal.alarm(0)
+    except PreflightError as error:
+        result = {'ok': False, 'error': 'preflight_failed', 'stage': str(error)}
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
-        result = {'ok': False, 'error': 'preflight_failed'}
+        result = {'ok': False, 'error': 'preflight_failed', 'stage': stage}
     print(json.dumps(result), flush=True)
     return 0 if result['ok'] else 1
 

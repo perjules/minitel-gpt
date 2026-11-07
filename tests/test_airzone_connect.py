@@ -131,7 +131,7 @@ def test_failed_fresh_read_leaves_even_old_backup_alone(installed):
     path = installed.state / 'airzone-before-connect.json'
     path.write_text('prior rollback')
     root.receipt.side_effect = ValueError('real state failed')
-    with pytest.raises(ValueError):
+    with pytest.raises(root.PreflightError, match='gateway_read'):
         root.connect(TARGET)
     assert path.read_text() == 'prior rollback'
     assert root.snapshot() == installed.before
@@ -522,13 +522,22 @@ def test_duplicate_dashboard_urls_have_one_stable_qr_number(monkeypatch, address
     assert '[2]' not in report['display']
 
 
-def test_missing_qr_links_clear_previous_web_sources_and_leave_summary_readable():
+def test_failed_gateway_preflight_fits_on_last_page_and_clears_old_links(monkeypatch):
+    receipt = {'ok': False, 'error': 'preflight_failed', 'stage': 'gateway_read'}
+    monkeypatch.setattr(connect.subprocess, 'run', Mock(return_value=SimpleNamespace(
+        returncode=1, stdout=json.dumps(receipt).encode())))
+    result = connect.activate(TARGET)
     uart = VisibleUART()
     term = chat.Term(uart)
-    terminal_display.View(term, 'OLD', references=[{'url': 'https://old.invalid'}]).install()
-    connect.show_summary(term, 'Connexion échouée. Aucun succès confirmé.')
+    report = '\n'.join(f'DIAG {i}' for i in range(34))
+    terminal_display.View(term, report, references=[{'url': 'https://old.invalid'}]).install()
+    connect.show_summary(term, result['display'], references=result['references'])
     assert not term.view.references and term.view.qr is None
-    assert 'Connexion échouée' in term.view.text
+    page = '\n'.join(term.view.pages[term.view.page])
+    assert 'CONNEXION AIRZONE' in page
+    assert 'Lecture depuis le compte aizone.' in page
+    assert 'Aucun succès confirmé.' in page
+    assert term.view.text.startswith(report)
     assert_gray_input(uart)
 
 
