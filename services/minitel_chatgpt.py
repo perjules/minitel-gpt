@@ -1744,12 +1744,22 @@ def run_session(t):
                     pending, result = airzone_connect.confirm(t, source)
                     if pending is not None:
                         t._pending = pending
-                        connected, result = wait_answer(t, pending, 220)
-                        if connected is not None:
-                            result = airzone_connect.show_summary(t, connected['display'], language,
-                                                                  references=connected.get('references', ()))
-                        elif result not in {'sommaire', 'guide'}:
-                            result = show_response(t, 'Connexion non confirmée. Vérifiez le service par SSH.', language)
+                        report = t.view.text if t.view is not None else ''
+                        result = airzone_connect.show_build(t, pending, language)
+                        if result == 'done':
+                            if t.view is None:
+                                report += '\n\n' + airzone_connect.BUILD_LOG
+                            connected, result = wait_answer(t, pending, airzone_connect.ACTIVATION_TIMEOUT)
+                            if connected is not None:
+                                result = airzone_connect.show_summary(t, connected['display'], language,
+                                                                      references=connected.get('references', ()),
+                                                                      simulated=connected.get('simulated', False),
+                                                                      previous_text=report)
+                            elif result not in {'sommaire', 'guide'}:
+                                result = airzone_connect.show_summary(
+                                    t, airzone_connect.FAILURE_HEADING
+                                    + '\nConnexion non confirmée. Vérifiez le service par SSH.',
+                                    language, previous_text=report)
                 if result == "guide":
                     show_guide(t, language)
                 if result != "done":

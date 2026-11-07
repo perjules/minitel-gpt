@@ -264,8 +264,8 @@ class StartupTests(unittest.TestCase):
             offset = len(uart.output)
             self.result_screens.append("\n".join("".join(row) for row in rendered.rows))
 
-        def capture_install(view):
-            result = install(view)
+        def capture_install(view, **kwargs):
+            result = install(view, **kwargs)
             snapshot()
             return result
 

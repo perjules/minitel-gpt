@@ -54,16 +54,16 @@ def _cancel(callback):
         return False
 
 
-def show(term, source, language="fr", *, cancel=None):
+def show(term, source, language="fr", *, cancel=None, restore=True):
     """Scroll a str, or a caller-owned Queue of str chunks / None EOF / Exception.
 
     Only this thread touches the UART. Empty queues have no idle/duration limit.
     ANNULATION stops locally; a nonblocking cancel callback may confirm that the
     producer stopped too. Queues/producers do not use the bounded API _pending
-    worker slot. Every received chunk is retained for ordinary local pagination.
+    worker slot. Every received chunk is retained for ordinary local pagination. Set restore=False for an immediate handoff.
     """
     try:
-        return _show(term, source, language, cancel=cancel)
+        return _show(term, source, language, cancel=cancel, restore=restore)
     except rose_terminal.EchoUnavailable:
         # Do not begin a full-screen log with uncontrolled local keyboard echo.
         # Public static text remains available through the normal reader fallback.
@@ -87,7 +87,7 @@ def _restore(term, text, language, notice):
     term.w(b"\x11")
 
 
-def _show(term, source, language, *, cancel):
+def _show(term, source, language, *, cancel, restore):
     chat = rose_terminal.api()
     static = isinstance(source, str)
     if not static and not callable(getattr(source, "get_nowait", None)):
@@ -176,5 +176,8 @@ def _show(term, source, language, *, cancel):
             # A fresh View prevents stale cache/gray fields or page-one flashes.
             # Its seen set starts with the last page only; this grants no review
             # acknowledgement for unseen pages and never changes feature state.
-            _restore(term, text, language, notice)
+            if restore or interrupted:
+                _restore(term, text, language, notice)
+            else:
+                term.w(chat.SCROLL_OFF + terminal_display.NORMAL + b"\x1b\x50\x11")
     return action

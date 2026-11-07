@@ -220,17 +220,19 @@ def test_french_confirmation_and_mock_do_not_activate_service(monkeypatch, mock,
     uart.keys.extend(submitted(reply))
     pending, action = connect.confirm(term, Mock())
     assert action == 'done' and term.view.text.startswith('PHOTO SUMMARY')
-    if mock and reply == 'OUI':
-        assert 'https://pi.family.ts.net:8443' in term.view.text
-        assert 'http://127.0.0.1:8081' in term.view.text
-        assert term.view.page == len(term.view.pages) - 1
-        assert 'SIMULATION' in term.view.notice
-        assert not (address_manifest.parent / '.env').exists()
-    else:
-        assert term.view.text == 'PHOTO SUMMARY'
+    assert term.view.text == 'PHOTO SUMMARY'
+    assert (pending is not None) is (reply == 'OUI')
     if pending is not None:
         pending[0].join(1)
-        assert pending[1].get_nowait() == ({'display': 'ACTUAL RESULT'}, None)
+        result, error = pending[1].get_nowait()
+        assert error is None
+        if mock:
+            assert result['simulated']
+            assert 'https://pi.family.ts.net:8443' in result['display']
+            assert 'http://127.0.0.1:8081' in result['display']
+            assert not (address_manifest.parent / '.env').exists()
+        else:
+            assert result == {'display': 'ACTUAL RESULT'}
     assert activate.called is (not mock and reply == 'OUI')
 
 
@@ -303,6 +305,7 @@ def test_confirmed_main_loop_activation_uses_result_and_normal_chat_recovers(mon
     monkeypatch.setattr(hack, 'source', Mock())
     monkeypatch.setattr(chat.stream_sources, 'show', lambda *args: 'done')
     monkeypatch.setattr(connect, 'confirm', lambda *args: (finished_worker({'display': 'ACTUAL CONNECT RESULT'}), 'done'))
+    monkeypatch.setattr(connect, 'show_build', Mock(return_value='done'))
     helper = startup.StartupTests()
     term, calls = helper.run_session(startup.login_keys('fr') + submitted('hack airzone') + submitted('FOLLOW UP'))
     assert [call[1][-1]['content'] for call in calls] == ['FOLLOW UP']
@@ -472,7 +475,12 @@ def test_mock_connect_finishes_on_tailnet_lan_and_pi_addresses_without_activatio
     uart = VisibleUART(submitted('OUI'))
     term = chat.Term(uart)
     terminal_display.View(term, 'SIMULATION\nPHOTO SUMMARY').install()
-    assert connect.confirm(term, Mock()) == (None, 'done')
+    pending, action = connect.confirm(term, Mock())
+    assert action == 'done'
+    pending[0].join(1)
+    result, error = pending[1].get_nowait()
+    assert error is None
+    connect.show_summary(term, result['display'], references=result['references'], simulated=result['simulated'])
     page = ''.join(term.view.pages[term.view.page])
     assert all(url in page for url in [data['origin'], data['loopback'], *data['lan_urls']])
     assert 'SIMULATION' in term.view.notice and term.view.text.startswith('SIMULATION\nPHOTO SUMMARY')
@@ -579,11 +587,14 @@ def test_real_connect_worker_references_reach_view_and_qr_stays_out_of_chat(monk
     references = [{'url': 'http://192.168.1.42:8081', 'title': 'Airzone Wi-Fi/LAN'}]
     result = {'display': 'RÉSULTAT RÉEL SYNTHÉTIQUE', 'references': references}
     monkeypatch.setattr(connect, 'confirm', lambda *args: (finished_worker(result), 'done'))
+    build = Mock(return_value='done')
+    monkeypatch.setattr(connect, 'show_build', build)
     show = Mock(wraps=connect.show_summary)
     monkeypatch.setattr(connect, 'show_summary', show)
     helper = startup.StartupTests()
     _, calls = helper.run_session(startup.login_keys('fr') + submitted('hack airzone')
                                   + fn(chat.K_RETOUR) + submitted('FOLLOW UP'))
+    build.assert_called_once()
     assert show.call_args.kwargs['references'] == references
     assert [call[1][-1]['content'] for call in calls] == ['FOLLOW UP']
     assert 'hack airzone' not in str(helper.memories[0].record.mock_calls)
@@ -623,3 +634,37 @@ def test_install_lock_accepts_sticky_directory_and_rejects_unsafe_entries(tmp_pa
     path.symlink_to(tmp_path / 'missing')
     with pytest.raises(OSError):
         root.open_install_lock()
+
+
+@pytest.mark.parametrize('early', [True, False])
+def test_build_stream_plays_every_block_before_handoff(monkeypatch, early):
+    from queue import Empty
+
+    clock = Mock(return_value=10.0)
+    monkeypatch.setattr(connect.time, 'monotonic', clock)
+    worker = Mock()
+    worker.is_alive.return_value = not early
+    term = SimpleNamespace(_tx_until=0)
+    stream = connect.BuildStream(term, (worker, None, 10))
+    blocks = []
+    for _ in connect.BUILD_LOG.split('\n\n'):
+        blocks.append(stream.get_nowait())
+        clock.return_value += 1
+    assert ''.join(blocks).rstrip() == connect.BUILD_LOG
+    assert 'FRANCE TÉLÉCOM' in blocks[-1]
+
+    # The last text must be on screen before the hold starts.
+    term._tx_until = clock.return_value + 1
+    with pytest.raises(Empty):
+        stream.get_nowait()
+    clock.return_value = term._tx_until
+    with pytest.raises(Empty):
+        stream.get_nowait()
+    if early:
+        clock.return_value += 4.9
+        with pytest.raises(Empty):
+            stream.get_nowait()
+        clock.return_value += 0.2
+    else:
+        worker.is_alive.return_value = False
+    assert stream.get_nowait() is None

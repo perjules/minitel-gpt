@@ -10,10 +10,17 @@ import threading
 import time
 from http.client import HTTPConnection, HTTPException
 from pathlib import Path
-from queue import Queue
+from queue import Empty, Queue
 from urllib.parse import urlsplit
 
-from . import airzone_demo, airzone_hack, config_store, rose_terminal, terminal_display
+from . import (
+    airzone_demo,
+    airzone_hack,
+    config_store,
+    rose_terminal,
+    terminal_display,
+    terminal_scrolling,
+)
 
 DASHBOARD_DEPLOYMENT = Path('/opt/aizone/deployment.json')
 ADDRESSES_HEADING = '=== ADRESSES DU DASHBOARD ==='
@@ -37,6 +44,87 @@ PREFLIGHT_DETAILS = {
     'oversized_file': 'Fichier supérieur à 1 Mio.',
 }
 
+
+ACTIVATION_TIMEOUT = 220
+BUILD_LOG = """*** 3615 IA / SOUMISSION DE TÂCHE ***
+
+CONFIRMATION OUI ENREGISTRÉE
+TÂCHE AZ-01 ADMISE EN FILE PRIORITAIRE
+
+DEMANDE MÉMOIRE .............. 64 Kio
+ALLOCATION ACCORDÉE
+QUOTA EXCEPTIONNEL POUR UNE TÂCHE WEB
+
+COMPILATEUR COBOL ............. CHARGÉ
+MODULE DE CONVERSION JSON ..... INCLUS
+ÉDITION DE LIENS ................. OK
+
+*** 3615 IA / GÉNÉRATION WEB ***
+
+SCHÉMA DES ZONES ............. IMPORTÉ
+VUES PAR PIÈCE .............. GÉNÉRÉES
+
+PROFIL DE POINTE .............. ACTIVÉ
+CIBLE SYSTÈME ............. WINDOWS 95
+CIBLE WEB ...... NETSCAPE NAVIGATOR 3.0
+NORME DE DERNIER CRI ........ HTML 3.2
+
+MODE HAUTE RÉSOLUTION ...... 800 × 600
+PALETTE ÉTENDUE ......... 256 COULEURS
+AFFICHAGE SIMULTANÉ DE TOUTES LES ZONES
+DEMANDE MÉMOIRE SUPPLÉMENTAIRE . REFUS
+GÉNÉRATION SOUS 64 Kio ............ OK
+
+*** 3615 IA / MISE EN SERVICE ***
+
+DEMANDE D'ACTIVATION ........... ÉMISE
+CONTRÔLE DU SERVICE HTTP LOCAL
+LECTURE DE L'ÉTAT DES ZONES
+
+SORTIE DEMANDÉE ............... QR CODE
+FORMAT DE SORTIE .............. VIDÉOTEX
+ADRESSE LOCALE ATTENDUE
+
+APPLI > SERVEUR MINITEL FRANCE TÉLÉCOM"""
+
+
+class BuildStream:
+    """Pace fictional log blocks independently of the local activation worker."""
+
+    blocks = True
+    stop_message = '[Journal arrêté. Activation non annulée.]'
+
+    def __init__(self, term, pending):
+        self.term = term
+        self.worker, _, started = pending
+        self.deadline = started + ACTIVATION_TIMEOUT
+        self.chunks = iter(BUILD_LOG.split('\n\n'))
+        self.ready_at = 0
+        self.hold_until = None
+        self.drained = False
+
+    def get_nowait(self):
+        now = time.monotonic()
+        if now < self.ready_at:
+            raise Empty
+        chunk = next(self.chunks, None)
+        if chunk is not None:
+            self.ready_at = now + 0.65
+            return chunk + '\n\n'
+
+        if not self.drained:
+            # Measure the final hold from delivery of the last block to the CRT.
+            if now < self.term._tx_until:
+                raise Empty
+            self.drained = True
+            self.hold_until = now + (5 if not self.worker.is_alive() else 0)
+        if now < self.hold_until or (self.worker.is_alive() and now < self.deadline):
+            raise Empty
+        return None
+
+
+def show_build(term, pending, language):
+    return terminal_scrolling.show(term, BuildStream(term, pending), language, restore=False)
 
 
 def origin_url(value):
@@ -175,12 +263,14 @@ def dashboard_addresses(origin=None):
     return dashboard_report(origin)['display']
 
 
-def show_summary(term, text, language='fr', *, references=(), simulated=False):
+def show_summary(term, text, language='fr', *, references=(), simulated=False, previous_text=None):
     """End on the addresses; retain the diagnostic/photo pages with ordinary paging."""
     page_heading = FAILURE_HEADING if text.startswith(FAILURE_HEADING) else ADDRESSES_HEADING
     previous = getattr(term, 'view', None)
-    if previous is not None:
-        text = previous.text + '\n\n' + text
+    if previous_text is None and previous is not None:
+        previous_text = previous.text
+    if previous_text:
+        text = previous_text + '\n\n' + text
     prefix, heading, addresses = text.rpartition(page_heading)
     if heading:
         # Start the address or error block on its own page.
@@ -194,11 +284,14 @@ def show_summary(term, text, language='fr', *, references=(), simulated=False):
     view.page = len(view.pages) - 1
     if simulated:
         view.notice = 'SIMULATION : aucun service modifié.'
-    view.install()
-    if references and references[0].get('title') == LAN_LINK_TITLE:
+    auto_qr = bool(references and references[0].get('title') == LAN_LINK_TITLE)
+    view.install(draw=not auto_qr)
+    if auto_qr:
         view.open_link(1)
         if view.qr is not None:
             view.status('SIMULATION / QR [1] : scannez' if simulated else 'Airzone [1] : scannez le QR')
+        else:
+            view.draw()
     return 'done'
 
 
@@ -279,22 +372,23 @@ def confirm(term, current):
             return None, 'done'
         if answer not in {'OUI', 'YES'}:
             continue
-        if result['demo']:
-            addresses = dashboard_report()
-            show_summary(term, 'SIMULATION : aucun service modifié.\nAdresses du dashboard existant.\n\n'
-                         + addresses['display'], getattr(term.view, 'language', 'fr'),
-                         references=addresses['references'], simulated=True)
-            return None, 'done'
-        # Consent may take minutes: revalidate freshness before starting anything.
-        if airzone_hack.verified_state(current) is None or not airzone_demo.enabled():
+        # Consent may take minutes: revalidate freshness before real activation.
+        if not result['demo'] and (airzone_hack.verified_state(current) is None or not airzone_demo.enabled()):
             term.view.status('Diagnostic expiré. Relancez HACK AIRZONE.')
             return None, 'done'
-        target = result['target']
         output = Queue(maxsize=1)
-        def request(output=output, target=target):
-            output.put((activate(target), None))
+
+        def request(output=output):
+            if result['demo']:
+                addresses = dashboard_report()
+                connected = {'display': 'SIMULATION : aucun service modifié.\n'
+                                        'Adresses du dashboard existant.\n\n' + addresses['display'],
+                             'references': addresses['references'], 'simulated': True}
+            else:
+                connected = activate(result['target'])
+            output.put((connected, None))
+
         worker = threading.Thread(target=request, daemon=True)
         started = time.monotonic()
         worker.start()
-        term.view.status('Raccordement réel. Restauration armée.')
         return (worker, output, started), 'done'

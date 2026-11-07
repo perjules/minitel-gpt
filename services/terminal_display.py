@@ -197,7 +197,7 @@ class View:
         self.term.w(POSITIVE)
         self.cache[row] = (text, inverse, foreground, background)
 
-    def install(self):
+    def install(self, *, draw=True):
         self.active()
         previous = getattr(self.term, "view", None)
         if previous is None:
@@ -214,7 +214,8 @@ class View:
             if not previous.carry_input:
                 self._erase_input()
             self._clear_content()
-        self.draw()
+        if draw:
+            self.draw()
         return self
 
     def _blank_cache(self):
