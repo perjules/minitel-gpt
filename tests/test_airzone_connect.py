@@ -18,7 +18,7 @@ from services import airzone_connect as connect
 from services import airzone_demo as demo
 from services import airzone_hack as hack
 from services import minitel_chatgpt as chat
-from services import terminal_display
+from services import terminal_display, terminal_qr
 
 TARGET = {'host': '192.168.1.50', 'port': 3000, 'system_id': 1}
 
@@ -468,3 +468,93 @@ def test_mock_connect_finishes_on_tailnet_lan_and_pi_addresses_without_activatio
     assert 'SIMULATION' in term.view.notice and term.view.text.startswith('SIMULATION\nPHOTO SUMMARY')
     assert_gray_input(uart)
     activate.assert_not_called()
+
+
+def test_dashboard_qr_uses_structured_urls_lan_first_and_never_loopback(monkeypatch, address_manifest):
+    data = address_payload()
+    endpoint(monkeypatch, data)
+    address_manifest.write_text(json.dumps({'origin': data['origin'], 'port': 8081, 'lan_access': True}))
+    report = connect.dashboard_report()
+    assert report['references'] == [{'url': data['lan_urls'][0], 'title': 'Airzone Wi-Fi/LAN'},
+                                     {'url': data['origin'], 'title': 'Airzone Tailnet'}]
+    assert f"[1] {data['lan_urls'][0]}" in report['display']
+    assert f"[2] {data['origin']}" in report['display']
+    assert not any(ref['url'] == data['loopback'] or TARGET['host'] in ref['url'] for ref in report['references'])
+    # No URL recovery from display text: even a deliberately different printed
+    # URL must not change the structured destination sent to the encoder.
+    uart = VisibleUART()
+    term = chat.Term(uart)
+    terminal_display.View(term, 'BILAN FACTUEL\nLecture réelle synthétique.').install()
+    make = Mock(wraps=terminal_qr.make)
+    monkeypatch.setattr(terminal_qr, 'make', make)
+    connect.show_summary(term, report['display'].replace(data['lan_urls'][0], 'http://wrong.invalid'),
+                         references=report['references'])
+    assert term.view.qr is not None
+    assert make.call_args.args[0] == data['lan_urls'][0]
+    page = term.view.page
+    uart.keys.extend(fn(chat.K_RETOUR) + submitted('LINK 2') + fn(chat.K_RETOUR) + submitted('FOLLOW UP'))
+    assert chat.read_question(term) == ('FOLLOW UP', 'envoi')
+    assert [call.args[0] for call in make.call_args_list] == [data['lan_urls'][0], data['origin']]
+    assert term.view.qr is None and term.view.page == page
+    assert term.view.text.startswith('BILAN FACTUEL')
+    assert_gray_input(uart)
+
+
+@pytest.mark.parametrize('origin', ['http://127.0.0.1:8081', 'http://localhost:8081',
+                                   'https://pi.family.ts.net:8443'])
+def test_no_lan_falls_back_only_to_a_phone_usable_configured_url(address_manifest, origin):
+    address_manifest.write_text(json.dumps({'origin': origin, 'port': 8081}))
+    report = connect.dashboard_report()
+    expected = [{'url': origin, 'title': 'Airzone Tailnet'}] if origin.startswith('https:') else []
+    assert report['references'] == expected
+    assert 'http://127.0.0.1:8081' in report['display']
+
+
+def test_duplicate_dashboard_urls_have_one_stable_qr_number(monkeypatch, address_manifest):
+    data = address_payload()
+    data['origin'] = data['lan_urls'][0]
+    data['lan_urls'] *= 2
+    endpoint(monkeypatch, data)
+    address_manifest.write_text(json.dumps({'origin': data['origin'], 'port': 8081, 'lan_access': True}))
+    report = connect.dashboard_report()
+    assert report['references'] == [{'url': data['origin'], 'title': 'Airzone Wi-Fi/LAN'}]
+    assert '[2]' not in report['display']
+
+
+def test_missing_qr_links_clear_previous_web_sources_and_leave_summary_readable():
+    uart = VisibleUART()
+    term = chat.Term(uart)
+    terminal_display.View(term, 'OLD', references=[{'url': 'https://old.invalid'}]).install()
+    connect.show_summary(term, 'Connexion échouée. Aucun succès confirmé.')
+    assert not term.view.references and term.view.qr is None
+    assert 'Connexion échouée' in term.view.text
+    assert_gray_input(uart)
+
+
+def test_oversized_qr_destination_keeps_exact_link_and_text_fallback():
+    uart = VisibleUART()
+    term = chat.Term(uart)
+    url = 'https://pi.family.ts.net/' + 'long' * 300
+    connect.show_summary(term, 'BILAN FACTUEL\n' + connect.ADDRESSES_HEADING + '\n' + url,
+                         references=[{'url': url, 'title': 'Airzone Tailnet'}])
+    assert term.view.qr is None and 'trop long' in term.view.notice
+    assert url in term.view.text and term.view.references[0]['url'] == url
+    assert_gray_input(uart)
+
+
+def test_real_connect_worker_references_reach_view_and_qr_stays_out_of_chat(monkeypatch):
+    from test_terminal_updates import finished_worker
+    monkeypatch.setenv('AIRZONE_DEMO_ENABLED', '1')
+    monkeypatch.setattr(hack, 'source', Mock())
+    monkeypatch.setattr(chat.stream_sources, 'show', lambda *args: 'done')
+    references = [{'url': 'http://192.168.1.42:8081', 'title': 'Airzone Wi-Fi/LAN'}]
+    result = {'display': 'RÉSULTAT RÉEL SYNTHÉTIQUE', 'references': references}
+    monkeypatch.setattr(connect, 'confirm', lambda *args: (finished_worker(result), 'done'))
+    show = Mock(wraps=connect.show_summary)
+    monkeypatch.setattr(connect, 'show_summary', show)
+    helper = startup.StartupTests()
+    _, calls = helper.run_session(startup.login_keys('fr') + submitted('connect airzone')
+                                  + fn(chat.K_RETOUR) + submitted('FOLLOW UP'))
+    assert show.call_args.kwargs['references'] == references
+    assert [call[1][-1]['content'] for call in calls] == ['FOLLOW UP']
+    assert 'connect airzone' not in str(helper.memories[0].record.mock_calls)

@@ -6,7 +6,36 @@ It is never an LLM tool. `HACK AIRZONE` keeps its detection/photo/.env pairing.
 Mock OUI reports simulation; no sudo, config, service or .env changes occur.
 ANNULATION kills diagnostics as usual. NON/empty/exit makes no service change.
 
-After OUI, mock and real runs end on a dedicated **ADRESSES DU DASHBOARD** page:
+## Optical handoff — scan the Minitel
+
+After confirmed success, **CONNECT AIRZONE automatically displays the current LAN
+dashboard as a QR code**. Scan the CRT with a phone on the same Wi-Fi to open the
+dashboard. If no LAN URL is available, it opens the configured Tailnet URL instead;
+the phone then needs Tailscale access. URLs are entry points, not a claim that
+physical HVAC compatibility or phone connectivity has been independently verified.
+
+This reuses the [physically validated QR viewer](TERMINAL_QR.md); no encoder,
+shortener, remote QR service, listener or dependency is added. Numbered link
+metadata retains exact validated URLs, separately from wrapped/sanitized screen
+text. LAN links come first, followed by Tailnet/configured origin; duplicate URLs
+share one number. Pi-only loopback addresses are text-only, never phone QR links.
+
+RETOUR restores the same address/report page. `LINK n` / `LIEN n` opens another
+numbered dashboard link; normally LINK 1 is LAN and LINK 2 is Tailnet. Normal
+pagination/input/exit behavior is unchanged. Missing or oversized QR destinations
+leave the factual text and full address available; there is no truncated encoding.
+In mock rehearsal, the QR leads to the actual installed dashboard while the
+simulated diagnostic remains explicitly labelled **SIMULATION**. It does not
+activate the real service or write HVAC settings. Failed real commissioning does
+not present a successful connection QR or inherit old web-search sources.
+
+Smoke test: MAJ, CONNECT AIRZONE, OUI; scan the automatically shown LAN QR, RETOUR,
+LINK 2 for Tailnet (if listed), RETOUR, then an ordinary chat question. Compare
+decoded destinations with the numbered address page and confirm simulation/real
+labelling and thermostat readings separately. Existing generic QR scan acceptance
+does not substitute for on-site Airzone/phone acceptance.
+
+Under the QR, mock and real runs retain a dedicated **ADRESSES DU DASHBOARD** page:
 the configured Tailscale URL (including its actual HTTPS port), current **Wi-Fi/LAN**
 URLs, and the loopback URL labelled **Sur le Pi uniquement**. The installed
 deployment manifest supplies the configured origin/port; Minitel makes one GET to

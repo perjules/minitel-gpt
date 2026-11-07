@@ -69,8 +69,8 @@ def current_dashboard_addresses(port, origin):
                 pass  # Optional URL reporting must not conceal a completed activation.
 
 
-def dashboard_addresses(origin=None):
-    """Display the installed URLs, including in mock rehearsal; no network changes.
+def dashboard_report(origin=None):
+    """Keep exact dashboard URLs as metadata for the existing local QR viewer.
 
     Never infer dashboard IPs from the gateway or cache the Pi's DHCP address.
     Airzone's address endpoint also works in mock mode without gateway I/O.
@@ -100,19 +100,44 @@ def dashboard_addresses(origin=None):
             tailnet |= ipaddress.ip_address(hostname) in ipaddress.ip_network('100.64.0.0/10')
         except ValueError:
             pass
+    references = []
+
+    def add_link(value, title):
+        hostname = urlsplit(value).hostname
+        if hostname == 'localhost' or hostname.endswith('.localhost'):
+            return  # A phone must never be sent to its own loopback interface.
+        try:
+            if ipaddress.ip_address(hostname).is_loopback:
+                return
+        except ValueError:
+            pass
+        if not any(ref['url'] == value for ref in references):
+            references.append({'url': value, 'title': title})
+
+    # The family standing beside the Minitel can open LAN without Tailscale.
+    if current:
+        for value in current['lan_urls']:
+            add_link(value, 'Airzone Wi-Fi/LAN')
+    if origin:
+        add_link(origin, 'Airzone Tailnet' if tailnet else 'Airzone dashboard')
+
+    def numbered(value):
+        return next((f'[{index}] {value}' for index, ref in enumerate(references, 1)
+                     if ref['url'] == value), value)
+
     lines = [ADDRESSES_HEADING]
     if tailnet:
-        lines.extend(('Tailnet (URL configurée) :', origin))
+        lines.extend(('Tailnet (URL configurée) :', numbered(origin)))
     else:
         lines.append('Tailnet : adresse non déterminée.')
         if origin:
-            lines.extend(('URL configurée :', origin))
+            lines.extend(('URL configurée :', numbered(origin)))
     if current is not None:
         if not current['lan_enabled']:
             lines.append('Wi-Fi/LAN : accès non activé.')
         elif current['lan_urls']:
             lines.append('Wi-Fi/LAN (réseau local) :')
-            lines.extend(dict.fromkeys(current['lan_urls']))
+            lines.extend(numbered(value) for value in dict.fromkeys(current['lan_urls']))
         else:
             lines.append('Wi-Fi/LAN : aucune adresse actuelle.')
     elif metadata.get('lan_access') is True:
@@ -120,10 +145,16 @@ def dashboard_addresses(origin=None):
     else:
         lines.append('Wi-Fi/LAN : accès non confirmé.')
     lines.extend(('Sur le Pi uniquement :', local or 'Adresse indisponible.'))
-    return '\n'.join(lines)
+    if references:
+        lines.append('LINK n : QR du lien [n].')
+    return {'display': '\n'.join(lines), 'references': references}
 
 
-def show_summary(term, text, language='fr'):
+def dashboard_addresses(origin=None):
+    return dashboard_report(origin)['display']
+
+
+def show_summary(term, text, language='fr', *, references=(), simulated=False):
     """End on the addresses; retain the diagnostic/photo pages with ordinary paging."""
     previous = getattr(term, 'view', None)
     if previous is not None:
@@ -137,9 +168,15 @@ def show_summary(term, text, language='fr'):
         rows = len(chat.wrap(chat.safe_display(prefix), geometry.columns))
         padding = -rows % geometry.content_rows
         text = prefix + '\n' * (padding + 1) + heading + addresses
-    view = terminal_display.View(term, text, language)
+    view = terminal_display.View(term, text, language, references=references)
     view.page = len(view.pages) - 1
+    if simulated:
+        view.notice = 'SIMULATION : aucun service modifié.'
     view.install()
+    if references:
+        view.open_link(1)
+        if view.qr is not None:
+            view.status('SIMULATION / QR [1] : scannez' if simulated else 'Airzone [1] : scannez le QR')
     return 'done'
 
 
@@ -149,6 +186,7 @@ def command(question):
 
 def activate(target):
     """The installed sudo rule accepts this one fixed helper, without arguments."""
+    references = []
     try:
         result = subprocess.run(['/usr/bin/sudo', '-n', '/usr/local/libexec/minitel-airzone-connect'],
                                 input=json.dumps(target).encode(), shell=False,
@@ -168,10 +206,12 @@ def activate(target):
                 paired = 'Passerelle Minitel enregistrée.'
             except (OSError, ValueError, config_store.StorageFailure):
                 paired = 'Dashboard actif; sauvegarde .env échouée.'
+            addresses = dashboard_report(data['origin'])
+            references = addresses['references']
             text = (f"=== AIRZONE CONNECTÉ ===\nLecture réelle : {data['zones']} zones.\n"
                     f"Passerelle : {target['host']}\n{paired}\n"
                     'Commandes HVAC désactivées.\nCompresseur physique non vérifié.\n\n'
-                    + dashboard_addresses(data['origin']))
+                    + addresses['display'])
         elif data.get('rollback') is True:
             text = 'Connexion échouée. Configuration et mode précédents restaurés. Vérifiez par SSH.'
         elif data.get('rollback') is False:
@@ -180,7 +220,7 @@ def activate(target):
             text = 'Connexion indisponible. Vérifiez par SSH le service Aizone installé et le helper Minitel. Aucun succès confirmé.'
     except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError):
         text = 'Connexion non confirmée. Vérifiez le dashboard et son service par SSH avant de recommencer.'
-    return {'display': text}
+    return {'display': text, 'references': references}
 
 
 def confirm(term, current):
@@ -201,9 +241,10 @@ def confirm(term, current):
         if answer not in {'OUI', 'YES'}:
             continue
         if result['demo']:
+            addresses = dashboard_report()
             show_summary(term, 'SIMULATION : aucun service modifié.\nAdresses du dashboard existant.\n\n'
-                         + dashboard_addresses(), getattr(term.view, 'language', 'fr'))
-            term.view.status('SIMULATION : aucun service modifié.')
+                         + addresses['display'], getattr(term.view, 'language', 'fr'),
+                         references=addresses['references'], simulated=True)
             return None, 'done'
         # Consent may take minutes: revalidate freshness before starting anything.
         if airzone_hack.verified_state(current) is None or not airzone_demo.enabled():
