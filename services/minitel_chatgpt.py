@@ -1490,13 +1490,13 @@ def read_question_legacy(t: Term, allow_empty=False, calculator_mode=False, navi
                 overflow = True
 
 
-def show_response(t: Term, text: str, language="fr", allow_retour=False):
+def show_response(t: Term, text: str, language="fr", allow_retour=False, *, references=()):
     """Install the complete result without blocking input on intermediate pages.
 
     read_question owns navigation/editing next. PRONOTE and CALC keep their
     RETOUR behavior through its explicit mode flags, not through paging.
     """
-    terminal_display.View(t, text, language).install()
+    terminal_display.View(t, text, language, references=references).install()
     return 'done'
 
 
@@ -2099,7 +2099,8 @@ def run_session(t):
                 result = (show_calculator_scene(t, response["scene"], language)
                           if response and response.get("scene") else
                           terminal_scrolling.show(t, answer, language) if response and response.get("scrolling") else
-                          show_response(t, safe_display(answer), language))
+                          show_response(t, safe_display(answer), language,
+                                        references=(response.get("turn") or {}).get("references", ()) if response else ()))
             if response and response.get('scene') and result == 'done':
                 show_response(t, safe_display(answer), language)
             if response and response.get('scene') and result != 'done':

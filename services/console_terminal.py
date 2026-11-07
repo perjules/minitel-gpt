@@ -7,7 +7,7 @@ the application still owns every page, timeout, request and tool action.
 import curses
 from collections import deque
 
-from . import videotex
+from . import terminal_qr, videotex
 from .terminal_display import STANDARD
 
 
@@ -29,6 +29,7 @@ class Screen:
         self.repeat_pending = False
         self.last_character = " "
         self.ss2 = bytearray()
+        self.mosaic = False
 
     def down(self):
         if self.row < self.geometry.rows - 1:
@@ -49,7 +50,7 @@ class Screen:
 
     def put(self, code):
         char = chr(code) if isinstance(code, int) else code
-        if char == " " and self.pending_background is not None:
+        if (char == " " or self.mosaic) and self.pending_background is not None:
             self.zones[self.row][self.column] = self.pending_background
             self.pending_background = None
         else:
@@ -110,6 +111,10 @@ class Screen:
                     elif command in (0x5C, 0x5D):
                         self.inverse = command == 0x5D
                     self.escape.clear()
+            elif code in (0x0E, 0x0F):
+                self.mosaic = code == 0x0E
+                if self.mosaic:
+                    self.inverse = False
             elif code == 0x12:
                 self.repeat_pending = True
             elif code == 0x11:
@@ -145,8 +150,8 @@ class Screen:
                 self.down()
             elif code == 0x08:
                 self.column = max(0, self.column - 1)
-            elif 0x20 <= code <= 0x7E:
-                self.put(code)
+            elif 0x20 <= code <= (0x7F if self.mosaic else 0x7E):
+                self.put(terminal_qr.mosaic_character(terminal_qr.mosaic_mask(code)) if self.mosaic else code)
 
 
 def key_bytes(key):

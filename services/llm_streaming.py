@@ -163,6 +163,9 @@ class Conversations:
                 text.append("\n\nSources:\n" + "\n".join(
                     f"[{number}] {urlsplit(url).hostname.encode('idna').decode('ascii')}"
                     for url, number in self.sources.items()))
+            # Transcript markers follow arrival order, which can differ from
+            # canonical message/chunk ordering. LINK must match what was shown.
+            result["display_references"] = [{"url": url} for url in self.sources]
             self.result, self.done = result, True
         else:
             # Provider errors, functions, handoffs and unsupported tools fail
