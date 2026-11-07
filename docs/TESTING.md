@@ -179,3 +179,11 @@ echo and 1200/7E1 backpressure, and streamed transcript source numbering. Segno 
 a locked core dependency; tests do not fetch URLs or call an external QR service.
 The console supports all 64 joined G1 shapes. Physical scan acceptance remains
 pending in [TERMINAL_QR.md](TERMINAL_QR.md).
+
+Deployment compatibility regressions in `tests/test_runtime.py` use real temporary
+Git repositories to stage a plain target from a helper with Airzone-only files.
+They verify target-manifest selection without execution, obsolete policy removal,
+rejection of unknown privileged paths before staging/stopping, rollback gating,
+and safe failure step/path reporting without leaking argv or captured data.
+`tests/test_admin_maintenance.py` checks that Maintenance displays that diagnostic.
+No Pi installer, real root command or systemd transaction runs in these tests.

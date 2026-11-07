@@ -1069,7 +1069,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <h2 id=software>🔄 Mise à jour de l'application</h2>
     <p class=sub>Version installée : <b>{{version}}</b> · branche suivie : {{runtime_branch}}</p>
     <p>Dernière vérification (cette session) : {{checked_at}} · {{update_status}}</p>
-    <p>Dernier déploiement : <b>{{deployment.phase}}</b>{% if deployment.error_type %} · {{deployment.error_type}}{% endif %}</p>
+    <p>Dernier déploiement : <b>{{deployment.phase}}</b>{% if deployment.error_type %} · {{deployment.error_type}}{% endif %}{% if deployment.error_step %} · {{deployment.error_step}}{% endif %}{% if deployment.error_file %} · {{deployment.error_file}}{% endif %}</p>
     <a href="/?section=maintenance">Actualiser l’état</a>
     <form method=POST action=/check-update style=margin:0><input type=hidden name=csrf value="{{csrf_token()}}">
       <button class="btn btn-s">Vérifier les mises à jour</button>
