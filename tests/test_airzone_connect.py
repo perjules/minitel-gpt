@@ -522,8 +522,8 @@ def test_duplicate_dashboard_urls_have_one_stable_qr_number(monkeypatch, address
     assert '[2]' not in report['display']
 
 
-def test_failed_gateway_preflight_fits_on_last_page_and_clears_old_links(monkeypatch):
-    receipt = {'ok': False, 'error': 'preflight_failed', 'stage': 'gateway_read'}
+def test_failed_preflight_fits_on_last_page_with_errno_and_clears_old_links(monkeypatch):
+    receipt = {'ok': False, 'error': 'preflight_failed', 'stage': 'template', 'errno': 2}
     monkeypatch.setattr(connect.subprocess, 'run', Mock(return_value=SimpleNamespace(
         returncode=1, stdout=json.dumps(receipt).encode())))
     result = connect.activate(TARGET)
@@ -535,7 +535,8 @@ def test_failed_gateway_preflight_fits_on_last_page_and_clears_old_links(monkeyp
     assert not term.view.references and term.view.qr is None
     page = '\n'.join(term.view.pages[term.view.page])
     assert 'CONNEXION AIRZONE' in page
-    assert 'Lecture depuis le compte aizone.' in page
+    assert '/opt/aizone/current/aizone.service.' in page
+    assert 'ENOENT' in page
     assert 'Aucun succès confirmé.' in page
     assert term.view.text.startswith(report)
     assert_gray_input(uart)

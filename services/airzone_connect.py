@@ -1,4 +1,5 @@
 """Explicit local dashboard commissioning; never an LLM tool or HVAC control."""
+import errno
 import ipaddress
 import json
 import os
@@ -24,7 +25,14 @@ PREFLIGHT_LABELS = {
     'installation': 'Installation ou métadonnées Aizone.',
     'service': 'Service aizone inactif.',
     'gateway_read': 'Lecture depuis le compte aizone.',
-    'backup': 'Préparation de la sauvegarde.',
+    'config': 'Lecture JSON /etc/aizone/config.json.',
+    'template': 'Modèle /opt/aizone/current/aizone.service.',
+    'backup': 'Écriture airzone-before-connect.json.',
+}
+PREFLIGHT_DETAILS = {
+    'unsupported_service_template': 'Marqueurs ARGS / REVISION absents.',
+    'untrusted_installation': 'Propriétaire, droits ou lien refusés.',
+    'oversized_file': 'Fichier supérieur à 1 Mio.',
 }
 
 
@@ -226,7 +234,15 @@ def activate(target):
             text = 'Connexion ET restauration échouées. Intervention SSH nécessaire. État du dashboard incertain.'
         elif data.get('error') == 'preflight_failed' and isinstance(data.get('stage'), str):
             label = PREFLIGHT_LABELS.get(data['stage'], 'Étape de préparation inconnue.')
-            text = f'Vérification refusée.\n{label}\nAucun succès confirmé.'
+            number = data.get('errno')
+            detail = errno.errorcode.get(number) if type(number) is int else None
+            reason = data.get('reason')
+            if detail is None and isinstance(reason, str):
+                detail = PREFLIGHT_DETAILS.get(reason)
+            text = f'Vérification refusée.\n{label}'
+            if detail:
+                text += f'\n{detail}'
+            text += '\nAucun succès confirmé.'
         else:
             text = 'Connexion indisponible. Vérifiez par SSH le service Aizone installé et le helper Minitel. Aucun succès confirmé.'
     except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError):

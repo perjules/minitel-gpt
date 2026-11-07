@@ -13,6 +13,7 @@ import signal
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -44,18 +45,18 @@ def read(path):
 
 
 def replace(path, content, mode, gid=0):
-    temporary = path.with_name(path.name + '.minitel-new')
-    # Fixed root-owned parents, exclusive creation: never follow a planted link.
-    try:
-        with temporary.open('xb') as stream:
+    # Use a fresh staging name even after an interrupted commissioning.
+    with tempfile.NamedTemporaryFile(dir=path.parent, prefix=path.name + '.minitel-', delete=False) as stream:
+        temporary = Path(stream.name)
+        try:
             os.fchmod(stream.fileno(), mode)
             os.fchown(stream.fileno(), 0, gid)
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def command(*args):
@@ -169,15 +170,17 @@ def connect(request):
         command('/usr/bin/systemctl', 'is-active', '--quiet', 'aizone.service')
     with preflight('gateway_read'):
         receipt(release, host, port, system)
-    with preflight('backup'):
+    with preflight('config'):
         settings = json.loads(saved[0]['content'])
         settings.update(airzone_host=host, airzone_port=port, system_id=system,
                         public_origin=origin, allow_commands=False, zone_controls={},
                         master_zone_id=None, supported_modes=[], expected_zone_ids=[])
+    with preflight('template'):
         template = read(release / 'aizone.service').decode()
         if '@@ARGS@@' not in template or '@@REVISION@@' not in template:
             raise ValueError('unsupported_service_template')
         unit = template.replace('@@ARGS@@', f'--config /etc/aizone/config.json --port {backend_port}').replace('@@REVISION@@', revision)
+    with preflight('backup'):
         backup = STATE / 'airzone-before-connect.json'
         replace(backup, json.dumps(saved).encode(), 0o600)
     try:
@@ -253,6 +256,12 @@ def main():
         signal.alarm(0)
     except PreflightError as error:
         result = {'ok': False, 'error': 'preflight_failed', 'stage': str(error)}
+        cause = error.__cause__
+        if isinstance(cause, OSError) and cause.errno is not None:
+            result['errno'] = cause.errno
+        elif isinstance(cause, ValueError) and cause.args and isinstance(cause.args[0], str) and cause.args[0] in {
+                'unsupported_service_template', 'untrusted_installation', 'oversized_file'}:
+            result['reason'] = cause.args[0]
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         result = {'ok': False, 'error': 'preflight_failed', 'stage': stage}
     print(json.dumps(result), flush=True)
