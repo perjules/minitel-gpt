@@ -169,3 +169,11 @@ validation/citations, hidden reasoning exclusion, partial/failure paths and term
 recovery. HTTP integration uses only a synthetic loopback server, never a real
 provider. Source/stream commands bypass ordinary history, memory and local tools.
 See [STREAM_SOURCES.md](STREAM_SOURCES.md) for physical checks.
+
+Deployment compatibility regressions in `tests/test_runtime.py` use real temporary
+Git repositories to stage a plain target from a helper with Airzone-only files.
+They verify target-manifest selection without execution, obsolete policy removal,
+rejection of unknown privileged paths before staging/stopping, rollback gating,
+and safe failure step/path reporting without leaking argv or captured data.
+`tests/test_admin_maintenance.py` checks that Maintenance displays that diagnostic.
+No Pi installer, real root command or systemd transaction runs in these tests.

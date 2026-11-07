@@ -286,10 +286,12 @@ def test_missing_rollback_and_concurrent_operation_fail_without_mutation(manager
 
 
 def test_snapshot_reads_only_required_committed_files(manager, tmp_path):
-    manager.command.return_value.stdout = b"tracked content"
+    script = (Path(__file__).resolve().parents[1] / "scripts/runtime.py").read_bytes()
+    manager.command.side_effect = lambda args, **kw: SimpleNamespace(
+        stdout=script if args[-1].endswith(":scripts/runtime.py") else b"tracked content")
     destination = tmp_path / "snapshot"
     manager.snapshot("abc123", destination)
-    assert (destination / "scripts/runtime.py").read_bytes() == b"tracked content"
+    assert (destination / "scripts/runtime.py").read_bytes() == script
     assert not (destination / ".env").exists()
     assert all("show" in call.args[0] for call in manager.command.call_args_list)
 
@@ -571,3 +573,147 @@ def test_missing_branch_checkout_does_not_hide_other_git_errors(branch_installat
         manager.checkout('feature/terminal-ux')
     assert failure.value.returncode == 128
     assert command('branch', '--show-current') == 'develop'
+
+
+def test_feature_helper_stages_smaller_target_manifest_without_missing_feature_files(manager, tmp_path, monkeypatch):
+    """Real Git: an Airzone-shaped installed helper switches to a plain target."""
+    source = Path(__file__).resolve().parents[1]
+    root_files = {name: path for name, path in runtime.ROOT_FILES.items()
+                  if name not in {"airzone_connect.py", "airzone_diagnostic.py"}}
+    system_files = {name: path for name, path in runtime.SYSTEM_FILES.items() if name != "minitel-airzone-sudoers"}
+    files = ["pyproject.toml", "uv.lock", *root_files.values(),
+             *(f"config/{service}.service" for service in runtime.SERVICES),
+             *(f"config/{name}" for name in system_files)]
+    for relative in files:
+        destination = manager.project / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((source / relative).read_bytes())
+    target_script = f"ROOT_FILES = {root_files!r}\nSYSTEM_FILES = {system_files!r}\n".encode()
+    (manager.project / "scripts/runtime.py").write_bytes(target_script)
+    for args in (("init", "-b", "develop"), ("config", "user.name", "Fixture"),
+                 ("config", "user.email", "fixture@example.invalid"), ("add", "."), ("commit", "-m", "target")):
+        subprocess.run(["git", "-C", str(manager.project), *args], check=True, capture_output=True)
+    target = subprocess.check_output(["git", "-C", str(manager.project), "rev-parse", "HEAD"]).decode().strip()
+    before = release(manager, "old")
+    manager.activate(before)
+    monkeypatch.setattr(runtime, "ROOT_FILES", {**root_files, "airzone_connect.py": "scripts/airzone_connect.py",
+                                             "airzone_diagnostic.py": "services/airzone_demo.py"})
+    monkeypatch.setattr(runtime, "SYSTEM_FILES", {**system_files, "minitel-airzone-sudoers": "/etc/sudoers.d/minitel-airzone"})
+    def command(args, **kwargs):
+        if args[0] == "runuser" and "show" in args:
+            return subprocess.run([str(value) for value in args[4:]], check=True, capture_output=True)
+        return SimpleNamespace(stdout="")
+    manager.command.side_effect = command
+    destination = tmp_path / "snapshot"
+    manager.snapshot(target, destination)
+    candidate = manager.prepare(destination, [], target)
+    protected = Path(candidate["release"]) / "root"
+    assert (protected / "runtime.py").read_bytes() == target_script
+    assert not (protected / "airzone_connect.py").exists()
+    assert not (protected / "airzone_diagnostic.py").exists()
+    assert not (protected / "minitel-airzone-sudoers").exists()
+    assert (manager.root / "current").resolve() == Path(before["release"])
+    assert not any(call.args[0][:2] == ["systemctl", "stop"] for call in manager.command.call_args_list)
+    # The installed feature helper removes its known old policy when absent in target.
+    policy = manager.system_path("/etc/sudoers.d/minitel-airzone")
+    policy.parent.mkdir(parents=True)
+    policy.write_text("old feature rule")
+    manager.activate(candidate)
+    manager.units()
+    assert not policy.exists()
+
+
+def test_target_manifest_is_literal_only_and_never_executes_target_code(tmp_path):
+    path = tmp_path / "scripts/runtime.py"
+    path.parent.mkdir()
+    marker = tmp_path / "executed"
+    path.write_text(f"ROOT_FILES = {runtime.ROOT_FILES!r}\nSYSTEM_FILES = {runtime.SYSTEM_FILES!r}\n"
+                    f"open({str(marker)!r}, 'w').write('executed')\n")
+    assert runtime.runtime_assets(path) == (runtime.ROOT_FILES, runtime.SYSTEM_FILES)
+    assert not marker.exists()
+    path.write_text(f"ROOT_FILES = dict({runtime.ROOT_FILES!r})\nSYSTEM_FILES = {runtime.SYSTEM_FILES!r}\n")
+    with pytest.raises(RuntimeError, match="installer|install_runtime"):
+        runtime.runtime_assets(path)
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("change", ["new-helper", "changed-helper-path", "changed-system-path", "missing-core"])
+def test_unrecognized_target_privileged_layout_requires_manual_install_without_writing(manager, tmp_path, change):
+    root_files, system_files = dict(runtime.ROOT_FILES), dict(runtime.SYSTEM_FILES)
+    if change == "new-helper":
+        root_files["new.py"] = "scripts/new.py"
+    elif change == "changed-helper-path":
+        root_files["runtime.py"] = "../../private.py"
+    elif change == "changed-system-path":
+        system_files[next(iter(system_files))] = "/etc/arbitrary"
+    else:
+        del root_files["runtime.py"]
+    source = tmp_path / "target"
+    (source / "scripts").mkdir(parents=True)
+    (source / "scripts/runtime.py").write_text(f"ROOT_FILES = {root_files!r}\nSYSTEM_FILES = {system_files!r}\n")
+    with pytest.raises(RuntimeError, match="install_runtime"):
+        manager.prepare(source, [], "target")
+    assert not (manager.root / "releases").exists()
+    manager.command.assert_not_called()
+
+
+def test_missing_required_snapshot_file_reports_safe_step_and_path(manager, tmp_path, monkeypatch, capsys):
+    source = Path(__file__).resolve().parents[1]
+    def command(args, **kwargs):
+        if args[-1].endswith(":scripts/runtime.py"):
+            return SimpleNamespace(stdout=(source / "scripts/runtime.py").read_bytes())
+        raise subprocess.CalledProcessError(128, args, output=b"PRIVATE-OUTPUT", stderr=b"PRIVATE-ERROR")
+    manager.command.side_effect = command
+    monkeypatch.setattr(runtime, "Runtime", lambda: manager)
+    monkeypatch.setattr(runtime.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(manager, "initialize", Mock())
+    monkeypatch.setattr(manager, "install", lambda *args: manager.snapshot("PRIVATE-COMMIT", tmp_path / "target"))
+    monkeypatch.setattr(runtime.sys, "argv", ["runtime", "install"])
+    assert runtime.main() == 1
+    output = capsys.readouterr().err
+    assert "status 128" in output and "git-read-target-file" in output and "pyproject.toml" in output
+    assert "PRIVATE" not in output
+    status = json.loads((manager.state / "deployment.json").read_text())
+    assert status["error_step"] == "git-read-target-file" and status["error_file"] == "pyproject.toml"
+    assert not (manager.root / "releases").exists()
+
+
+def test_git_failure_reports_fixed_subcommand_without_url_arguments_or_captured_data(manager, monkeypatch, capsys):
+    monkeypatch.setattr(runtime, "Runtime", lambda: manager)
+    monkeypatch.setattr(runtime.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(manager, "initialize", Mock())
+    def command(args, **kwargs):
+        raise subprocess.CalledProcessError(128, args, output="PRIVATE-OUTPUT", stderr="PRIVATE-ERROR")
+    manager.command.side_effect = command
+    real_git = type(manager).git
+    monkeypatch.setattr(manager, "install", lambda *args: real_git(manager, "fetch", "https://PRIVATE@host/repo"))
+    monkeypatch.setattr(runtime.sys, "argv", ["runtime", "install"])
+    assert runtime.main() == 1
+    output = capsys.readouterr().err
+    assert "git-fetch" in output and "PRIVATE" not in output
+    assert json.loads((manager.state / "deployment.json").read_text())["error_step"] == "git-fetch"
+
+
+def test_diagnostics_reject_unrecognized_steps_or_paths():
+    error = RuntimeError("PRIVATE")
+    error.deployment_step, error.deployment_file = "PRIVATE", "PRIVATE"
+    assert runtime.failure_details(error) == {}
+    error.deployment_step = "git-read-target-file"
+    assert runtime.failure_details(error) == {"error_step": "git-read-target-file"}
+
+
+def test_rollback_refuses_unknown_protected_feature_before_stopping_services(manager):
+    active, previous = release(manager, "active"), release(manager, "previous")
+    script = Path(previous["release"]) / "root/runtime.py"
+    script.write_text(f"ROOT_FILES = {dict(runtime.ROOT_FILES, new_helper='scripts/new.py')!r}\n"
+                      f"SYSTEM_FILES = {runtime.SYSTEM_FILES!r}\n")
+    state = {"branch": "develop", "active": active, "previous": previous}
+    manager.activate(active)
+    runtime.atomic_json(manager.state / "runtime.json", state)
+    manager.command.reset_mock()
+    manager.git.return_value = ""
+    with pytest.raises(RuntimeError, match="install_runtime"):
+        manager.rollback()
+    manager.command.assert_not_called()
+    assert manager.read() == state
+    assert (manager.root / "current").resolve() == Path(active["release"])

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Root-managed shared uv runtime. See docs/RUNTIME.md for deployment semantics."""
 import argparse
+import ast
 import fcntl
 import json
 import os
@@ -41,6 +42,46 @@ SYSTEM_FILES = {
     "minitel-housekeeping.timer": "/etc/systemd/system/minitel-housekeeping.timer",
 }
 MIN_STAGE_FREE = 1024 ** 3
+GIT_STEPS = {name: "git-" + name for name in (
+    "fetch", "rev-parse", "merge-base", "show-ref", "switch", "reset", "status", "ls-tree", "ls-files", "check-ref-format")}
+
+
+def runtime_assets(script):
+    """Read literal target manifests without importing/executing target code.
+
+    An installed feature helper may know more files than the target needs.
+    Removal is supported; newly introduced privileged files require that target's
+    installer, as with the original first-rollout policy.
+    """
+    manifests = {}
+    try:
+        for node in ast.parse(script.read_bytes()).body:
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name) and node.targets[0].id in {"ROOT_FILES", "SYSTEM_FILES"}):
+                manifests[node.targets[0].id] = ast.literal_eval(node.value)
+        for name, known in (("ROOT_FILES", ROOT_FILES), ("SYSTEM_FILES", SYSTEM_FILES)):
+            values = manifests[name]
+            if not isinstance(values, dict) or any(key not in known or value != known[key] for key, value in values.items()):
+                raise ValueError("Unknown protected layout")
+        if not {"runtime.py", "wifi_manager.py", "gmail_credential_helper.py", "gmail_auth.py"} <= manifests["ROOT_FILES"].keys():
+            raise ValueError("Missing core helpers")
+    except (KeyError, ValueError, TypeError, SyntaxError) as error:
+        raise RuntimeError("Target protected runtime layout is incompatible; use the target branch's scripts/install_runtime.sh") from error
+    return manifests["ROOT_FILES"], manifests["SYSTEM_FILES"]
+
+
+def failure_details(error):
+    """Only fixed operation labels and known tracked paths may reach diagnostics."""
+    step = getattr(error, "deployment_step", None)
+    if step not in {*GIT_STEPS.values(), "git-read-target-file"}:
+        return {}
+    details = {"error_step": step}
+    path = getattr(error, "deployment_file", None)
+    allowed = {*ROOT_FILES.values(), "pyproject.toml", "uv.lock",
+               *(f"config/{service}.service" for service in SERVICES), *(f"config/{name}" for name in SYSTEM_FILES)}
+    if step == "git-read-target-file" and path in allowed:
+        details["error_file"] = path
+    return details
 
 
 
@@ -116,10 +157,14 @@ class Runtime:
 
     def git(self, *args):
         # Keep Git credentials/config and checkout ownership with the original user.
-        output = self.command(
-            ["runuser", "-u", "minitel", "--", "git", "-C", self.project, *args],
-            capture_output=True, text=True, timeout=120 if args[0] == "fetch" else 30,
-        ).stdout
+        try:
+            output = self.command(
+                ["runuser", "-u", "minitel", "--", "git", "-C", self.project, *args],
+                capture_output=True, text=True, timeout=120 if args[0] == "fetch" else 30,
+            ).stdout
+        except subprocess.SubprocessError as error:
+            error.deployment_step = GIT_STEPS.get(args[0])
+            raise
         return output if "-z" in args else output.strip()
 
     def read(self):
@@ -170,6 +215,7 @@ class Runtime:
 
     def prepare(self, source, extras, commit):
         """Create at the final path: virtual environments cannot safely be relocated."""
+        root_files, system_files = runtime_assets(source / "scripts/runtime.py")
         self.check_space()
         release = self.root / "releases" / uuid.uuid4().hex
         release.mkdir(parents=True, mode=0o755)
@@ -181,12 +227,12 @@ class Runtime:
                 shutil.copyfile(source / name, metadata / name)
             protected = release / "root"
             protected.mkdir()
-            for name, relative in ROOT_FILES.items():
+            for name, relative in root_files.items():
                 shutil.copyfile(source / relative, protected / name)
                 compile((protected / name).read_bytes(), str(protected / name), "exec")
             for service in SERVICES:
                 shutil.copyfile(source / f"config/{service}.service", protected / f"{service}.service")
-            for name in SYSTEM_FILES:
+            for name in system_files:
                 shutil.copyfile(source / "config" / name, protected / name)
             environment = release / "venv"
             env = {
@@ -335,6 +381,9 @@ PrivateMounts=yes
         accounts = self.system_path('/etc/credstore.encrypted/minitel-gmail-accounts')
         if accounts.exists() and 'AccountTokenSource' not in (Path(candidate['release']) / 'root/gmail_auth.py').read_text():
             raise RuntimeError('Multi-account Gmail requires a compatible release; restore matching data before downgrade')
+        # Retained releases bypass prepare(); reject unknown privileged layouts
+        # before stopping anything rather than restoring only part of a feature.
+        runtime_assets(Path(candidate["release"]) / "root/runtime.py")
         running = self.running()
         old_commit = old.get("active", {}).get("commit") or self.git("rev-parse", "HEAD")
         paths = [self.system_path(f"/etc/systemd/system/{service}.service") for service in SERVICES]
@@ -400,17 +449,26 @@ PrivateMounts=yes
 
     def snapshot(self, commit, source):
         """Read only required tracked files; never extract an untrusted archive as root."""
-        files = ["pyproject.toml", "uv.lock", *ROOT_FILES.values()]
-        files += [f"config/{service}.service" for service in SERVICES]
-        files += [f"config/{name}" for name in SYSTEM_FILES]
-        for relative in files:
-            result = self.command(
-                ["runuser", "-u", "minitel", "--", "git", "-C", self.project,
-                 "show", f"{commit}:{relative}"], capture_output=True,
-            )
+        def copy(relative):
+            try:
+                result = self.command(
+                    ["runuser", "-u", "minitel", "--", "git", "-C", self.project,
+                     "show", f"{commit}:{relative}"], capture_output=True,
+                )
+            except subprocess.SubprocessError as error:
+                error.deployment_step, error.deployment_file = "git-read-target-file", relative
+                raise
             path = source / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(result.stdout)
+
+        copy("scripts/runtime.py")
+        root_files, system_files = runtime_assets(source / "scripts/runtime.py")
+        files = ["pyproject.toml", "uv.lock", *(path for path in root_files.values() if path != "scripts/runtime.py")]
+        files += [f"config/{service}.service" for service in SERVICES]
+        files += [f"config/{name}" for name in system_files]
+        for relative in files:
+            copy(relative)
 
     def install(self, requested, branch):
         old = self.read()
@@ -679,8 +737,9 @@ def main():
         print("Another deployment is running.", file=sys.stderr)
         return 1
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError, SyntaxError, KeyError, TypeError) as error:
+        details = failure_details(error)
         if initialized and args.operation not in {"update", "rollback", "housekeeping", "switch-branch", "poweroff", "reboot"}:
-            manager.status("failed", error_type=type(error).__name__)
+            manager.status("failed", error_type=type(error).__name__, **details)
         message = str(error) if isinstance(error, RuntimeError) else "Inspect journalctl -u minitel-deploy -u minitel-runtime-install."
         if isinstance(error, subprocess.CalledProcessError):
             executable = Path(str(error.cmd[0])).name if isinstance(error.cmd, (list, tuple)) and error.cmd else "command"
@@ -689,6 +748,10 @@ def main():
             if executable not in {"systemctl", "systemd-run", "runuser", "uv", "visudo", "apt-get"}:
                 executable = "External command"
             message = f"{executable} exited with status {error.returncode}. {message}"
+        if details:
+            message += " Step: " + details["error_step"]
+            if "error_file" in details:
+                message += " File: " + details["error_file"]
         print(f"Deployment failed ({type(error).__name__}): {message}", file=sys.stderr)
         return 1
 

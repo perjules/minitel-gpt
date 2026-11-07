@@ -59,3 +59,13 @@ def test_diagnostics_omit_private_configuration_and_conversation_contents(consol
     assert report.json is None  # Download remains plain text JSON.
     assert '"http_status": 422' in report.text and '"recent_answer_errors"' in report.text
     assert admin.app.test_client().get('/diagnostics.txt').status_code == 302
+
+
+def test_maintenance_displays_safe_deployment_step_and_missing_file(console, monkeypatch):
+    client, _, _ = console
+    monkeypatch.setattr(admin.system_health, "deployment", lambda _: {
+        "phase": "failed", "error_type": "CalledProcessError",
+        "error_step": "git-read-target-file", "error_file": "config/minitel-airzone-sudoers"})
+    page = client.get('/?section=maintenance')
+    assert page.status_code == 200
+    assert "git-read-target-file" in page.text and "config/minitel-airzone-sudoers" in page.text

@@ -453,6 +453,47 @@ Use a fresh admin preview after fetching, since the confirmed commit may change.
 If deployment still fails, inspect `sudo journalctl -u minitel-deploy -n 100
 --no-pager`; a generic `CalledProcessError` does not identify the failed step.
 
+### Switching away from a feature with extra protected helpers
+
+The Airzone branch adds protected Python helpers and a sudoers asset. Older
+installed helpers used their own file list when preparing every target. Switching
+from Airzone to a plain terminal/develop branch therefore requested absent
+Airzone files with `git show`, returning `runuser`/Git exit 128 before environment
+preparation. Creating a local target branch cannot resolve this failure.
+
+The corrected helper reads the target commit's `scripts/runtime.py` first, then
+uses its literal `ROOT_FILES` and `SYSTEM_FILES` declarations for snapshot and
+preparation. Target code is parsed, never imported/executed during inspection.
+Only names and paths already recognized by the installed helper are accepted;
+core helpers remain mandatory. Assets explicitly removed by the target are not
+requested. A missing file still declared by the target remains a preparation
+failure. The installed helper's existing cleanup removes its obsolete feature
+policy/wrapper during activation; user files and installed extras are preserved.
+
+Introducing new protected files or changing protected destinations still requires
+the **target branch's runtime installer**, as with a first rollout. Such a target
+is refused explicitly before stopping services, rather than being partially
+installed. Retained-pair rollback applies the same layout gate.
+
+A fix on the target branch cannot update the already-running old helper. Either
+update/reinstall the current feature branch with this fix before switching, or
+perform the deliberate manual switch and install once. For the QR trial, after
+checking that tracked files are clean:
+
+```bash
+cd /home/minitel/minitel-gpt &&
+git fetch origin +refs/heads/feature/terminal-source-qr:refs/remotes/origin/feature/terminal-source-qr &&
+git switch feature/terminal-source-qr &&
+git merge --ff-only refs/remotes/origin/feature/terminal-source-qr &&
+sudo bash scripts/install_runtime.sh --branch feature/terminal-source-qr
+```
+
+Git failures now retain `error_step` (a fixed operation label) and, for snapshot
+reads, `error_file` (an allowlisted tracked path) in `deployment.json`. Maintenance
+and the deployment journal display these fields. Raw command arguments, URLs and
+captured stdout/stderr remain excluded. This also distinguishes fetch, ancestry,
+checkout and missing-target-file failures without exposing credentials.
+
 ### Recovering a checkout/installed-branch mismatch
 
 Owner-confirmed recovery on 5 November 2026 for:
