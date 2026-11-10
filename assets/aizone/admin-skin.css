@@ -1,0 +1,31 @@
+/* Aizone skin A, typography C: presentation only. Assets are served locally. */
+@font-face{font-family:PanelDIN;src:url(fonts/d-din-condensed.otf)}
+@font-face{font-family:PanelDIN;src:url(fonts/d-din-condensed-bold.otf);font-weight:700}
+@font-face{font-family:PanelHeading;src:url(fonts/michroma.woff)}
+@font-face{font-family:PanelOutput;src:url(fonts/space-mono-regular.woff)}
+@font-face{font-family:PanelOutput;src:url(fonts/space-mono-bold.woff);font-weight:700}
+:root{--accent:#bcfa73;--accent-d:#d3ff9d;--bg:#1d2019;--bg2:#30372b;--card:#383c2e;--border:#a28b56;--text:#f6e8bd;--muted:#ded0a9;--danger:#ff9a80;color-scheme:dark}
+body{background:#1d2019;color:var(--text);font-family:PanelDIN,'Arial Narrow',sans-serif;font-size:18px}
+h1,h2,h3,.brand b{font-family:PanelHeading,system-ui,sans-serif;letter-spacing:0;color:#f8e8b9}
+h1{font-size:1.3em}h2{font-size:1em}h3{font-size:.9em}
+.block h2{display:inline-block;max-width:100%;padding:3px 12px;border:5px solid transparent;border-image:url(skins/a/nameplate.webp) 17 39 fill / 5px 11px stretch;color:#201509;overflow-wrap:anywhere}
+a,summary{color:var(--accent)}
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible{outline:3px solid #ffc866;outline-offset:2px}
+.topbar,.tabwrap,.box,body:not(:has(.topbar)):not(:has(.box)) section,body:not(:has(.topbar)):not(:has(.box)) fieldset,body:not(:has(.topbar)):not(:has(.box)) details{background: url(skins/a/steel.webp) 0 0/480px auto,#30372b;border:7px solid transparent;border-image:url(skins/a/frame.webp) 35 / 7px stretch;color:var(--text)}
+.topbar{border-width:0 0 7px}.tabwrap{border-radius:0}.block{background:#383c2e;border:8px solid transparent;border-image:url(skins/a/zone-plaque.webp) 36 fill / 8px stretch;border-radius:0}
+nav.tabs a{color:#ded0a9;background:#30372b;border:1px solid #726043;border-radius:4px 4px 0 0}nav.tabs a.active{background:#383c2e;color:#bcfa73;border-color:#a28b56}
+.logo-badge{background:#eceae3}
+label,.sub,.ipbox{color:#ded0a9}label{font-size:1em}
+:is(input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=file]),select,textarea,pre,.reading){background:linear-gradient(#101810dc,#101810dc),url(skins/a/glass.webp) center/100% 40px repeat-y;border:2px solid #675336;border-radius:5px;color:#bcfa73;font-family:PanelOutput,monospace;box-shadow:inset 0 1px 6px #000a}
+.reading{padding:8px 12px;font-weight:700;overflow-wrap:anywhere}
+input::placeholder,textarea::placeholder{color:#b4c7a3;opacity:1}
+:is(button,.btn){font-family:PanelDIN,'Arial Narrow',sans-serif;font-size:1em;font-weight:700;cursor:pointer;color:#fff0c6;background:linear-gradient(#6b604b,#3f392d);border:6px solid transparent;border-image:url(skins/a/key.webp) 24 fill / 8px stretch;border-radius:3px;text-shadow:0 1px 2px #110c06;box-shadow:none}
+:is(button,.btn):hover{filter:brightness(1.18)}:is(button,.btn):active{transform:translateY(2px);filter:brightness(.8)}
+.btn-p:hover,.btn-s:hover,.btn-d:hover{background:linear-gradient(#6b604b,#3f392d)}
+button:disabled{opacity:.55;cursor:not-allowed}.btn-d{color:#ffd4bb}.logout{padding:5px 12px;color:#fff0c6}
+input[type=checkbox],input[type=radio]{accent-color:#802b26;width:auto}
+pre,code,.ipbox,.tag{font-family:PanelOutput,monospace}.tag{background:#121b11;color:#bcfa73;border-color:#726043}
+.dot.on{background:#88e854;box-shadow:0 0 5px #88e85480}.dot.warn{background:#ffb944}.dot.off{background:#697165}
+.fok,[role=status]{color:#d8fcb8;border-color:#88e854}.ferr,.err,.warning{color:#ffb392}.ferr{background:#381d18;border-color:#ba6c58}
+.plist li{background:#252b20;border-color:#726043}.plist .name{min-width:0}
+@media(max-width:600px){body{font-size:17px}.box{width:min(340px,calc(100vw - 24px));padding:24px}.tabwrap{padding:12px}.block{padding:14px}input,select,textarea{font-size:16px}}

@@ -6,7 +6,7 @@ HTML = r'''<!doctype html><html lang=fr><meta charset=utf-8>
 <style>body{background:#101820;color:#eee;font:16px system-ui;max-width:720px;margin:1em auto;padding:1em}
 a{color:#4ecdc4}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#000;color:#7fffa0;padding:1em;min-height:8em}
 input,button{font:inherit;padding:.6em;max-width:100%;box-sizing:border-box}input{width:100%;margin:.5em 0}button{margin:.3em}
-[hidden]{display:none!important}</style>
+[hidden]{display:none!important}</style><link rel="stylesheet" href="/assets/aizone/admin-skin.css">
 <a href="/test?mode=conversation">Retour aux tests</a><h1>Journal intime</h1>
 <p>Mot de passe propre au journal. Les textes ne sont pas journalisés ni mémorisés par la conversation.</p>
 <form id=choose autocomplete=off><label>Profil nommé<input id=username maxlength=60 value="{{username}}" required></label>

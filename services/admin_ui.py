@@ -705,7 +705,7 @@ LOGIN_HTML = """<!DOCTYPE html><html lang=fr><head><meta charset=UTF-8>
 .logo-badge img{width:180px;height:auto;display:block}
 input{width:100%;padding:12px;background:#1b1b1f;border:1px solid #4ecdc4;color:#e6e6e6;border-radius:6px;text-align:center;letter-spacing:.2em;box-sizing:border-box;font-size:16px}
 button{width:100%;margin-top:12px;padding:12px;background:#4ecdc4;color:#06201d;border:none;border-radius:6px;font-weight:bold;cursor:pointer;font-size:1em}
-button:hover{background:#3db5ab}.err{color:#ff5b5b;margin-top:10px}</style></head><body>
+button:hover{background:#3db5ab}.err{color:#ff5b5b;margin-top:10px}</style><link rel="stylesheet" href="/assets/aizone/admin-skin.css"></head><body>
 <div class=box><div class=logo-badge><img src=/assets/logo-minitel-gpt.png alt="MINITEL GPT"></div>
 <form method=POST><input type=hidden name=csrf value="{{csrf_token()}}"><input type=password name=password placeholder="••••••" autofocus>
 <button>Entrer</button></form>{% if error %}<div class=err>{{error}}</div>{% endif %}</div></body></html>"""
@@ -773,7 +773,7 @@ pre{background:var(--bg);padding:10px;border-radius:6px;font-size:.72em;max-heig
 @media(max-width:600px){.topbar{flex-wrap:wrap;gap:8px}nav.tabs{padding:0 10px}nav.tabs a{flex:1 1 45%;text-align:center;padding:12px 8px}main{padding:0 10px}.tabwrap{padding:12px}.brand{gap:6px}.brand b{font-size:.9em}.row,.plist li{flex-wrap:wrap}input,select,textarea{min-width:0}}
 hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 .ipbox{font-size:.9em;color:var(--muted)}.ipbox b{color:var(--accent)}
-</style></head><body>
+</style><link rel="stylesheet" href="/assets/aizone/admin-skin.css"></head><body>
 <div class=topbar>
   <div class=brand><span class=logo-badge><img src=/assets/logo-minitel-gpt.png alt=""></span><b>Administration</b></div>
   <form method=POST action=/logout><input type=hidden name=csrf value="{{csrf_token()}}"><button class=logout>Déconnexion</button></form>
@@ -2324,7 +2324,7 @@ def gmail_accounts_admin():
 
 ROSE_HTML = """<!doctype html><html lang=fr><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1"><title>Atelier privé</title>
-<style>body{font:16px system-ui;max-width:850px;margin:20px auto;padding:16px;background:#19191d;color:#eee}a,summary{color:#4ecdc4}label{display:block;margin:12px 0}input,select,textarea{box-sizing:border-box;width:100%;padding:8px;font:inherit}input[type=hidden]{display:none}button{padding:10px;margin:8px 0}section,details{border:1px solid #555;padding:16px;margin:16px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style>
+<style>body{font:16px system-ui;max-width:850px;margin:20px auto;padding:16px;background:#19191d;color:#eee}a,summary{color:#4ecdc4}label{display:block;margin:12px 0}input,select,textarea{box-sizing:border-box;width:100%;padding:8px;font:inherit}input[type=hidden]{display:none}button{padding:10px;margin:8px 0}section,details{border:1px solid #555;padding:16px;margin:16px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style><link rel="stylesheet" href="/assets/aizone/admin-skin.css">
 {% if message %}<p role=status>{{message}}</p>{% endif %}
 {% if not unlocked %}<h1>Accès réservé</h1><form method=post><input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=action value=unlock>
 <label>Mot de passe<input type=password name=password required autocomplete=current-password></label><button>Déverrouiller</button></form>
@@ -2795,7 +2795,7 @@ GMAIL_HTML = """<!doctype html><html lang="fr"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Gmail — 3615 IA</title>
 <style>body{background:#101820;color:#eee;font:16px system-ui;max-width:700px;margin:2em auto;padding:1em}
 pre{font:16px monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:#000;color:#7fffa0;padding:1em}
-input,button{font:inherit;padding:.5em;margin:.2em} input[type=text]{width:90%}</style>
+input,button{font:inherit;padding:.5em;margin:.2em} input[type=text]{width:90%}</style><link rel="stylesheet" href="/assets/aizone/admin-skin.css">
 <a href="/?section=services">Retour aux services</a><h1>Tester le Minitel — Gmail</h1>
 <nav><a href="/test?mode=conversation">Conversation</a> · <a href="/test?mode=gmail">Gmail</a> · <a href="/services/gmail">Configurer Gmail</a></nav>
 <form method=post><input type=hidden name=csrf value="{{csrf}}">

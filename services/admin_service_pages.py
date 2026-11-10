@@ -7,7 +7,7 @@ label{display:block;margin:12px 0}input,textarea,select,button{font:inherit;box-
 input:not([type=checkbox]),textarea,select{width:100%}button{margin:6px 6px 6px 0}table{width:100%;border-collapse:collapse}td,th{padding:6px;text-align:left}
 pre{white-space:pre-wrap;overflow-wrap:anywhere}summary{cursor:pointer}input:disabled{opacity:.5}
 @media(max-width:600px){table,tr,td,th{display:block}thead{display:none}}[role=status]{border-left:3px solid #4ecdc4;padding:10px}
-</style><a href="/?section=services">Retour aux services</a><h1>{{title}}</h1>
+</style><link rel="stylesheet" href="/assets/aizone/admin-skin.css"><a href="/?section=services">Retour aux services</a><h1>{{title}}</h1>
 {% if message %}<p role=status>{{message}}</p>{% endif %}'''
 GMAIL = '''<section><h2>Comptes Gmail</h2><p>{{account}}</p>
 <p><a href=/users>Utilisateurs et accès</a></p>
