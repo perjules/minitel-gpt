@@ -420,3 +420,30 @@ réels Pi/Minitel : [docs/GMAIL.md](docs/GMAIL.md).
 `NOEL` ouvre une liste publique par profil : ajouts assistés par IA ou texte exact,
 suppression et cases à cocher par numéro. JSON et Markdown locaux.
 Commandes et vérification : [docs/CHRISTMAS_LIST.md](docs/CHRISTMAS_LIST.md).
+
+## Airzone (optionnel)
+
+Airzone est l'équipement de climatisation. Aizone est le contrôleur indépendant.
+Régler `AIRZONE_URL` dans le `.env` de MinitelGPT sur l'origine HTTPS du contrôleur,
+par exemple `https://controleur.example:8443`, sans chemin ni barre oblique finale.
+Redémarrer le service MinitelGPT. Une valeur vide désactive le panneau.
+
+Après connexion à un profil, saisir `AIRZONE`. Choisir une zone par son numéro,
+puis `C:20,5`, `MARCHE` ou `ARRET`. `MODE` depuis la liste concerne toute
+la maison. `OUI` + ENVOI confirme la commande proposée. `MAJ` relit l'état.
+Taper `RETOUR` pour revenir à la liste, puis au chat. SOMMAIRE quitte le panneau.
+Une commande déjà confirmée peut finir après la sortie du panneau.
+En cas de résultat inconnu, relire l'état avant de réessayer.
+
+Les mesures et commandes restent dans ce panneau local. Chaque profil connecté
+peut y accéder. Les limites et permissions viennent du contrôleur Aizone.
+Le panneau signale les mesures anciennes, simulées ou indisponibles.
+Les écritures ne sont jamais renvoyées automatiquement.
+
+L'accès réseau est configuré en dehors de MinitelGPT. Pour Tailscale Serve,
+relever l'origine HTTPS avec `tailscale serve status` sur le contrôleur et
+vérifier sa joignabilité depuis le Pi Minitel.
+
+Test sur matériel : comparer les relevés avec le dashboard, puis changer
+légèrement une consigne et la rétablir après relecture. Tester marche/arrêt
+et mode partagé lorsque ces changements conviennent.

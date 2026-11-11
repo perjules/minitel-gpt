@@ -1,0 +1,249 @@
+"""Private terminal panel for the Aizone HTTP API."""
+import re
+import threading
+import time
+from decimal import Decimal, InvalidOperation
+from functools import partial
+from queue import Queue
+
+from . import airzone_client, rose_terminal
+
+MODES = {1: "Arrêt", 2: "Climatisation", 3: "Chauffage", 4: "Ventilation",
+         5: "Déshumidification", 7: "Auto"}
+MESSAGES = {
+    "confirmed": "Réglage confirmé par Airzone.",
+    "sent": "Consigne envoyée. Relecture en attente.",
+    "rejected": "Commande rejetée par Airzone.",
+    "not_sent": "Commande non envoyée.",
+    "unconfirmed": "Réglage non confirmé. Vérifiez l'état.",
+    "unknown": "Résultat inconnu. Vérifiez l'état.",
+}
+
+
+def label(value, fallback=""):
+    if not isinstance(value, str):
+        return fallback
+    return " ".join("".join(char for char in value[:160] if char.isprintable()).split()) or fallback
+
+
+def room_name(zone):
+    return label(zone.get("name"), f"Zone {zone['id']}")
+
+
+def number(value):
+    return type(value) in (int, float) and -1e6 < value < 1e6
+
+
+def display(value, unit=""):
+    return f"{value:g}".replace(".", ",") + unit if number(value) else "--"
+
+
+def power(zone):
+    value = zone.get("on")
+    if type(value) is not bool:
+        return "--"
+    return "Marche" if value else "Arrêt"
+
+
+def mode_name(value):
+    return MODES.get(value, f"Mode {value}") if type(value) is int else "--"
+
+
+def current_mode(state):
+    return next((z.get("mode") for z in state.get("zones", [])
+                 if z["id"] == state.get("master_zone_id") and z.get("available") is True), None)
+
+
+def supported_modes(state):
+    modes = state.get("supported_modes")
+    return [mode for mode in modes if type(mode) is int and 1 <= mode <= 255] if isinstance(modes, list) else []
+
+
+def render(state, zone, choosing_mode, notice):
+    lines = ["AIRZONE / " + (room_name(zone) if zone else "MAISON")]
+    if state.get("demo") is True:
+        lines.append("SIMULATION / lecture seule")
+    if not airzone_client.fresh(state):
+        lines.append("Hors ligne ou relevé non actuel")
+    seconds = airzone_client.age(state)
+    if seconds is not None:
+        lines.append(f"Âge du relevé : {max(0, int(seconds))} s")
+    if notice:
+        lines.extend(("", notice))
+    lines.append("")
+    if choosing_mode:
+        lines.append("Mode actuel : " + mode_name(current_mode(state)))
+        lines.extend(f"{mode}  {mode_name(mode)}" for mode in supported_modes(state))
+        lines.extend(("", "Numéro du mode + ENVOI"))
+    elif zone:
+        if zone.get("available") is not True:
+            lines.append("Zone indisponible.")
+        else:
+            lines.extend((
+                "Température : " + display(zone.get("temperature"), " °C"),
+                "Consigne    : " + display(zone.get("setpoint"), " °C"),
+                "État        : " + power(zone),
+                "Humidité    : " + display(zone.get("humidity"), " %"),
+                "Demande air : " + display(zone.get("air_demand")),
+                "Mode        : " + mode_name(zone.get("mode")),
+            ))
+            warning = label(zone.get("device_warning"))
+            if warning:
+                lines.append(warning)
+            if number(zone.get("pending_setpoint")):
+                lines.append("Consigne en attente : " + display(zone["pending_setpoint"], " °C"))
+        lines.extend(("", "C:20,5 / MARCHE / ARRET"))
+    else:
+        for item in state.get("zones", []):
+            lines.append(f"{item['id']}  {room_name(item)[:23]}")
+            if item.get("available") is True:
+                lines.append(f"   {display(item.get('temperature'), ' °C')} / "
+                             f"{display(item.get('setpoint'), ' °C')} / {power(item)}")
+            else:
+                lines.append("   Indisponible")
+        lines.extend(("", "Numéro de zone / MODE"))
+    lines.append("MAJ : relire / taper RETOUR : sortir")
+    return "\n".join(lines)
+
+
+def reason(value, fallback):
+    return label(value[0], fallback) if isinstance(value, list) and value else fallback
+
+
+def proposal(state, zone, choosing_mode, command):
+    if state.get("demo") is not False or not airzone_client.fresh(state):
+        raise airzone_client.AirzoneError("Relevé réel récent requis. Tapez MAJ.")
+    if state.get("commands_enabled") is not True:
+        raise airzone_client.AirzoneError("Commandes désactivées.")
+    if choosing_mode:
+        if not re.fullmatch(r"[0-9]{1,3}", command) or int(command) not in supported_modes(state):
+            raise airzone_client.AirzoneError("Choisissez un mode proposé.")
+        if state.get("mode_enabled") is not True:
+            raise airzone_client.AirzoneError(reason(state.get("mode_reasons"), "Mode partagé indisponible."))
+        value = int(command)
+        return None, "mode", value, f"Toute la maison :\n{mode_name(current_mode(state))} > {mode_name(value)}"
+    if command in {"MARCHE", "ARRÊT", "ARRET"}:
+        field, value = "on", command == "MARCHE"
+        summary = f"{power(zone)} > {'Marche' if value else 'Arrêt'}"
+    else:
+        match = re.fullmatch(r"C:\s*([+-]?[0-9]{1,3}(?:[.,][0-9]{1,3})?)", command)
+        if not match:
+            raise airzone_client.AirzoneError("Utilisez C:20,5, MARCHE ou ARRET.")
+        field = "setpoint"
+        target = Decimal(match[1].replace(",", "."))
+        limits = [zone.get(key) for key in ("min", "max", "step")]
+        if not all(number(limit) for limit in limits):
+            raise airzone_client.AirzoneError("Limites de consigne indisponibles.")
+        low, high, step = (Decimal(str(limit)) for limit in limits)
+        try:
+            valid = low <= target <= high and step > 0 and (target - low) % step == 0
+        except InvalidOperation:
+            valid = False
+        if not valid:
+            raise airzone_client.AirzoneError(f"Consigne : {low} à {high} °C, pas {step}.")
+        value = float(target)
+        summary = f"{display(zone.get('setpoint'))} > {display(value, ' °C')}"
+    controls = zone.get("controls")
+    if zone.get("available") is not True or not isinstance(controls, dict) or controls.get(field) is not True:
+        reasons = zone.get("control_reasons")
+        why = reasons.get(field) if isinstance(reasons, dict) else None
+        raise airzone_client.AirzoneError(reason(why, "Commande indisponible pour cette zone."))
+    return zone["id"], field, value, f"{room_name(zone)} :\n{summary}"
+
+
+def run(term, client, language):
+    chat = rose_terminal.api()
+    pending = None
+
+    def request(operation, timeout):
+        nonlocal pending
+        output = Queue(maxsize=1)
+
+        def work():
+            try:
+                output.put((operation(), None))
+            except airzone_client.AirzoneError as error:
+                output.put((str(error), None))
+            except Exception as error:  # noqa: BLE001 - Relay worker failures to the UART owner.
+                output.put((None, error))
+
+        worker = threading.Thread(target=work, daemon=True)
+        pending = term._pending = (worker, output, time.monotonic())
+        term.waiting("Airzone : veuillez patienter")
+        worker.start()
+        return chat.wait_answer(term, pending, timeout)
+
+    state, selected, choosing_mode, notice = {}, None, False, ""
+    refresh = True
+    while True:
+        if refresh:
+            reply, action = request(client.state, airzone_client.REQUEST_TIMEOUT + 1)
+            if action in {"sommaire", "guide"}:
+                return action, pending
+            state = reply if isinstance(reply, dict) else {}
+            if not state:
+                notice = "\n".join(filter(None, (notice, reply or "Lecture Aizone indisponible.")))
+            if action == "deadline":
+                chat.show_response(term, notice, language)
+                return "done", pending
+            refresh = False
+        zone = next((item for item in state.get("zones", []) if item["id"] == selected), None)
+        chat.show_response(term, render(state, zone, choosing_mode, notice), language)
+        answer, action = chat.read_question(term)
+        if action != "envoi":
+            return action, pending
+        command = (answer or "").strip().upper()
+        if command in {"SOMMAIRE", "LOGOUT"}:
+            return command.lower(), pending
+        notice = ""
+        if command == "MAJ":
+            refresh = True
+            continue
+        if command == "RETOUR":
+            if selected is None and not choosing_mode:
+                return "done", pending
+            selected, choosing_mode = None, False
+            continue
+        if not zone and not choosing_mode:
+            if command == "MODE":
+                choosing_mode = True
+            elif re.fullmatch(r"[0-9]{1,2}", command) and any(
+                    item["id"] == int(command) for item in state.get("zones", [])):
+                selected = int(command)
+            else:
+                notice = "Choisissez un numéro de zone ou MODE."
+            continue
+        try:
+            zone_id, field, value, summary = proposal(state, zone, choosing_mode, command)
+        except airzone_client.AirzoneError as error:
+            notice = str(error)
+            continue
+        chat.show_response(term, summary + "\n\nConfirmer ? OUI / NON", language)
+        answer, action = chat.read_question(term, calculator_mode=True)
+        if action != "envoi":
+            return action, pending
+        answer = (answer or "").strip().upper()
+        if answer in {"SOMMAIRE", "LOGOUT"}:
+            return answer.lower(), pending
+        if answer != "OUI":
+            notice = "Commande annulée."
+            continue
+        if not airzone_client.fresh(state):
+            notice = "Relevé expiré. Aucune commande envoyée."
+            refresh = True
+            continue
+        receipt, action = request(partial(client.apply, zone_id, field, value),
+                                  airzone_client.REQUEST_TIMEOUT + 8)
+        if action in {"sommaire", "guide"}:
+            return action, pending
+        if action == "deadline":
+            chat.show_response(term, MESSAGES["unknown"], language)
+            return "done", pending
+        receipt = receipt if isinstance(receipt, dict) else {}
+        outcome = receipt.get("outcome", "unknown")
+        notice = MESSAGES.get(outcome, MESSAGES["unknown"])
+        if outcome in {"not_sent", "rejected"}:
+            detail = label(receipt.get("message"))
+            if detail:
+                notice += "\n" + detail
+        refresh = True

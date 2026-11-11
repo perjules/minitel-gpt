@@ -25,6 +25,8 @@ from dotenv import load_dotenv
 
 try:  # Support both systemd's direct script and package imports in tests.
     from . import (
+        airzone_client,
+        airzone_terminal,
         answer_diagnostics,
         calculator,
         christmas_list,
@@ -51,6 +53,8 @@ except ImportError:
     # Direct systemd entry point: keep one identity for exception/session classes.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from services import (
+        airzone_client,
+        airzone_terminal,
         answer_diagnostics,
         calculator,
         christmas_list,
@@ -1673,6 +1677,32 @@ def run_session(t):
                 t.line('Profil modifié. Reconnectez-vous.')
                 username = language = None
                 break
+
+            if recall_eligible and (question or "").strip().upper() == "AIRZONE":
+                if pending is not None and pending[0].is_alive():
+                    show_response(t, "Requête précédente en cours. Réessayez bientôt.", language)
+                    continue
+                origin = os.getenv("AIRZONE_URL", "").strip()
+                if not origin:
+                    show_response(t, "Airzone désactivé : AIRZONE_URL absent.", language)
+                    continue
+                try:
+                    controller = airzone_client.Client(origin)
+                except airzone_client.AirzoneError as error:
+                    show_response(t, str(error), language)
+                    continue
+                action, airzone_pending = airzone_terminal.run(t, controller, language)
+                if airzone_pending is not None:
+                    pending = airzone_pending
+                if action == "guide":
+                    show_guide(t, language)
+                    break
+                if action == "logout":
+                    username = language = None
+                    break
+                if action in {"sommaire", "timeout"}:
+                    break
+                continue
 
             # Deterministic local tool: use the ordinary answer display path,
             # but never send the fixture to a model, memory, history or printer.
