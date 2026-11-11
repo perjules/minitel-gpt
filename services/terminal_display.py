@@ -255,7 +255,8 @@ class View:
         """Restore chrome/input after FF without displaying or acknowledging a page."""
         self.row(1, self.heading)
         navigation = {"grades": "SUITE:note+ RETOUR:note-", "exit": "SUITE:page RETOUR:quitter",
-                      "catalogue": "SUITE:catalogue RETOUR:quitter"}.get(
+                      "catalogue": "SUITE:catalogue RETOUR:quitter",
+                      "zones": "SUITE:zone+ RETOUR:zone-"}.get(
             self.feature_navigation, "SUITE/RETOUR | LINK n:QR" if self.references else "SUITE:suiv RETOUR:prec")
         self.row(self.geometry.navigation_row, "QR | RETOUR: reponse / LINK n" if self.qr else
                  "Requete en cours..." if self.processing else
@@ -420,7 +421,8 @@ class View:
 
     def _read(self, allow_empty, calculator_mode, navigation_mode, touch, recall):
         chat = rose_terminal.api()
-        self.feature_navigation = "grades" if navigation_mode else "exit" if calculator_mode else False
+        self.feature_navigation = ("zones" if navigation_mode == "zones" else
+                                   "grades" if navigation_mode else "exit" if calculator_mode else False)
         self.buffer, self.pending_input = self.pending_input, []
         self.carry_input = False
         overflow = False
@@ -485,7 +487,7 @@ class View:
                         self.close_qr()
                         continue
                     if navigation_mode:
-                        self.carry_input = True
+                        self.carry_input = navigation_mode != "zones"
                         return "SUIVANT" if code == chat.K_SUITE else "PRECEDENT", "envoi"
                     if code == chat.K_RETOUR and calculator_mode:
                         return "RETOUR", "envoi"

@@ -15,8 +15,9 @@ MESSAGES = {
     "sent": "Consigne envoyée. Relecture en attente.",
     "rejected": "Commande rejetée par Airzone.",
     "not_sent": "Commande non envoyée.",
-    "unconfirmed": "Réglage non confirmé. Vérifiez l'état.",
+    "unconfirmed": "Commande envoyée. Relecture en attente.",
     "unknown": "Résultat inconnu. Vérifiez l'état.",
+    "skipped": "Non envoyée (séquence interrompue).",
 }
 
 
@@ -59,7 +60,7 @@ def supported_modes(state):
     return [mode for mode in modes if type(mode) is int and 1 <= mode <= 255] if isinstance(modes, list) else []
 
 
-def render(state, zone, choosing_mode, notice):
+def render(state, zone, choosing_mode, notice, *, all_zones=False):
     lines = ["AIRZONE / " + (room_name(zone) if zone else "MAISON")]
     if state.get("demo") is True:
         lines.append("SIMULATION / lecture seule")
@@ -75,6 +76,9 @@ def render(state, zone, choosing_mode, notice):
         lines.append("Mode actuel : " + mode_name(current_mode(state)))
         lines.extend(f"{mode}  {mode_name(mode)}" for mode in supported_modes(state))
         lines.extend(("", "Numéro du mode + ENVOI"))
+    elif all_zones:
+        lines.extend(("TOUTES LES ZONES", "C:20,5 / MARCHE / ARRET",
+                      "Une confirmation pour toute la maison."))
     elif zone:
         if zone.get("available") is not True:
             lines.append("Zone indisponible.")
@@ -101,7 +105,9 @@ def render(state, zone, choosing_mode, notice):
                              f"{display(item.get('setpoint'), ' °C')} / {power(item)}")
             else:
                 lines.append("   Indisponible")
-        lines.extend(("", "Numéro de zone / MODE"))
+        lines.extend(("", "0 ou TOUS : toutes les zones", "Numéro de zone / MODE"))
+    if zone:
+        lines.append("SUITE/RETOUR : zone suivante/précédente")
     lines.append("MAJ : relire / taper RETOUR : sortir")
     return "\n".join(lines)
 
@@ -151,6 +157,42 @@ def proposal(state, zone, choosing_mode, command):
     return zone["id"], field, value, f"{room_name(zone)} :\n{summary}"
 
 
+def group_proposal(state, command):
+    zones = state.get("zones", [])
+    if not zones:
+        raise airzone_client.AirzoneError("Aucune zone disponible.")
+    targets = []
+    for zone in zones:
+        try:
+            zone_id, field, value, _ = proposal(state, zone, False, command)
+        except airzone_client.AirzoneError as error:
+            raise airzone_client.AirzoneError(f"{room_name(zone)} : {error}") from error
+        targets.append((zone_id, field, value))
+    value = targets[0][2]
+    if targets[0][1] == "setpoint":
+        change = display(value, " °C")
+    else:
+        change = "Marche" if value else "Arrêt"
+    names = "\n".join(room_name(zone) for zone in zones)
+    return targets, f"TOUTES LES ZONES ({len(zones)})\n{names}\n\nAppliquer : {change}"
+
+
+def mode_notice(state, target, outcome):
+    requested = f"Mode demandé : {mode_name(target)}"
+    observed = f"Mode relu : {mode_name(current_mode(state))}"
+    return "\n".join((MESSAGES[outcome], requested, observed))
+
+
+def group_notice(state, receipt):
+    zones = {zone["id"]: zone for zone in state.get("zones", [])}
+    lines = ["BILAN TOUTES LES ZONES"]
+    for result in receipt["results"]:
+        zone = zones.get(result["id"], {"id": result["id"]})
+        lines.append(room_name(zone) + " :")
+        lines.append(MESSAGES.get(result["outcome"], MESSAGES["unknown"]))
+    return "\n".join(lines)
+
+
 def run(term, client, language):
     chat = rose_terminal.api()
     pending = None
@@ -175,6 +217,7 @@ def run(term, client, language):
 
     state, selected, choosing_mode, notice = {}, None, False, ""
     refresh = True
+    pending_mode = None
     while True:
         if refresh:
             reply, action = request(client.state, airzone_client.REQUEST_TIMEOUT + 1)
@@ -186,16 +229,32 @@ def run(term, client, language):
             if action == "deadline":
                 chat.show_response(term, notice, language)
                 return "done", pending
+            if pending_mode is not None and state:
+                target, baseline, master, pending_outcome = pending_mode
+                observed = airzone_client.observation(state)
+                confirmed = (state.get("demo") is False and airzone_client.fresh(state)
+                             and baseline is not None and observed is not None and observed > baseline
+                             and state.get("master_zone_id") == master and current_mode(state) == target)
+                notice = mode_notice(state, target, "confirmed" if confirmed else pending_outcome)
+                if confirmed:
+                    pending_mode = None
             refresh = False
         zone = next((item for item in state.get("zones", []) if item["id"] == selected), None)
-        chat.show_response(term, render(state, zone, choosing_mode, notice), language)
-        answer, action = chat.read_question(term)
+        chat.show_response(term, render(state, zone, choosing_mode, notice, all_zones=selected == 0), language)
+        answer, action = chat.read_question(term, navigation_mode="zones" if zone else False)
         if action != "envoi":
             return action, pending
         command = (answer or "").strip().upper()
         if command in {"SOMMAIRE", "LOGOUT"}:
             return command.lower(), pending
         notice = ""
+        if zone and command in {"SUIVANT", "PRECEDENT"}:
+            ids = [item["id"] for item in state["zones"]]
+            selected = ids[(ids.index(selected) + (1 if command == "SUIVANT" else -1)) % len(ids)]
+            continue
+        if command in {"TOUS", "0"}:
+            selected, choosing_mode = 0, False
+            continue
         if command == "MAJ":
             refresh = True
             continue
@@ -204,7 +263,7 @@ def run(term, client, language):
                 return "done", pending
             selected, choosing_mode = None, False
             continue
-        if not zone and not choosing_mode:
+        if not zone and not choosing_mode and selected != 0:
             if command == "MODE":
                 choosing_mode = True
             elif re.fullmatch(r"[0-9]{1,2}", command) and any(
@@ -214,7 +273,15 @@ def run(term, client, language):
                 notice = "Choisissez un numéro de zone ou MODE."
             continue
         try:
-            zone_id, field, value, summary = proposal(state, zone, choosing_mode, command)
+            if selected == 0:
+                targets, summary = group_proposal(state, command)
+                operation = partial(client.apply_all, targets)
+                timeout = 49
+                field, value = targets[0][1:]
+            else:
+                zone_id, field, value, summary = proposal(state, zone, choosing_mode, command)
+                operation = partial(client.apply, zone_id, field, value)
+                timeout = airzone_client.REQUEST_TIMEOUT + 8
         except airzone_client.AirzoneError as error:
             notice = str(error)
             continue
@@ -232,8 +299,9 @@ def run(term, client, language):
             notice = "Relevé expiré. Aucune commande envoyée."
             refresh = True
             continue
-        receipt, action = request(partial(client.apply, zone_id, field, value),
-                                  airzone_client.REQUEST_TIMEOUT + 8)
+        if field == "mode":
+            pending_mode = (value, airzone_client.observation(state), state.get("master_zone_id"), "unknown")
+        receipt, action = request(operation, timeout)
         if action in {"sommaire", "guide"}:
             return action, pending
         if action == "deadline":
@@ -241,7 +309,16 @@ def run(term, client, language):
             return "done", pending
         receipt = receipt if isinstance(receipt, dict) else {}
         outcome = receipt.get("outcome", "unknown")
-        notice = MESSAGES.get(outcome, MESSAGES["unknown"])
+        if outcome == "group":
+            notice = group_notice(state, receipt)
+        elif field == "mode":
+            notice = mode_notice(receipt, value, outcome if outcome in MESSAGES else "unknown")
+            if outcome in {"confirmed", "not_sent", "rejected"}:
+                pending_mode = None
+            else:
+                pending_mode = (*pending_mode[:3], outcome if outcome in MESSAGES else "unknown")
+        else:
+            notice = MESSAGES.get(outcome, MESSAGES["unknown"])
         if outcome in {"not_sent", "rejected"}:
             detail = label(receipt.get("message"))
             if detail:

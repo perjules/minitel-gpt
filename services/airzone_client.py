@@ -87,7 +87,7 @@ class Client:
         except (requests.RequestException, UnicodeError, json.JSONDecodeError, RecursionError) as error:
             raise AirzoneError("Lecture Aizone indisponible.") from error
 
-    def write(self, zone_id, field, value):
+    def write(self, zone_id, field, value, *, budget=REQUEST_TIMEOUT):
         if field == "mode" and zone_id is None:
             path = "/api/mode"
         elif field in {"setpoint", "on"} and type(zone_id) is int and 1 <= zone_id <= 32:
@@ -95,7 +95,7 @@ class Client:
         else:
             raise AirzoneError("Commande Airzone invalide.")
         try:
-            status, receipt = self._request("POST", path, {field: value})
+            status, receipt = self._request("POST", path, {field: value}, budget=budget)
             outcome = receipt.get("outcome")
             if (outcome in {"rejected", "not_sent", "unconfirmed", "unknown"}
                     or status == 200 and outcome == "confirmed"
@@ -107,7 +107,7 @@ class Client:
 
     def apply(self, zone_id, field, value):
         receipt = self.write(zone_id, field, value)
-        if field != "setpoint" or receipt["outcome"] != "sent":
+        if receipt["outcome"] not in {"sent", "unconfirmed"}:
             return receipt
         baseline = observation(receipt)
         if baseline is None:
@@ -125,8 +125,28 @@ class Client:
             observed = observation(state)
             if state["demo"] or not fresh(state) or observed is None or observed <= baseline:
                 continue
-            zone = next((zone for zone in state["zones"] if zone["id"] == zone_id), {})
-            if (zone.get("available") is True and "pending_setpoint" in zone
-                    and zone["pending_setpoint"] is None and zone.get("setpoint") == value):
-                return {"outcome": "confirmed"}
+            target_id = receipt.get("master_zone_id") if field == "mode" else zone_id
+            zone = next((zone for zone in state["zones"] if zone["id"] == target_id), {})
+            matches = zone.get("available") is True and zone.get(field) == value
+            if field == "setpoint":
+                matches = matches and "pending_setpoint" in zone and zone["pending_setpoint"] is None
+            if matches:
+                return {**state, "outcome": "confirmed"}
         return receipt
+
+
+    def apply_all(self, targets):
+        """One consent, sequential writes; retain partial results and never resend."""
+        deadline = time.monotonic() + 40
+        results = []
+        stopped = False
+        for zone_id, field, value in targets:
+            remaining = deadline - time.monotonic()
+            if stopped or remaining <= 0:
+                results.append({"id": zone_id, "outcome": "skipped"})
+                continue
+            receipt = self.write(zone_id, field, value, budget=min(REQUEST_TIMEOUT, remaining))
+            outcome = receipt["outcome"]
+            results.append({"id": zone_id, "outcome": outcome})
+            stopped = outcome not in {"confirmed", "sent", "unconfirmed"}
+        return {"outcome": "group", "results": results}

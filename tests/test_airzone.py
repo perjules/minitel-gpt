@@ -196,3 +196,133 @@ def test_failed_read_keeps_terminal_usable(monkeypatch):
     assert panel.run(Mock(), client, "fr")[0] == "done"
     client.apply.assert_not_called()
     assert "Lecture Aizone indisponible." in chat.show_response.call_args.args[1]
+
+
+def house():
+    from copy import deepcopy
+
+    current = state()
+    current["zones"] = [deepcopy(current["zones"][0]) for _ in range(3)]
+    for zone, identifier, name in zip(current["zones"], (1, 3, 5), ("Enfants", "Chambre", "Salon")):
+        zone.update(id=identifier, name=name)
+    return current
+
+
+@pytest.mark.parametrize("command", ["C:20,5", "MARCHE", "ARRET"])
+def test_all_zone_proposal_validates_every_zone(command):
+    current = house()
+    targets, summary = panel.group_proposal(current, command)
+    assert [target[0] for target in targets] == [1, 3, 5]
+    assert all(name in summary for name in ("Enfants", "Chambre", "Salon"))
+    field = targets[0][1]
+    current["zones"][1]["controls"][field] = False
+    with pytest.raises(api.AirzoneError, match="Chambre"):
+        panel.group_proposal(current, command)
+
+
+def test_group_stops_after_unknown_and_preserves_partial_results():
+    client = api.Client(ORIGIN)
+    client.write = Mock(side_effect=[{"outcome": "sent"}, {"outcome": "unknown"}])
+    targets = [(i, "setpoint", 20.5) for i in (1, 3, 5)]
+    receipt = client.apply_all(targets)
+    assert [result["outcome"] for result in receipt["results"]] == ["sent", "unknown", "skipped"]
+    assert client.write.call_count == 2
+
+
+@pytest.mark.parametrize("outcome", ["confirmed", "unconfirmed", "sent"])
+def test_group_applies_all_accepted_commands_once(outcome):
+    client = api.Client(ORIGIN)
+    client.write = Mock(return_value={"outcome": outcome})
+    targets = [(i, "on", False) for i in (1, 3, 5)]
+    receipt = client.apply_all(targets)
+    assert [result["id"] for result in receipt["results"]] == [1, 3, 5]
+    assert [call.args for call in client.write.call_args_list] == targets
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+@pytest.mark.parametrize("selector", ["TOUS", "0"])
+def test_all_zone_confirmation(monkeypatch, accepted, selector):
+    def wait(_term, pending, _timeout):
+        return pending[1].get(timeout=2)[0], "done"
+
+    commands = [selector, "C:20,5", "OUI" if accepted else "NON", "RETOUR", "RETOUR"]
+    chat = SimpleNamespace(wait_answer=wait, show_response=Mock(),
+                           read_question=Mock(side_effect=[(command, "envoi") for command in commands]))
+    monkeypatch.setattr(panel.rose_terminal, "api", lambda: chat)
+    client = Mock()
+    client.state.side_effect = house
+    client.apply_all.return_value = {
+        "outcome": "group", "results": [{"id": 1, "outcome": "confirmed"},
+                                       {"id": 3, "outcome": "unknown"}, {"id": 5, "outcome": "skipped"}]}
+    assert panel.run(Mock(), client, "fr")[0] == "done"
+    client.apply.assert_not_called()
+    if accepted:
+        client.apply_all.assert_called_once_with([(1, "setpoint", 20.5),
+                                                 (3, "setpoint", 20.5), (5, "setpoint", 20.5)])
+        assert any("séquence interrompue" in call.args[1] for call in chat.show_response.call_args_list)
+    else:
+        client.apply_all.assert_not_called()
+
+
+def test_delayed_mode_readback_never_repeats_post(monkeypatch):
+    before = state(age=30)
+    unconfirmed = {**before, "outcome": "unconfirmed"}
+    after = state(age=1)
+    after["zones"][0]["mode"] = 2
+    request = Mock(side_effect=[response(502, unconfirmed), response(200, after)])
+    monkeypatch.setattr(api.requests, "request", request)
+    monkeypatch.setattr(api.time, "sleep", lambda _: None)
+    assert api.Client(ORIGIN).apply(None, "mode", 2)["outcome"] == "confirmed"
+    assert [call.args[0] for call in request.call_args_list] == ["POST", "GET"]
+
+
+def test_mode_pending_can_be_confirmed_by_manual_refresh(monkeypatch):
+    def wait(_term, pending, _timeout):
+        return pending[1].get(timeout=2)[0], "done"
+
+    commands = ["MODE", "2", "OUI", "MAJ", "RETOUR", "RETOUR"]
+    chat = SimpleNamespace(wait_answer=wait, show_response=Mock(),
+                           read_question=Mock(side_effect=[(command, "envoi") for command in commands]))
+    monkeypatch.setattr(panel.rose_terminal, "api", lambda: chat)
+    initial, changed = state(age=30), state(age=1)
+    changed["zones"][0]["mode"] = 2
+    client = Mock()
+    client.state.side_effect = [initial, initial, changed]
+    client.apply.return_value = {**initial, "outcome": "unconfirmed"}
+    assert panel.run(Mock(), client, "fr")[0] == "done"
+    screens = [call.args[1] for call in chat.show_response.call_args_list]
+    assert any("Relecture en attente" in screen and "Mode demandé : Climatisation" in screen for screen in screens)
+    assert any("Réglage confirmé" in screen and "Mode relu : Climatisation" in screen for screen in screens)
+    client.apply.assert_called_once_with(None, "mode", 2)
+
+
+def test_physical_suite_retour_cycle_nonconsecutive_zones(monkeypatch):
+    from test_terminal_startup import StartupTests, fn, login_keys
+
+    from services import minitel_chatgpt as chat
+
+    monkeypatch.setenv("AIRZONE_URL", ORIGIN)
+    client = Mock()
+    client.state.side_effect = house
+    monkeypatch.setattr(api, "Client", Mock(return_value=client))
+    original_wait = chat.wait_answer
+
+    def wait(term, pending, timeout, **options):
+        if timeout == api.REQUEST_TIMEOUT + 1:
+            return pending[1].get(timeout=2)[0], "done"
+        return original_wait(term, pending, timeout, **options)
+
+    monkeypatch.setattr(chat, "wait_answer", wait)
+    submit = fn(chat.K_ENVOI)
+    # Partly typed C: must not be carried to another zone.
+    keys = (login_keys("fr") + b"AIRZONE" + submit + b"1" + submit
+            + b"C:" + fn(chat.K_SUITE) + fn(chat.K_RETOUR) + fn(chat.K_RETOUR)
+            + b"RETOUR" + submit + b"RETOUR" + submit + b"FOLLOW UP" + submit)
+    helper = StartupTests()
+    _, calls = helper.run_session(keys)
+    detail = [screen for screen in helper.result_screens if "Humidité" in screen]
+    assert any("Chambre" in screen for screen in detail)
+    assert any("Salon" in screen for screen in detail)  # RETOUR from first wraps to last.
+    assert [call[1][-1]["content"] for call in calls] == ["FOLLOW UP"]
+    client.apply.assert_not_called()
+    client.apply_all.assert_not_called()

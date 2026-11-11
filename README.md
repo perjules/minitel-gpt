@@ -429,9 +429,21 @@ par exemple `https://controleur.example:8443`, sans chemin ni barre oblique fina
 Redémarrer le service MinitelGPT. Une valeur vide désactive le panneau.
 
 Après connexion à un profil, saisir `AIRZONE`. Choisir une zone par son numéro,
-puis `C:20,5`, `MARCHE` ou `ARRET`. `MODE` depuis la liste concerne toute
+puis `C:20,5`, `MARCHE` ou `ARRET`. SUITE et RETOUR passent à la zone
+suivante/précédente, avec retour circulaire entre la première et la dernière.
+Taper `RETOUR` revient à la liste. `MODE` depuis la liste concerne toute
 la maison. `OUI` + ENVOI confirme la commande proposée. `MAJ` relit l'état.
 Taper `RETOUR` pour revenir à la liste, puis au chat. SOMMAIRE quitte le panneau.
+Saisir `TOUS` ou `0` pour appliquer une même consigne ou marche/arrêt à toutes
+les zones. Une confirmation affiche les zones concernées. Les commandes sont
+envoyées successivement, une fois par zone. Le bilan indique les résultats
+individuels. Une erreur ou un résultat inconnu interrompt la suite et signale
+les zones restantes comme non envoyées.
+
+Un changement de mode peut être accepté avant que la nouvelle valeur apparaisse.
+Le panneau relit brièvement l'état, puis conserve le mode demandé en attente.
+`MAJ` peut confirmer le changement sur un relevé ultérieur, sans le renvoyer.
+
 Une commande déjà confirmée peut finir après la sortie du panneau.
 En cas de résultat inconnu, relire l'état avant de réessayer.
 
