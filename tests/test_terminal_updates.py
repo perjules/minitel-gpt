@@ -311,11 +311,11 @@ def test_real_uart_confirmation_routes_locally_and_never_enters_chat(confirmatio
             patch.object(deployment, "unchanged", return_value=True), patch.object(chat, "play_update", play):
         screens, calls = harness.run_session(keys)
     text = "\n".join(screens)
-    assert "Mettre a jour le mainframe ? OUI/NON" in text
+    assert "Mise a jour du mainframe ? OUI/NON" in text
     uart = bytes(harness.uart.output)
     assert any("Visa obtenu." in frame and "Revisions disponibles." in frame
                for frame in harness.result_screens)
-    assert ("Preparation du protocole Alcatel..." if launch else
+    assert ("Preparation du protocole Alcate..." if launch else
             "Dossier classe sans suite.") in startup.screen_text(uart)
     assert len(calls) == 1 and calls[0][1] == [{"role": "user", "content": "Bonjour"}]
     assert queue.call_count == int(launch) and play.call_count == int(launch)

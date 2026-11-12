@@ -47,7 +47,7 @@ class AdminAnswerTests(unittest.TestCase):
         self.assertTrue(payload["instructions"].startswith(
             engine.CHAT_PROMPT_FILE.read_text(encoding="utf-8").strip()))
         self.assertIn("Known reference", payload["instructions"])
-        self.assertEqual(payload["model"], "configured-model")
+        self.assertEqual(payload["model"], admin.intelligence.defaults()[5].model)
         self.assertFalse(payload["store"])
 
     def test_route_retains_full_urls_without_ascii_rewrite(self):

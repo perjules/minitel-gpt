@@ -333,7 +333,7 @@ def test_waiting_message_is_centered_in_status_and_caret_returns_to_input(hardwa
     before = len(uart.output)
     term.waiting("CONSULTATION PRONOTE")
     assert all(not line.strip() for line in uart.lines()[1:19])
-    assert uart.lines()[20][:39] == "CONSULTATION PRONOTE".center(39)
+    assert uart.lines()[20][:39] == "CONSULTATION PRONOTE".center(34) + " I:05"
     assert uart.lines()[21].strip() == ">"
     assert all(not row.strip() for row in uart.lines()[22:])
     assert not uart.screen.cursor_visible
@@ -349,7 +349,7 @@ def test_long_waiting_message_stays_on_one_status_row(hardware):
     term, uart = hardware()
     chat.show_response(term, "KEEP")
     term.waiting("A very long waiting message\n" * 5)
-    assert uart.lines()[20][:39].endswith("...")
+    assert uart.lines()[20][:34].endswith("...")
     assert not uart.lines()[1].strip()
     assert uart.lines()[21].strip() == ">"
 
@@ -386,7 +386,7 @@ def test_submission_clears_input_then_status_then_content_bottom_to_top(hardware
                     phases.append(2)
                     answer_cells.append((row, column))
                     assert screen.rows[row][column] == " "
-                    assert "".join(screen.rows[20][:39]) == "ATTENTE...".center(39)
+                    assert "".join(screen.rows[20][:39]) == "ATTENTE...".center(34) + " I:05"
                     assert "".join(screen.rows[21]).strip() == ">"
                     assert not any("".join(line).strip() for line in screen.rows[22:])
     assert phases == sorted(phases) and set(phases) == {0, 1, 2}
@@ -422,7 +422,7 @@ def test_uncertain_cache_recovers_with_full_clear_and_restores_frame(hardware):
     assert all(not line.strip() for line in uart.lines()[1:19])
     assert uart.lines()[0][:39] == "*** 3615 IA ***".center(39)
     assert uart.lines()[19].startswith("Requete en cours")
-    assert uart.lines()[20][:39] == "WAIT".center(39)
+    assert uart.lines()[20][:39] == "WAIT".center(34) + " I:05"
     assert uart.lines()[21].strip() == ">"
     assert all(not line.strip() for line in uart.lines()[22:])
 

@@ -213,8 +213,8 @@ def request_payload(history, language, model, web_search=True, knowledge="", *, 
             "completion_args": {"max_tokens": 700}}
 
 
-def answer(history, language, key, model, web_search=True, timeout=60, knowledge="", pronote=None, *, session_context=""):
-    """One complete request; no retry, stored session or endpoint fallback."""
+def answer(history, language, key, model, web_search=True, timeout=60, knowledge="", pronote=None, *, session_context="", profile=None):
+    """Public dial snapshot only; operational school routing stays unchanged."""
     if pronote is not None:
         try:
             from . import pronote_answers
@@ -231,6 +231,11 @@ def answer(history, language, key, model, web_search=True, timeout=60, knowledge
             from pronote_answers import public_history
         history = public_history(history)
     payload = request_payload(history, language, model, web_search, knowledge, session_context=session_context)
+    if profile is not None:
+        payload["model"] = profile.model
+        payload["completion_args"].update(profile.completion_args())
+        if profile.reasoning_effort not in ("", "none"):
+            payload["completion_args"]["max_tokens"] = 8192
     started = time.monotonic()
     status, result = "api_error", None
     try:
@@ -240,9 +245,30 @@ def answer(history, language, key, model, web_search=True, timeout=60, knowledge
         response = requests.post(URL, headers={"Authorization": f"Bearer {key}",
                                                "Content-Type": "application/json"},
                                  json=payload, timeout=timeout)
+        # Only a definite configuration rejection can be retried. Never replay
+        # timeouts, 429/5xx, ambiguous errors or any operational function call.
+        fields = answer_diagnostics.validation_fields(response)
+        if (profile is not None and response.status_code in (400, 404, 422)
+                and any(part in {"model", "reasoning_effort", "temperature"}
+                        for part in re.split(r"[.,]", fields))):
+            log.warning("intelligence profile rejected; using configured base model")
+            remaining = timeout - (time.monotonic() - started)
+            if remaining > 0:
+                payload["model"] = model
+                payload["completion_args"] = {"max_tokens": 700, "temperature": .2}
+                response = requests.post(URL, headers={"Authorization": f"Bearer {key}",
+                                                       "Content-Type": "application/json"},
+                                         json=payload, timeout=remaining)
+                fallback = True
+            else:
+                fallback = False
+        else:
+            fallback = False
         raise_for_status(response, "public")
         status = "malformed"
         result = parse_response(response.json(), prior_references(history))
+        if fallback:
+            result["intelligence_fallback"] = True
         question = history[-1]["content"]
         if explicit_search(question) and not result["search"]:
             result["status"] = "search_not_executed" if web_search else "search_disabled"
@@ -255,7 +281,7 @@ def answer(history, language, key, model, web_search=True, timeout=60, knowledge
             "prompt_tokens", "completion_tokens", "total_tokens", "connector_tokens")
             if isinstance(usage, dict) and isinstance(usage.get(name), int)}
         log.info("endpoint=conversations model=%s elapsed=%.2f search=%s refs=%d status=%s usage=%s",
-                 model[:120].replace("\n", " "), time.monotonic() - started,
+                 payload["model"][:120].replace("\n", " "), time.monotonic() - started,
                  bool((result or {}).get("search")),
                  len((result or {}).get("references", [])), status, json.dumps(counters))
 

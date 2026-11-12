@@ -35,6 +35,7 @@ try:  # Support both systemd's direct script and package imports in tests.
         deployment,
         gmail_mail,
         home_config,
+        intelligence,
         io_limits,
         llm_streaming,
         mainframe_update,
@@ -65,6 +66,7 @@ except ImportError:
         deployment,
         gmail_mail,
         home_config,
+        intelligence,
         io_limits,
         llm_streaming,
         mainframe_update,
@@ -743,7 +745,8 @@ def prompt_recall_allowed(memory, mail, calc, school, printer, *, onboarding_act
 
 
 def call_answer(system_prompt, history, language, options, knowledge,
-                mail=None, review_ticket=None, memory=None, calc=None, welcome_start=False):
+                mail=None, review_ticket=None, memory=None, calc=None, welcome_start=False, intelligence_profile=None):
+    intelligence_profile = intelligence_profile or intelligence.snapshot()
     api, web_search, timeout = options
     welcome = getattr(memory, "welcome", None)
     if welcome_start:
@@ -827,7 +830,7 @@ def call_answer(system_prompt, history, language, options, knowledge,
     if PROVIDER == "mistral" and api == "conversations":
         result = mistral_answers.answer(history, language, MISTRAL_KEY,
                                         MISTRAL_MODEL, web_search, timeout, knowledge,
-                                        **({"pronote": school} if school_request else {}),
+                                        **({"pronote": school} if school_request else {"profile": intelligence_profile}),
                                         **({"session_context": session_context} if session_context else {}))
         if memory is not None:
             memory.active()
@@ -838,7 +841,8 @@ def call_answer(system_prompt, history, language, options, knowledge,
             # Operational notices are not successful factual turns. Do not
             # display an unverified current answer as a successful lookup.
             return {"display": notice, "turn": None}
-        return {"display": pronote_answers.render(result, language), "turn": {
+        return {"display": pronote_answers.render(result, language) + (
+            "\n\nINTELLIGENCE : mode de secours" if result.get("intelligence_fallback") else ""), "turn": {
             "role": "assistant", "content": result["text"],
             "chunks": result["chunks"], "references": result["references"],
             **({"private": True} if result.get("private") else {}),
@@ -854,6 +858,7 @@ def start_answer(system_prompt, history, language, options, knowledge,
                  mail=None, review_ticket=None, memory=None, calc=None, welcome_start=False):
     """One daemon worker; no UART access. File operations use the scoped memory guard."""
     output = Queue(maxsize=1)
+    profile = intelligence.snapshot()  # Freeze before the worker is scheduled.
 
     def request():
         try:
@@ -864,7 +869,8 @@ def start_answer(system_prompt, history, language, options, knowledge,
                 optional["calc"] = calc
             if welcome_start:
                 optional["welcome_start"] = True
-            output.put((call_answer(system_prompt, history, language, options, knowledge, **optional), None))
+            output.put((call_answer(system_prompt, history, language, options, knowledge,
+                                    intelligence_profile=profile, **optional), None))
         except Exception as error:  # noqa: BLE001 - Forward every worker failure to the UART owner.
             output.put((None, error))
 
@@ -1686,6 +1692,14 @@ def run_session(t):
                 t.line('Profil modifié. Reconnectez-vous.')
                 username = language = None
                 break
+
+            dial_allowed = prompt_recall_allowed(memory, mail, calc, school_mode, printer)
+            dial_notice = intelligence.command(question) if dial_allowed else None
+            if dial_notice is not None:
+                if getattr(t, "view", None) is not None:
+                    t.view.status(dial_notice)
+                    t.view.input()
+                continue
 
             if recall_eligible and (question or "").strip().upper() == "AIRZONE":
                 if pending is not None and pending[0].is_alive():

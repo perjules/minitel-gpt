@@ -31,7 +31,7 @@ CODES = set(LOCAL_CODES.values()) | {
     "http_error", "timeout", "network", "invalid_response", "unclassified",
 }
 FIELDS = {
-    "body", "model", "inputs", "instructions", "tools", "completion_args", "max_tokens",
+    "body", "model", "reasoning_effort", "temperature", "inputs", "instructions", "tools", "completion_args", "max_tokens",
     "type", "role", "content", "text", "url", "title", "tool", "message.input",
     "message.output", "tool_reference", "function.call", "function.result", "function",
     "name", "parameters", "properties", "required", "arguments", "tool_call_id", "result",

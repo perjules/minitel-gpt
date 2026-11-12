@@ -7,7 +7,7 @@ calls. The only mutable state is the loaded view, row cache and current input.
 from contextlib import nullcontext
 from dataclasses import dataclass
 
-from . import io_limits, rose_terminal, terminal_qr, videotex
+from . import intelligence, io_limits, rose_terminal, terminal_qr, videotex
 
 
 @dataclass(frozen=True)
@@ -269,7 +269,14 @@ class View:
         if self.qr is not None and self.qr.full_screen:
             return
         fallback = "Commande + ENVOI / SOMMAIRE" if self.language == "fr" else "Command + ENVOI / SOMMAIRE"
-        self.row(self.geometry.status_row, text or fallback)
+        if self.input_notice is not None:
+            self.row(self.geometry.status_row, text or fallback)
+            return  # Private stop words and password/editor notices retain full width.
+        width = self.geometry.width - 5
+        label = text or fallback
+        if len(label) > width:
+            label = label[:width - 3] + "..."
+        self.row(self.geometry.status_row, label.ljust(width + 1) + intelligence.indicator())
 
     def busy(self, message):
         """Accept input, show waiting status, then clear the previous answer."""
@@ -277,14 +284,15 @@ class View:
         self.close_qr(redraw=False)
         chat = rose_terminal.api()
         label = chat.safe_display(message).replace("\n", " ").replace("\t", " ")
-        if len(label) > self.geometry.width:
-            label = label[:self.geometry.width - 3] + "..."
+        status_width = self.geometry.width if self.input_notice is not None else self.geometry.width - 5
+        if len(label) > status_width:
+            label = label[:status_width - 3] + "..."
         self.buffer.clear()
         self.pending_input.clear()
         self.carry_input = False
         self.processing = True
         self._erase_input()
-        self.status(label.center(self.geometry.width))
+        self.status(label.center(status_width))
         self.row(self.geometry.navigation_row, "Requete en cours...")
         self._clear_content()
         self.term.w(self.geometry.position(self.geometry.input_first, 3))

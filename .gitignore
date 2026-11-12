@@ -23,3 +23,6 @@ config/*.lock
 config/rose-local.json
 
 config/homes.json
+
+config/intelligence-profiles.json
+config/intelligence-state.json

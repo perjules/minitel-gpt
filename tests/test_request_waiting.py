@@ -122,7 +122,7 @@ class FactualIntegrationTests(unittest.TestCase):
         calls = []
         result = engine.parse_response(self.data)
 
-        def answer(history, language, key, model, web_search, timeout, knowledge):
+        def answer(history, language, key, model, web_search, timeout, knowledge, **kwargs):
             calls.append((history, language, knowledge))
             return result
 
@@ -150,7 +150,7 @@ class FactualIntegrationTests(unittest.TestCase):
         for failure in (RuntimeError("connection"), "search_not_executed", "search_incomplete", "insufficient_sources"):
             calls = []
 
-            def answer(history, *args, calls=calls, failure=failure):
+            def answer(history, *args, calls=calls, failure=failure, **kwargs):
                 calls.append(history)
                 if len(calls) == 1:
                     if isinstance(failure, Exception):
