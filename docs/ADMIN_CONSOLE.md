@@ -243,3 +243,13 @@ une confirmation, le Minitel vérifie que le même contrôleur et la même URL
 sont toujours actifs. Une commande déjà envoyée peut finir si l'opérateur
 désactive l'intégration pendant son exécution. La configuration réseau du Pi
 est indépendante de ces réglages.
+
+## Intelligence
+
+Configuration IA includes six editable Intelligence profiles and a restore-defaults
+button. Model, model-specific reasoning and finite temperature (0–1.5) are validated
+as a single save, protected by the existing login/CSRF mechanism. Changes apply to
+subsequent ordinary Mistral Conversations requests without restarting the terminal.
+The current position is machine-wide; profile saves do not move it. See
+[INTELLIGENCE_DIAL.md](INTELLIGENCE_DIAL.md) for defaults, routing exclusions,
+persistence, fallback and Pi acceptance checks.
