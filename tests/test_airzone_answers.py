@@ -113,7 +113,8 @@ def test_prepared_action_revalidates_before_confirmation(monkeypatch, accept):
     controller.apply.return_value = {"outcome": "confirmed"}
     prepared = {"selected": 5, "mode": False, "command": "C:20.5"}
     assert panel.run(Mock(), controller, "fr", initial=prepared)[0] == "done"
-    assert "Confirmer" in chat.show_response.call_args_list[1].args[1]
+    assert "Confirmer" in chat.show_response.call_args_list[0].args[1]
+    assert chat.read_question.call_count == 1
     if accept:
         controller.apply.assert_called_once_with(5, "setpoint", 20.5)
     else:
@@ -184,3 +185,62 @@ def test_capability_change_after_planning_blocks_confirmation(monkeypatch):
     assert panel.run(Mock(), controller, "fr", initial=prepared)[0] == "done"
     assert not any("Confirmer ?" in call.args[1] for call in chat.show_response.call_args_list)
     controller.apply.assert_not_called()
+
+
+@pytest.mark.parametrize(("reply", "outcome"), [
+    ("OUI", "confirmed"), ("OUI", "sent"), ("OUI", "unknown"), ("NON", "confirmed"),
+])
+def test_chat_change_returns_directly_to_normal_chat(monkeypatch, reply, outcome):
+    from test_terminal_startup import StartupTests, fn, login_keys
+
+    from services import minitel_chatgpt as chat
+
+    monkeypatch.setenv("AIRZONE_URL", ORIGIN)
+    prepared = {"selected": 5, "mode": False, "command": "C:20.5"}
+    original_answer = chat.call_answer
+
+    def answer_worker(system, history, language, options, knowledge, **kwargs):
+        if history[-1]["content"] == "Mets le salon a 20,5":
+            return {"display": "PROPOSAL", "turn": None, "airzone": True,
+                    "airzone_proposal": prepared, "airzone_origin": ORIGIN}
+        return original_answer(system, history, language, options, knowledge, **kwargs)
+
+    monkeypatch.setattr(chat, "call_answer", answer_worker)
+    controller = Mock()
+    controller.state.side_effect = state
+    controller.apply.return_value = {"outcome": outcome}
+    monkeypatch.setattr(api, "Client", Mock(return_value=controller))
+    original_wait = chat.wait_answer
+
+    def wait_for_panel(term, pending, timeout, **options):
+        if timeout in (api.REQUEST_TIMEOUT + 1, api.REQUEST_TIMEOUT + 8):
+            result, error = pending[1].get(timeout=2)
+            assert error is None
+            return result, "done"
+        return original_wait(term, pending, timeout, **options)
+
+    monkeypatch.setattr(chat, "wait_answer", wait_for_panel)
+    submit = fn(chat.K_ENVOI)
+    helper = StartupTests()
+    _, calls = helper.run_session(login_keys("fr") + b"Mets le salon a 20,5" + submit
+                                  + reply.encode() + submit + b"FOLLOW UP" + submit)
+    assert [call[1][-1]["content"] for call in calls] == ["FOLLOW UP"]
+    assert not any("AIRZONE /" in screen for screen in helper.result_screens)
+    if reply == "OUI":
+        controller.apply.assert_called_once_with(5, "setpoint", 20.5)
+    else:
+        controller.apply.assert_not_called()
+
+
+def test_unavailable_chat_target_returns_without_entering_panel(monkeypatch):
+    def wait(_term, pending, _timeout):
+        return pending[1].get(timeout=2)[0], "done"
+
+    chat = SimpleNamespace(wait_answer=wait, show_response=Mock(), read_question=Mock())
+    monkeypatch.setattr(panel.rose_terminal, "api", lambda: chat)
+    client = Mock()
+    client.state.side_effect = api.AirzoneError("Lecture Aizone indisponible.")
+    prepared = {"selected": 5, "mode": False, "command": "C:20.5"}
+    assert panel.run(Mock(), client, "fr", initial=prepared)[0] == "done"
+    chat.read_question.assert_not_called()
+    client.apply.assert_not_called()

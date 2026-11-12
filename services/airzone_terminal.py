@@ -194,6 +194,7 @@ def group_notice(state, receipt):
 
 
 def run(term, client, language, *, initial=None):
+    """A chat proposal finishes after one action; explicit entry keeps the panel open."""
     chat = rose_terminal.api()
     pending = None
 
@@ -215,6 +216,10 @@ def run(term, client, language, *, initial=None):
         worker.start()
         return chat.wait_answer(term, pending, timeout)
 
+    def finish(text):
+        chat.show_response(term, text, language)
+        return "done", pending
+
     state, selected, choosing_mode, notice = {}, None, False, ""
     queued_command = None
     if initial is not None:
@@ -230,9 +235,8 @@ def run(term, client, language, *, initial=None):
             state = reply if isinstance(reply, dict) else {}
             if not state:
                 notice = "\n".join(filter(None, (notice, reply or "Lecture Aizone indisponible.")))
-            if action == "deadline":
-                chat.show_response(term, notice, language)
-                return "done", pending
+            if action == "deadline" or initial is not None and not state:
+                return finish(notice)
             if pending_mode is not None and state:
                 target, baseline, master, pending_outcome = pending_mode
                 observed = airzone_client.observation(state)
@@ -244,7 +248,10 @@ def run(term, client, language, *, initial=None):
                     pending_mode = None
             refresh = False
         zone = next((item for item in state.get("zones", []) if item["id"] == selected), None)
-        chat.show_response(term, render(state, zone, choosing_mode, notice, all_zones=selected == 0), language)
+        if initial is not None and selected not in (None, 0) and zone is None:
+            return finish("Zone indisponible. Aucune commande envoyée.")
+        if initial is None:
+            chat.show_response(term, render(state, zone, choosing_mode, notice, all_zones=selected == 0), language)
         if queued_command is not None:
             answer, action = queued_command, "envoi"
             queued_command = None
@@ -292,6 +299,8 @@ def run(term, client, language, *, initial=None):
                 timeout = airzone_client.REQUEST_TIMEOUT + 8
         except airzone_client.AirzoneError as error:
             notice = str(error)
+            if initial is not None:
+                return finish(notice)
             continue
         chat.show_response(term, summary + "\n\nConfirmer ? OUI / NON", language)
         answer, action = chat.read_question(term, calculator_mode=True)
@@ -302,9 +311,13 @@ def run(term, client, language, *, initial=None):
             return answer.lower(), pending
         if answer != "OUI":
             notice = "Commande annulée."
+            if initial is not None:
+                return finish(notice)
             continue
         if not airzone_client.fresh(state):
             notice = "Relevé expiré. Aucune commande envoyée."
+            if initial is not None:
+                return finish(notice)
             refresh = True
             continue
         if field == "mode":
@@ -331,4 +344,6 @@ def run(term, client, language, *, initial=None):
             detail = label(receipt.get("message"))
             if detail:
                 notice += "\n" + detail
+        if initial is not None:
+            return finish(summary + "\n\n" + notice)
         refresh = True

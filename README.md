@@ -455,8 +455,9 @@ Les écritures ne sont jamais renvoyées automatiquement.
 Avec Mistral Conversations, les demandes explicites peuvent aussi passer par
 les outils Airzone, par exemple « Quelle température dans le salon ? »,
 « Mets le salon à 20,5 degrés », « Éteins toutes les zones » ou « Passe en chauffage ».
-Une lecture affiche les mesures du contrôleur. Un changement ouvre la confirmation
-locale dans le panneau, avec les pièces et valeurs concernées. Une nouvelle
+Une lecture affiche les mesures du contrôleur. Un changement présente une confirmation
+locale avec les pièces et valeurs concernées, puis le résultat et un retour au chat.
+Le panneau interactif s’ouvre avec la commande explicite `AIRZONE`. Une nouvelle
 lecture vérifie les capacités avant confirmation. Les demandes ambiguës nécessitent
 la pièce et une seule action. Les mesures et propositions restent hors de
 l'historique conversationnel local. Le relevé actuel et la demande sont transmis
