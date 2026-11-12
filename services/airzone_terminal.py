@@ -193,7 +193,7 @@ def group_notice(state, receipt):
     return "\n".join(lines)
 
 
-def run(term, client, language):
+def run(term, client, language, *, initial=None):
     chat = rose_terminal.api()
     pending = None
 
@@ -216,6 +216,10 @@ def run(term, client, language):
         return chat.wait_answer(term, pending, timeout)
 
     state, selected, choosing_mode, notice = {}, None, False, ""
+    queued_command = None
+    if initial is not None:
+        selected, choosing_mode = initial["selected"], initial["mode"]
+        queued_command = initial["command"]
     refresh = True
     pending_mode = None
     while True:
@@ -241,7 +245,11 @@ def run(term, client, language):
             refresh = False
         zone = next((item for item in state.get("zones", []) if item["id"] == selected), None)
         chat.show_response(term, render(state, zone, choosing_mode, notice, all_zones=selected == 0), language)
-        answer, action = chat.read_question(term, navigation_mode="zones" if zone else False)
+        if queued_command is not None:
+            answer, action = queued_command, "envoi"
+            queued_command = None
+        else:
+            answer, action = chat.read_question(term, navigation_mode="zones" if zone else False)
         if action != "envoi":
             return action, pending
         command = (answer or "").strip().upper()

@@ -447,10 +447,20 @@ Le panneau relit brièvement l'état, puis conserve le mode demandé en attente.
 Une commande déjà confirmée peut finir après la sortie du panneau.
 En cas de résultat inconnu, relire l'état avant de réessayer.
 
-Les mesures et commandes restent dans ce panneau local. Chaque profil connecté
+Le panneau AIRZONE utilise directement l'API du contrôleur. Chaque profil connecté
 peut y accéder. Les limites et permissions viennent du contrôleur Aizone.
 Le panneau signale les mesures anciennes, simulées ou indisponibles.
 Les écritures ne sont jamais renvoyées automatiquement.
+
+Avec Mistral Conversations, les demandes explicites peuvent aussi passer par
+les outils Airzone, par exemple « Quelle température dans le salon ? »,
+« Mets le salon à 20,5 degrés », « Éteins toutes les zones » ou « Passe en chauffage ».
+Une lecture affiche les mesures du contrôleur. Un changement ouvre la confirmation
+locale dans le panneau, avec les pièces et valeurs concernées. Une nouvelle
+lecture vérifie les capacités avant confirmation. Les demandes ambiguës nécessitent
+la pièce et une seule action. Les mesures et propositions restent hors de
+l'historique conversationnel local. Le relevé actuel et la demande sont transmis
+à Mistral pour choisir l'outil. Les sujets généraux gardent leur parcours habituel.
 
 L'accès réseau est configuré en dehors de MinitelGPT. Pour Tailscale Serve,
 relever l'origine HTTPS avec `tailscale serve status` sur le contrôleur et

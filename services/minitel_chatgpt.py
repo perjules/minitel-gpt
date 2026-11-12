@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 
 try:  # Support both systemd's direct script and package imports in tests.
     from . import (
+        airzone_answers,
         airzone_client,
         airzone_terminal,
         answer_diagnostics,
@@ -53,6 +54,7 @@ except ImportError:
     # Direct systemd entry point: keep one identity for exception/session classes.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from services import (
+        airzone_answers,
         airzone_client,
         airzone_terminal,
         answer_diagnostics,
@@ -797,6 +799,10 @@ def call_answer(system_prompt, history, language, options, knowledge,
         response = mail.handle(history[-1]["content"], review_ticket, timeout)
         if not response.get("passthrough"):
             return {**response, "gmail": True}
+    if (PROVIDER == "mistral" and api == "conversations" and os.getenv("AIRZONE_URL", "").strip()
+            and not blocked and not school_request and not explicit_memory and not note_request
+            and airzone_answers.interested(question)):
+        return airzone_answers.answer(history, language, MISTRAL_KEY, MISTRAL_MODEL, timeout)
     if calc is not None and not blocked:
         if (not school_request and (calculator.candidate(question) or calc.mode)
                 and isinstance(getattr(memory, "user", None), user_services.user_registry.User)):
@@ -2015,6 +2021,25 @@ def run_session(t):
                     answer = response["display"]
                     if response["turn"] is not None:
                         history = mistral_answers.bound_history(candidate + [response["turn"]])
+
+            if response is not None and response.get("airzone"):
+                prepared = response.get("airzone_proposal")
+                if prepared is not None:
+                    action, airzone_pending = airzone_terminal.run(
+                        t, airzone_client.Client(response["airzone_origin"]), language, initial=prepared)
+                    if airzone_pending is not None:
+                        pending = airzone_pending
+                    if action == "guide":
+                        show_guide(t, language)
+                        break
+                    if action == "logout":
+                        username = language = None
+                        break
+                    if action in {"sommaire", "timeout"}:
+                        break
+                else:
+                    show_response(t, answer, language)
+                continue
 
             if response is not None and response.get("turn") is not None:
                 printer.remember(answer)
