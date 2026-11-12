@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 from functools import partial
 from queue import Queue
 
-from . import airzone_client, rose_terminal
+from . import airzone_client, config_store, home_config, rose_terminal
 
 MODES = {1: "Arrêt", 2: "Climatisation", 3: "Chauffage", 4: "Ventilation",
          5: "Déshumidification", 7: "Auto"}
@@ -193,7 +193,36 @@ def group_notice(state, receipt):
     return "\n".join(lines)
 
 
-def run(term, client, language, *, initial=None):
+def choose_controller(term, language):
+    chat = rose_terminal.api()
+    try:
+        choices = home_config.targets()
+    except (config_store.InvalidConfig, config_store.StorageFailure) as error:
+        chat.show_response(term, str(error), language)
+        return None, "done"
+    if not choices:
+        chat.show_response(term, "Climatisation désactivée. Configurez Maison connectée dans l'administration.", language)
+        return None, "done"
+    if len(choices) == 1:
+        return choices[0], "done"
+    lines = ["AIRZONE / CHOISIR UNE MAISON"]
+    lines.extend(f"{i}  {item['home']} / {item['name']}" for i, item in enumerate(choices, 1))
+    lines.append("Numéro + ENVOI / RETOUR : quitter")
+    chat.show_response(term, "\n".join(lines), language)
+    while True:
+        answer, action = chat.read_question(term, calculator_mode=True)
+        if action != "envoi":
+            return None, action
+        answer = (answer or "").strip().upper()
+        if answer in {"RETOUR", "NON"}:
+            return None, "done"
+        if answer in {"SOMMAIRE", "LOGOUT"}:
+            return None, answer.lower()
+        if re.fullmatch(r"[0-9]{1,3}", answer) and 1 <= int(answer) <= len(choices):
+            return choices[int(answer) - 1], "done"
+
+
+def run(term, client, language, *, initial=None, access=None, location=""):
     """A chat proposal finishes after one action; explicit entry keeps the panel open."""
     chat = rose_terminal.api()
     pending = None
@@ -229,6 +258,11 @@ def run(term, client, language, *, initial=None):
     pending_mode = None
     while True:
         if refresh:
+            try:
+                if access is not None:
+                    access()
+            except (airzone_client.AirzoneError, config_store.InvalidConfig, config_store.StorageFailure) as error:
+                return finish(str(error))
             reply, action = request(client.state, airzone_client.REQUEST_TIMEOUT + 1)
             if action in {"sommaire", "guide"}:
                 return action, pending
@@ -251,7 +285,7 @@ def run(term, client, language, *, initial=None):
         if initial is not None and selected not in (None, 0) and zone is None:
             return finish("Zone indisponible. Aucune commande envoyée.")
         if initial is None:
-            chat.show_response(term, render(state, zone, choosing_mode, notice, all_zones=selected == 0), language)
+            chat.show_response(term, location + "\n" + render(state, zone, choosing_mode, notice, all_zones=selected == 0), language)
         if queued_command is not None:
             answer, action = queued_command, "envoi"
             queued_command = None
@@ -302,6 +336,7 @@ def run(term, client, language, *, initial=None):
             if initial is not None:
                 return finish(notice)
             continue
+        summary = (location + "\n" if location else "") + summary
         chat.show_response(term, summary + "\n\nConfirmer ? OUI / NON", language)
         answer, action = chat.read_question(term, calculator_mode=True)
         if action != "envoi":
@@ -314,6 +349,11 @@ def run(term, client, language, *, initial=None):
             if initial is not None:
                 return finish(notice)
             continue
+        try:
+            if access is not None:
+                access()
+        except (airzone_client.AirzoneError, config_store.InvalidConfig, config_store.StorageFailure) as error:
+            return finish(str(error))
         if not airzone_client.fresh(state):
             notice = "Relevé expiré. Aucune commande envoyée."
             if initial is not None:

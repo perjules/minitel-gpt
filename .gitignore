@@ -21,3 +21,5 @@ config/rose-password.txt
 config/*.lock
 
 config/rose-local.json
+
+config/homes.json

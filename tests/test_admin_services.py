@@ -12,7 +12,7 @@ def test_uniform_cards_and_inert_placeholders(console):
     page = client.get('/?section=services').text
     for key in ('gmail', 'pronote', 'alexa', 'printer', 'smart-home'):
         assert f'/services/{key}' in page or key == 'pronote'
-    for key in ('alexa', 'printer', 'smart-home'):
+    for key in ('alexa', 'printer'):
         assert 'En construction' in client.get('/services/' + key).text
         assert client.post('/services/' + key + '/toggle', headers=headers).status_code == 404
     admin.restart_terminal.assert_not_called()

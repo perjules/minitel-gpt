@@ -160,7 +160,7 @@ def test_airzone_is_intercepted_before_completion_and_returns_to_chat(monkeypatc
     assert factory.called is configured
     controller.apply.assert_not_called()
     assert [call[1][-1]["content"] for call in calls] == ["FOLLOW UP"]
-    assert any(("Humidité" if configured else "AIRZONE_URL") in screen for screen in startup.result_screens)
+    assert any(("Humidité" if configured else "Climatisation désactivée") in screen for screen in startup.result_screens)
 
 
 @pytest.mark.parametrize("bad", [

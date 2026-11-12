@@ -53,6 +53,7 @@ try:
         gmail_client,
         gmail_mail,
         gmail_oauth,
+        home_config,
         io_limits,
         journal,
         journal_page,
@@ -107,7 +108,7 @@ except ImportError:
     import user_reports
     import user_services
 
-    from services import journal, journal_page, journal_store
+    from services import home_config, journal, journal_page, journal_store
 
 PROJ_DIR = Path(__file__).parent.parent
 ASSETS_DIR = PROJ_DIR / "assets"
@@ -1985,8 +1986,10 @@ def service_cards():
         {"key": "gmail", "label": "Gmail", "enabled": gmail_enabled(), "placeholder": False, "url": "/services/gmail"},
         {"key": "pronote", "label": "PRONOTE", "enabled": school_enabled, "placeholder": False, "url": "/pronote"},
         {"key": "journal", "label": "Journal intime", "enabled": True, "placeholder": False, "private": True, "url": "/journal"},
+        {"key": "smart-home", "label": "Maison connectée", "enabled": home_config.enabled(),
+         "placeholder": False, "url": "/services/smart-home"},
         *({"key": key, "label": label, "enabled": False, "placeholder": True, "url": "/services/" + key}
-          for key, label in (("alexa", "Alexa"), ("printer", "Imprimante"), ("smart-home", "Maison connectée"))),
+          for key, label in (("alexa", "Alexa"), ("printer", "Imprimante"))),
     ]
 
 
@@ -2000,6 +2003,10 @@ def toggle_service(feature):
         os.environ["GMAIL_ENABLED"] = value
         discard_mail(session.get("gmail_session"))
         saved_feedback("Activation Gmail enregistrée.", True)
+    elif feature == "smart-home":
+        home_config.update(lambda data: data.update(enabled=enabled), env=read_env())
+        session["flash"] = "Activation de la climatisation enregistrée."
+        session["flash_ok"] = True
     elif feature == "pronote":
         local = pronote.backend()
         local.configure(enabled, local.config()["children"])
@@ -2018,6 +2025,8 @@ def service_configuration(feature):
     titles = {"gmail": "Gmail", "alexa": "Alexa", "printer": "Imprimante", "smart-home": "Maison connectée"}
     if feature not in titles:
         abort(404)
+    if feature == "smart-home":
+        return homes_configuration()
     if feature != "gmail":
         if request.method == "POST":
             abort(405)
@@ -2066,6 +2075,54 @@ def service_configuration(feature):
                    "oauth_console": oauth_uri.removesuffix(gmail_auth.OAUTH_CALLBACK) + "/services/gmail" if oauth_uri else ""}
     return render_template_string(admin_service_pages.HEAD + body + "</html>",
                                   title=titles[feature], message=message, **context), status_code
+
+
+def homes_configuration():
+    message = session.pop("homes_message", "")
+    status = 200
+    if request.method == "POST":
+        def change(data):
+            action = request.form.get("action")
+            enabled = request.form.get("enabled") == "1"
+            if action == "toggle":
+                data["enabled"] = enabled
+                return
+            name = request.form.get("name", "").strip()
+            aliases = [alias.strip() for alias in request.form.get("aliases", "").split(",") if alias.strip()]
+            if action == "add_home":
+                data["homes"][secrets.token_hex(12)] = {
+                    "name": name, "aliases": aliases, "enabled": enabled, "targets": {}}
+                return
+            home = data["homes"][request.form["home_id"]]
+            if action == "save_home":
+                home.update(name=name, aliases=aliases, enabled=enabled)
+            elif action == "delete_home":
+                del data["homes"][request.form["home_id"]]
+            elif action in {"add_target", "save_target"}:
+                target_id = secrets.token_hex(12) if action == "add_target" else request.form["target_id"]
+                if action == "save_target" and target_id not in home["targets"]:
+                    raise config_store.InvalidConfig("Contrôleur inconnu.")
+                home["targets"][target_id] = {"kind": request.form.get("kind"), "name": name,
+                                             "url": request.form.get("url", "").strip(), "enabled": enabled}
+            elif action == "delete_target":
+                del home["targets"][request.form["target_id"]]
+            else:
+                raise config_store.InvalidConfig("Action inconnue.")
+        try:
+            home_config.update(change, revision=int(request.form["revision"]), env=read_env())
+            session["homes_message"] = "Configuration des maisons enregistrée."
+            return redirect(url_for("service_configuration", feature="smart-home"), code=303)
+        except (KeyError, ValueError, config_store.StorageFailure) as error:
+            message = str(error) if isinstance(error, (config_store.InvalidConfig, config_store.StorageFailure)) else "Formulaire invalide. Rechargez la page."
+            status = 400
+    try:
+        data = home_config.load(read_env())
+    except (config_store.InvalidConfig, config_store.StorageFailure) as error:
+        data = {"enabled": False, "revision": 0, "homes": {}}
+        message, status = str(error), 400
+    return render_template_string(admin_service_pages.HEAD + admin_service_pages.HOMES + "</html>",
+                                  title="Maison connectée", message=message, config=data,
+                                  imported=not home_config.CONFIG.exists() and bool(data["homes"])), status
 
 
 def gmail_https_origin(uri):

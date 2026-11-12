@@ -1,6 +1,5 @@
 """Mistral selects readings or prepares a locally confirmed Airzone action."""
 import json
-import os
 import re
 import time
 import unicodedata
@@ -9,6 +8,7 @@ import requests
 
 from . import airzone_client as api
 from . import airzone_terminal as panel
+from . import config_store, home_config
 from . import mistral_answers as engine
 
 
@@ -20,13 +20,19 @@ def interested(question):
     text = normalized(question)
     local = re.search(r"\b(airzone|aizone|clim|climatisation|salon|chambres?|enfants|invites|sdb|"
                       r"salle de bains?|pieces?|zones?|maison)\b", text)
+    try:
+        configured_home = any(home_config.mentions(question, name)
+                              for home in home_config.load()["homes"].values()
+                              for name in [home["name"], *home["aliases"]])
+    except (config_store.InvalidConfig, config_store.StorageFailure):
+        configured_home = False
     topic = re.search(r"\b(temperatures?|humidite|consignes?|degres?|demande|air|etats?|modes?|marche|arret\w*|"
                       r"allum\w*|etein\w*|regl\w*|mets?|mettez|baisse\w*|augmente\w*|"
                       r"chauffage|chauffe|refroid\w*|fonctionne|lis|affiche\w*|montre\w*)\b", text)
     mode = re.search(r"\b(passe\w*|mode|active\w*)\b.{0,40}\b(chauffage|climatisation|ventilation|"
                      r"deshumidification)\b", text)
     explanation = re.search(r"\b(explique\w*|pourquoi|comment fonctionne|c'est quoi|qu'est.ce)\b", text)
-    return not explanation and bool(local and topic or mode)
+    return not explanation and bool((local or configured_home) and topic or mode)
 
 
 def tools(state):
@@ -113,12 +119,16 @@ def answer(history, language, key, model, timeout):
     try:
         if not key or key == "...":
             raise api.AirzoneError("Interpréteur Mistral indisponible. Utilisez AIRZONE.")
-        controller = api.Client(os.environ.get("AIRZONE_URL", "").strip())
+        selected = home_config.resolve(history[-1]["content"])
+        controller = api.Client(selected["url"])
         state = controller.state(budget=min(api.REQUEST_TIMEOUT, max(.1, deadline - time.monotonic())))
         payload = engine.request_payload([history[-1]], language, model, False, "")
         payload["tools"] = tools(state)
         payload["instructions"] += (
-            "\nAIRZONE: select exactly one function for the current user request. "
+            "\nSelected home and controller: " + json.dumps(
+                {key: selected[key] for key in ("home", "name")}, ensure_ascii=False) + ". "
+            "This selection is fixed locally. Never choose a different home or controller. "
+            "AIRZONE: select exactly one function for the current user request. "
             "Read requests use airzone_read. Changes ONLY prepare a proposal, never execute a write. "
             "Do not claim a requested change has happened. Never combine operations. "
             "If a piece, value or request is ambiguous, ask a short clarification with no function call. "
@@ -149,10 +159,12 @@ def answer(history, language, key, model, timeout):
         if len(calls) != 1 or not isinstance(calls[0].get("tool_call_id"), str):
             raise api.AirzoneError("Précisez la pièce et une seule action. Le panneau AIRZONE reste disponible.")
         result = execute(state, calls[0].get("name"), calls[0].get("arguments"))
+        result["display"] = selected["home"] + " / " + selected["name"] + "\n\n" + result["display"]
         if "airzone_proposal" in result:
             # Origin comes only from trusted configuration, never tool arguments.
-            result["airzone_origin"] = controller.origin
+            result["airzone_origin"] = selected["url"]
+            result["airzone_target"] = selected
         return result
-    except (api.AirzoneError, requests.RequestException, ValueError, TypeError, RecursionError) as error:
+    except (api.AirzoneError, config_store.StorageFailure, requests.RequestException, ValueError, TypeError, RecursionError) as error:
         message = str(error) if isinstance(error, api.AirzoneError) else "Demande Airzone indisponible. Utilisez AIRZONE."
         return {"display": message, "turn": None, "airzone": True}

@@ -17,6 +17,7 @@ import threading
 import time
 import unicodedata
 from collections import deque
+from functools import partial
 from pathlib import Path
 from queue import Empty, Queue
 
@@ -33,6 +34,7 @@ try:  # Support both systemd's direct script and package imports in tests.
         christmas_list,
         deployment,
         gmail_mail,
+        home_config,
         io_limits,
         llm_streaming,
         mainframe_update,
@@ -62,6 +64,7 @@ except ImportError:
         christmas_list,
         deployment,
         gmail_mail,
+        home_config,
         io_limits,
         llm_streaming,
         mainframe_update,
@@ -799,7 +802,7 @@ def call_answer(system_prompt, history, language, options, knowledge,
         response = mail.handle(history[-1]["content"], review_ticket, timeout)
         if not response.get("passthrough"):
             return {**response, "gmail": True}
-    if (PROVIDER == "mistral" and api == "conversations" and os.getenv("AIRZONE_URL", "").strip()
+    if (PROVIDER == "mistral" and api == "conversations" and home_config.enabled()
             and not blocked and not school_request and not explicit_memory and not note_request
             and airzone_answers.interested(question)):
         return airzone_answers.answer(history, language, MISTRAL_KEY, MISTRAL_MODEL, timeout)
@@ -1688,16 +1691,13 @@ def run_session(t):
                 if pending is not None and pending[0].is_alive():
                     show_response(t, "Requête précédente en cours. Réessayez bientôt.", language)
                     continue
-                origin = os.getenv("AIRZONE_URL", "").strip()
-                if not origin:
-                    show_response(t, "Airzone désactivé : AIRZONE_URL absent.", language)
-                    continue
-                try:
-                    controller = airzone_client.Client(origin)
-                except airzone_client.AirzoneError as error:
-                    show_response(t, str(error), language)
-                    continue
-                action, airzone_pending = airzone_terminal.run(t, controller, language)
+                target, action = airzone_terminal.choose_controller(t, language)
+                airzone_pending = None
+                if target is not None:
+                    action, airzone_pending = airzone_terminal.run(
+                        t, airzone_client.Client(target["url"]), language,
+                        access=partial(home_config.authorize, target["home_id"], target["target_id"], target["url"]),
+                        location=target["home"] + " / " + target["name"])
                 if airzone_pending is not None:
                     pending = airzone_pending
                 if action == "guide":
@@ -2025,8 +2025,16 @@ def run_session(t):
             if response is not None and response.get("airzone"):
                 prepared = response.get("airzone_proposal")
                 if prepared is not None:
-                    action, airzone_pending = airzone_terminal.run(
-                        t, airzone_client.Client(response["airzone_origin"]), language, initial=prepared)
+                    try:
+                        target = response.get("airzone_target") or home_config.resolve(question)
+                        target = home_config.authorize(target["home_id"], target["target_id"], response["airzone_origin"])
+                        action, airzone_pending = airzone_terminal.run(
+                            t, airzone_client.Client(target["url"]), language, initial=prepared,
+                            access=partial(home_config.authorize, target["home_id"], target["target_id"], target["url"]),
+                            location=target["home"] + " / " + target["name"])
+                    except (airzone_client.AirzoneError, ValueError, RuntimeError) as error:
+                        show_response(t, str(error), language)
+                        continue
                     if airzone_pending is not None:
                         pending = airzone_pending
                     if action == "guide":

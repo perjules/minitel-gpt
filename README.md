@@ -424,11 +424,23 @@ Commandes et vérification : [docs/CHRISTMAS_LIST.md](docs/CHRISTMAS_LIST.md).
 ## Airzone (optionnel)
 
 Airzone est l'équipement de climatisation. Aizone est le contrôleur indépendant.
-Régler `AIRZONE_URL` dans le `.env` de MinitelGPT sur l'origine HTTPS du contrôleur,
-par exemple `https://controleur.example:8443`, sans chemin ni barre oblique finale.
-Redémarrer le service MinitelGPT. Une valeur vide désactive le panneau.
+Dans l'administration, ouvrir **Services → Maison connectée**, activer la
+climatisation et ajouter une maison avec son nom et ses alias (par exemple
+« Drôme », alias « Bourdeaux »). Ajouter un contrôleur de type Airzone avec
+son nom et son origine HTTPS, par exemple `https://controleur.example:8443`,
+sans chemin ni barre oblique finale. Chaque maison peut avoir plusieurs
+contrôleurs Airzone. Chaque maison et contrôleur peut être désactivé séparément.
 
-Après connexion à un profil, saisir `AIRZONE`. Choisir une zone par son numéro,
+La configuration est enregistrée dans `config/homes.json`, privé et ignoré
+par Git. Les changements s'appliquent aux prochaines requêtes, sans redémarrage.
+Si ce fichier n'existe pas, l'ancienne valeur `AIRZONE_URL` du `.env` reste
+utilisable et préremplit une première maison. Renommer cette maison, puis
+enregistrer pour migrer. Dès le premier enregistrement, le fichier JSON fait
+autorité, y compris lorsqu'il désactive la climatisation ou ne contient plus
+aucun contrôleur. Conserver ce fichier lors d'une sauvegarde ou migration du Pi.
+
+Après connexion à un profil, saisir `AIRZONE`. Avec plusieurs contrôleurs actifs,
+choisir d’abord la maison et le contrôleur. Choisir une zone par son numéro,
 puis `C:20,5`, `MARCHE` ou `ARRET`. SUITE et RETOUR passent à la zone
 suivante/précédente, avec retour circulaire entre la première et la dernière.
 Taper `RETOUR` revient à la liste. `MODE` depuis la liste concerne toute
@@ -455,7 +467,11 @@ Les écritures ne sont jamais renvoyées automatiquement.
 Avec Mistral Conversations, les demandes explicites peuvent aussi passer par
 les outils Airzone, par exemple « Quelle température dans le salon ? »,
 « Mets le salon à 20,5 degrés », « Éteins toutes les zones » ou « Passe en chauffage ».
-Une lecture affiche les mesures du contrôleur. Un changement présente une confirmation
+Les noms et alias des maisons sont reconnus dans les requêtes, par exemple
+« Quelle température dans le salon à Bourdeaux ? ». Avec plusieurs maisons
+actives, préciser la maison dans la demande ; avec plusieurs contrôleurs dans
+cette maison, préciser aussi son nom. Le choix est fixé localement avant
+d'envoyer la demande à Mistral. Une lecture affiche les mesures du contrôleur. Un changement présente une confirmation
 locale avec les pièces et valeurs concernées, puis le résultat et un retour au chat.
 Le panneau interactif s’ouvre avec la commande explicite `AIRZONE`. Une nouvelle
 lecture vérifie les capacités avant confirmation. Les demandes ambiguës nécessitent

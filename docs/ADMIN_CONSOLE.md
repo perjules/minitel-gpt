@@ -221,3 +221,25 @@ ou le journal de conversation. DESACTIVER MEMOIRE, SOMMAIRE, un changement de pr
 ou une session expirée referment cet accès. Les faits/préférences ajoutés deviennent
 lisibles par tous; l’apprentissage automatique reste désactivé. Le déverrouillage
 de Maintenance reste indépendant. Voir [MEMORY.md](MEMORY.md).
+
+## Maison connectée
+
+Services → Maison connectée gère la climatisation, les maisons (nom, alias,
+activation) et leurs contrôleurs (type Airzone, nom, origine HTTPS, activation).
+La carte Services permet l'activation globale. Les noms et alias doivent être
+uniques entre maisons. Les noms des contrôleurs sont distincts dans une maison.
+Les ajouts, modifications et retraits ne contactent pas les contrôleurs.
+
+Le fichier local `config/homes.json` utilise un schéma version 1 avec une
+activation globale, une révision et une collection `homes`. Chaque maison a
+des identifiants stables et une collection `targets`, dont chaque entrée possède
+`kind`, `name`, `url` et `enabled`. Seul le type `airzone` est implémenté.
+L'écriture est atomique et verrouillée, avec refus des formulaires périmés.
+Les permissions sont 0600 et le fichier est ignoré par Git. L'ancien
+`AIRZONE_URL` du .env préremplit la première maison jusqu'au premier enregistrement.
+
+Les changements s'appliquent sans redémarrage aux nouvelles requêtes. Avant
+une confirmation, le Minitel vérifie que le même contrôleur et la même URL
+sont toujours actifs. Une commande déjà envoyée peut finir si l'opérateur
+désactive l'intégration pendant son exécution. La configuration réseau du Pi
+est indépendante de ces réglages.

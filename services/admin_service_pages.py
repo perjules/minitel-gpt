@@ -137,3 +137,57 @@ async function testPreset(reset=false,welcome=false,control=null){
  if(sequence===testSequence)spin.style.display='none';
 }
 </script>'''
+
+HOMES = """<p>Les maisons et contrôleurs sont disponibles pour tous les profils connectés.
+Les changements sont appliqués aux prochaines requêtes.</p>
+<form method=post><input type=hidden name=csrf value="{{csrf_token()}}">
+<input type=hidden name=revision value="{{config.revision}}"><input type=hidden name=action value=toggle>
+<label><input type=checkbox name=enabled value=1 {{'checked' if config.enabled}}> Activer la climatisation</label>
+<button>Enregistrer l’activation</button></form>
+{% if imported %}<p>La configuration proposée reprend AIRZONE_URL du .env.
+Le premier enregistrement la conserve dans config/homes.json.</p>{% endif %}
+{% for hid,home in config.homes.items() %}
+<section><h2>{{home.name}}</h2>
+<form method=post><input type=hidden name=csrf value="{{csrf_token()}}">
+<input type=hidden name=revision value="{{config.revision}}"><input type=hidden name=action value=save_home>
+<input type=hidden name=home_id value="{{hid}}">
+<label>Nom de la maison<input name=name value="{{home.name}}" maxlength=80 required></label>
+<label>Autres noms reconnus, séparés par des virgules<input name=aliases value="{{home.aliases|join(', ')}}" maxlength=800></label>
+<label><input type=checkbox name=enabled value=1 {{'checked' if home.enabled}}> Maison active</label>
+<button>Enregistrer la maison</button></form>
+{% for tid,target in home.targets.items() %}<fieldset><legend>{{target.name}} · Airzone</legend>
+<form method=post><input type=hidden name=csrf value="{{csrf_token()}}">
+<input type=hidden name=revision value="{{config.revision}}"><input type=hidden name=action value=save_target>
+<input type=hidden name=home_id value="{{hid}}"><input type=hidden name=target_id value="{{tid}}">
+<label>Nom du contrôleur<input name=name value="{{target.name}}" maxlength=80 required></label>
+<label>Type<select name=kind><option value=airzone>Airzone</option></select></label>
+<label>URL du contrôleur<input name=url type=url value="{{target.url}}" placeholder="https://controleur.example:8443" required></label>
+<label><input type=checkbox name=enabled value=1 {{'checked' if target.enabled}}> Contrôleur actif</label>
+<button>Enregistrer le contrôleur</button></form>
+<form method=post><input type=hidden name=csrf value="{{csrf_token()}}">
+<input type=hidden name=revision value="{{config.revision}}"><input type=hidden name=action value=delete_target>
+<input type=hidden name=home_id value="{{hid}}"><input type=hidden name=target_id value="{{tid}}">
+<button>Retirer le contrôleur</button></form></fieldset>{% endfor %}
+<details><summary>Ajouter un contrôleur</summary><form method=post><input type=hidden name=csrf value="{{csrf_token()}}">
+<input type=hidden name=revision value="{{config.revision}}"><input type=hidden name=action value=add_target>
+<input type=hidden name=home_id value="{{hid}}">
+<label>Nom du contrôleur<input name=name value="Climatisation" maxlength=80 required></label>
+<label>Type<select name=kind><option value=airzone>Airzone</option></select></label>
+<label>URL du contrôleur<input name=url type=url placeholder="https://controleur.example:8443" required></label>
+<label><input type=checkbox name=enabled value=1 checked> Contrôleur actif</label>
+<button>Ajouter le contrôleur</button></form></details>
+<form method=post onsubmit="return confirm('Retirer cette maison et ses contrôleurs du Minitel ?')">
+<input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=revision value="{{config.revision}}">
+<input type=hidden name=action value=delete_home><input type=hidden name=home_id value="{{hid}}">
+<button>Retirer la maison</button></form></section>{% endfor %}
+<section><h2>Ajouter une maison</h2><form method=post>
+<input type=hidden name=csrf value="{{csrf_token()}}"><input type=hidden name=revision value="{{config.revision}}">
+<input type=hidden name=action value=add_home>
+<label>Nom de la maison<input name=name maxlength=80 placeholder="Drôme" required></label>
+<label>Autres noms reconnus, séparés par des virgules<input name=aliases maxlength=800 placeholder="Bourdeaux, maison de vacances"></label>
+<label><input type=checkbox name=enabled value=1 checked> Maison active</label>
+<button>Ajouter la maison</button></form></section>
+<p>Exemple : « Quelle température dans le salon à Drôme ? »
+Avec plusieurs maisons ou contrôleurs actifs, précisez leur nom.
+Les écritures nécessitent toujours une confirmation sur le Minitel.</p>
+"""
