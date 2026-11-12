@@ -17,6 +17,7 @@ except ImportError:
 URL = "https://api.mistral.ai/v1/conversations"
 PROMPT_FILE = Path(__file__).resolve().parent.parent / "config" / "factual_prompt.txt"
 CHAT_PROMPT_FILE = PROMPT_FILE.with_name("chat_personality.txt")
+UNHINGED_PROMPT_FILE = PROMPT_FILE.with_name("intelligence_11_prompt.txt")
 log = logging.getLogger(__name__)
 
 
@@ -213,7 +214,7 @@ def request_payload(history, language, model, web_search=True, knowledge="", *, 
             "completion_args": {"max_tokens": 700}}
 
 
-def answer(history, language, key, model, web_search=True, timeout=60, knowledge="", pronote=None, *, session_context="", profile=None):
+def answer(history, language, key, model, web_search=True, timeout=60, knowledge="", pronote=None, *, session_context="", profile=None, unhinged=False):
     """Public dial snapshot only; operational school routing stays unchanged."""
     if pronote is not None:
         try:
@@ -231,6 +232,8 @@ def answer(history, language, key, model, web_search=True, timeout=60, knowledge
             from pronote_answers import public_history
         history = public_history(history)
     payload = request_payload(history, language, model, web_search, knowledge, session_context=session_context)
+    if unhinged:
+        payload["instructions"] += "\n\n" + UNHINGED_PROMPT_FILE.read_text(encoding="utf-8")
     if profile is not None:
         payload["model"] = profile.model
         payload["completion_args"].update(profile.completion_args())

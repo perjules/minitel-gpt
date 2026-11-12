@@ -617,6 +617,7 @@ def llm_answer(system_prompt, user_message, knowledge="", selected=None):
     """Interroge le LLM configuré comme le ferait le terminal (system + question).
     Retourne le texte de la réponse."""
     import requests
+    level, profile = intelligence.snapshot(with_level=True)
     history = [{"role": "user", "content": user_message}]
     provider = llm_provider()
     session_context = (selected.session_instructions()
@@ -677,7 +678,7 @@ def llm_answer(system_prompt, user_message, knowledge="", selected=None):
         result = mistral_answers.answer(history, "fr", key, mistral_model(),
                                         options[1], options[2], knowledge,
                                         **({"pronote": school} if pronote_answers.school_tool_request(
-                                            user_message, school.config()["children"]) and school.tools() else {"profile": intelligence.snapshot()}),
+                                            user_message, school.config()["children"]) and school.tools() else {"profile": profile, "unhinged": level == 11}),
                                         **({"session_context": session_context} if session_context else {}))
         if selected is not None:
             selected.private_turn = bool(result.get("private"))

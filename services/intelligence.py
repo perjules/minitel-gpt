@@ -109,19 +109,22 @@ class Controller:
         config_store.atomic_write(self.state_path, (json.dumps({"version": 1, "level": level}) + "\n").encode())
         return level
 
-    def resolve(self):
-        return self.profiles()[self.level]
+    def resolve(self, *, with_level=False):
+        level = self.level
+        profile = self.profiles()[level]
+        return (level, profile) if with_level else profile
 
 
 controller = Controller()
 
 
-def snapshot():
+def snapshot(*, with_level=False):
+    """Optionally include the position from the same immutable selection."""
     try:
-        return controller.resolve()
+        return controller.resolve(with_level=with_level)
     except (config_store.InvalidConfig, config_store.StorageFailure, OSError):
         log.warning("intelligence configuration unavailable; using default profile 5")
-        return defaults()[5]
+        return (5, defaults()[5]) if with_level else defaults()[5]
 
 
 def indicator():

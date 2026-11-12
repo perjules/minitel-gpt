@@ -8,6 +8,16 @@ conversation transcript, memory, printer history or prompt recall. Invalid input
 lists the six accepted positions. No conversation reset occurs.
 
 The progression deliberately jumps from 9 to 11: 11 adds randomness, not ability.
+Level 11 also appends the approved `config/intelligence_11_prompt.txt` to the
+ordinary conversation system instructions. It encourages deadpan bureaucratic
+absurdity, unexpected opinions and 80–140-word replies, while explicitly retaining
+factual accuracy, privacy and all operational safeguards. Levels 1–9 keep their
+original prompt. Both position and model profile are captured before the worker
+starts, so switching the dial cannot change an in-flight request's personality.
+The browser conversation preview follows the same rule. School and other
+operational stages never receive this suffix. Existing saved temperatures and
+reasoning settings are preserved; the owner's confirmed test temperature for 11
+is 0.9. Changing personality does not require restoring profiles.
 The machine starts at 5 when no saved selection exists. Selection survives
 SOMMAIRE, logout, user changes and restart. Do not intercept the reserved command
 inside private/literal editors, mail, calculator, school or confirmation workflows;

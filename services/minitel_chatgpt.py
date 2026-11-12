@@ -745,8 +745,10 @@ def prompt_recall_allowed(memory, mail, calc, school, printer, *, onboarding_act
 
 
 def call_answer(system_prompt, history, language, options, knowledge,
-                mail=None, review_ticket=None, memory=None, calc=None, welcome_start=False, intelligence_profile=None):
-    intelligence_profile = intelligence_profile or intelligence.snapshot()
+                mail=None, review_ticket=None, memory=None, calc=None, welcome_start=False, intelligence_profile=None,
+                intelligence_level=None):
+    if intelligence_profile is None:
+        intelligence_level, intelligence_profile = intelligence.snapshot(with_level=True)
     api, web_search, timeout = options
     welcome = getattr(memory, "welcome", None)
     if welcome_start:
@@ -830,7 +832,8 @@ def call_answer(system_prompt, history, language, options, knowledge,
     if PROVIDER == "mistral" and api == "conversations":
         result = mistral_answers.answer(history, language, MISTRAL_KEY,
                                         MISTRAL_MODEL, web_search, timeout, knowledge,
-                                        **({"pronote": school} if school_request else {"profile": intelligence_profile}),
+                                        **({"pronote": school} if school_request else {"profile": intelligence_profile,
+                                                                                       "unhinged": intelligence_level == 11}),
                                         **({"session_context": session_context} if session_context else {}))
         if memory is not None:
             memory.active()
@@ -858,7 +861,7 @@ def start_answer(system_prompt, history, language, options, knowledge,
                  mail=None, review_ticket=None, memory=None, calc=None, welcome_start=False):
     """One daemon worker; no UART access. File operations use the scoped memory guard."""
     output = Queue(maxsize=1)
-    profile = intelligence.snapshot()  # Freeze before the worker is scheduled.
+    level, profile = intelligence.snapshot(with_level=True)  # Freeze before scheduling.
 
     def request():
         try:
@@ -870,7 +873,7 @@ def start_answer(system_prompt, history, language, options, knowledge,
             if welcome_start:
                 optional["welcome_start"] = True
             output.put((call_answer(system_prompt, history, language, options, knowledge,
-                                    intelligence_profile=profile, **optional), None))
+                                    intelligence_profile=profile, intelligence_level=level, **optional), None))
         except Exception as error:  # noqa: BLE001 - Forward every worker failure to the UART owner.
             output.put((None, error))
 

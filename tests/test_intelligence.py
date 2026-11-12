@@ -186,10 +186,12 @@ def test_network_failures_never_replay(monkeypatch):
 def test_worker_freezes_config_before_start_and_changes_apply_next_time(dial, monkeypatch):
     entered, release = threading.Event(), threading.Event()
     seen = []
+    levels = []
     def answer(*args, **kwargs):
         entered.set()
         assert release.wait(2)
         seen.append(kwargs['intelligence_profile'])
+        levels.append(kwargs['intelligence_level'])
         return {'display': 'ok', 'turn': None}
     monkeypatch.setattr(chat, 'call_answer', answer)
     dial.set_level(9)
@@ -203,6 +205,7 @@ def test_worker_freezes_config_before_start_and_changes_apply_next_time(dial, mo
     pending = chat.start_answer('', [], 'fr', ('conversations', False, 60), '')
     pending[0].join(2)
     assert seen[-1] == intelligence.defaults()[11]
+    assert levels == [9, 11]
 
 
 @pytest.mark.parametrize('level', intelligence.LEVELS)
@@ -296,6 +299,7 @@ def test_pronote_routing_never_receives_dial_profile(dial, monkeypatch):
     chat.call_answer('', [{'role': 'user', 'content': 'Notes Alice ?'}], 'fr', ('conversations', False, 60), '')
     assert answer.call_args.kwargs['pronote'] is school
     assert 'profile' not in answer.call_args.kwargs
+    assert 'unhinged' not in answer.call_args.kwargs
     assert answer.call_args.args[3] == chat.MISTRAL_MODEL
 
 
@@ -336,7 +340,48 @@ def test_school_backend_defensively_discards_profile_even_if_supplied(monkeypatc
     answer = Mock(return_value={'private': True})
     monkeypatch.setattr(pronote_answers, 'answer', answer)
     result = mistral_answers.answer([{'role': 'user', 'content': 'Notes Alice'}], 'fr', 'key', 'base',
-                                    pronote=school, profile=intelligence.defaults()[11])
+                                    pronote=school, profile=intelligence.defaults()[11], unhinged=True)
     assert result == {'private': True}
     assert 'profile' not in answer.call_args.kwargs
+    assert 'unhinged' not in answer.call_args.kwargs
     assert answer.call_args.args[3] == 'base'
+
+
+@pytest.mark.parametrize('level', intelligence.LEVELS)
+def test_only_11_appends_approved_prompt_to_public_request(dial, monkeypatch, level):
+    dial.set_level(level)
+    monkeypatch.setattr(chat, 'PROVIDER', 'mistral')
+    monkeypatch.setattr(chat, 'MISTRAL_KEY', 'synthetic-key')
+    monkeypatch.setattr(chat.pronote, 'backend', lambda: None)
+    monkeypatch.setattr(chat.home_config, 'enabled', lambda: False)
+    post = Mock(return_value=response())
+    monkeypatch.setattr(mistral_answers.requests, 'post', post)
+    result = chat.call_answer('', [{'role': 'user', 'content': 'Que penses-tu de Tesla ?'}],
+                              'fr', ('conversations', False, 60), '')
+    assert result['turn']['content'] == 'Bonjour.'
+    payload = post.call_args.kwargs['json']
+    suffix = mistral_answers.UNHINGED_PROMPT_FILE.read_text(encoding='utf-8')
+    base = mistral_answers.request_payload([{'role': 'user', 'content': 'Que penses-tu de Tesla ?'}],
+                                          'fr', dial.resolve().model, False)['instructions']
+    assert payload['instructions'] == base + ('\n\n' + suffix if level == 11 else '')
+    assert payload['model'] == dial.resolve().model
+    assert payload['completion_args']['temperature'] == dial.resolve().temperature
+    assert 'FACTUAL AND OPERATIONAL RULES' in payload['instructions']
+    assert '80 à 140 mots' in suffix
+
+
+def test_browser_preview_uses_same_level_11_prompt(dial, console, monkeypatch):
+    dial.set_level(11)
+    monkeypatch.setattr(admin, 'llm_provider', lambda: 'mistral')
+    monkeypatch.setattr(admin, 'mistral_key', lambda: 'synthetic-key')
+    school = Mock()
+    school.config.return_value = {'children': {}}
+    monkeypatch.setattr(admin.pronote, 'backend', lambda: school)
+    post = Mock(return_value=response())
+    monkeypatch.setattr(mistral_answers.requests, 'post', post)
+    admin.llm_answer('', 'Que penses-tu de Tesla ?')
+    assert post.call_args.kwargs['json']['instructions'].endswith(
+        mistral_answers.UNHINGED_PROMPT_FILE.read_text(encoding='utf-8'))
+    dial.set_level(9)
+    admin.llm_answer('', 'Que penses-tu de Tesla ?')
+    assert 'RÉGIME DÉBRIDÉ' not in post.call_args.kwargs['json']['instructions']
