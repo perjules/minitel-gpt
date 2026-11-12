@@ -1031,7 +1031,7 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 <p><a href=/users>Utilisateurs et accès</a></p>
   <div class=health-grid>{% for service in service_cards %}<div class=block>
     <h2>{{service.label}}</h2><p><span class="dot {{'on' if service.enabled else 'off'}}"></span>{{'Active' if service.enabled else 'Inactive'}}</p>
-    {% if service.private %}<p class=sub>Mot de passe propre à chaque journal. Aucun accès au contenu avec le mot de passe administrateur.</p>
+    {% if service.private %}<p class=sub>Chaque journal est chiffré avec son propre mot de passe. Sans ce mot de passe, son contenu ne peut pas être déchiffré, même par l’administrateur : il n’existe pas de clé de secours.</p>
     {% elif service.placeholder %}<p class=sub>Administration en construction</p>
     <label><input type=checkbox disabled aria-label="Activer {{service.label}}"> Activer</label>
     {% else %}<form method=post action="/services/{{service.key}}/toggle"><input type=hidden name=csrf value="{{csrf_token()}}">
