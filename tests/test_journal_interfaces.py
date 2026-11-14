@@ -62,11 +62,11 @@ def test_browser_passwords_and_entries_never_enter_cookie_logs_or_memory(
     monkeypatch.setattr(journal.requests, "post", no_network)
     private = create(client, headers)
     diary_text = "PRIVATE DIARY CONTENT ONLY IN CIPHERTEXT"
-    result = api(client, headers, "command", text="TEXTE : " + diary_text)
+    result = api(client, headers, "command", text=":T " + diary_text)
     while result.json.get("more"):
         result = api(client, headers, "next")
     assert private.draft["reviewed"]
-    api(client, headers, "command", text="ENREGISTRER")
+    api(client, headers, "command", text=":ENREGISTRER")
     root = private.vault.registry.root
     for path in root.rglob("*"):
         if path.is_file():
@@ -84,16 +84,16 @@ def test_browser_passwords_and_entries_never_enter_cookie_logs_or_memory(
 def test_browser_review_all_pages_before_save_and_profile_switch_closes(console):
     client, headers, _ = console
     private = create(client, headers)
-    text = "TEXTE : " + "A private paragraph. " * 75
+    text = ":T " + "A private paragraph. " * 75
     result = api(client, headers, "command", text=text)
     assert result.json["more"]
     assert not private.draft["reviewed"]
-    result = api(client, headers, "command", text="ENREGISTRER")
+    result = api(client, headers, "command", text=":ENREGISTRER")
     assert "Relisez" in result.json["display"]
     while result.json.get("more"):
         result = api(client, headers, "next")
     assert private.draft["reviewed"]
-    api(client, headers, "command", text="ENREGISTRER")
+    api(client, headers, "command", text=":ENREGISTRER")
     client.post(
         "/test-preset",
         headers=headers,
@@ -139,13 +139,13 @@ def test_reading_another_screen_does_not_approve_an_unseen_draft(console):
     client, headers, _ = console
     private = create(client, headers)
     result = api(
-        client, headers, "command", text="TEXTE : " + "Private long text. " * 80
+        client, headers, "command", text=":T " + "Private long text. " * 80
     )
     assert result.json["more"] and not private.draft["reviewed"]
-    api(client, headers, "command", text="LIRE HIER")
+    api(client, headers, "command", text=":LIRE HIER")
     assert not private.draft["reviewed"]
     assert (
-        "Relisez" in api(client, headers, "command", text="ENREGISTRER").json["display"]
+        "Relisez" in api(client, headers, "command", text=":ENREGISTRER").json["display"]
     )
 
 
@@ -153,7 +153,7 @@ def test_browser_journal_commands_on_first_page_and_previous_after_last(console)
     client, headers, _ = console
     private = create(client, headers)
     result = api(
-        client, headers, "command", text="T: " + "A long private paragraph. " * 65
+        client, headers, "command", text=":T " + "A long private paragraph. " * 65
     )
     assert result.json["more"] and not private.draft["reviewed"]
     first = result.json["display"]
@@ -161,16 +161,16 @@ def test_browser_journal_commands_on_first_page_and_previous_after_last(console)
     result = api(client, headers, "previous")
     assert result.json["display"] == first and result.json["page"] == 1
     assert not private.draft["reviewed"]
-    assert "Relisez" in api(client, headers, "command", text="E:").json["display"]
+    assert "Relisez" in api(client, headers, "command", text=":E").json["display"]
     while private.page < len(private.pages) - 1:
         api(client, headers, "next")
     assert private.draft["reviewed"]
     api(client, headers, "previous")
-    assert "enregistrée" in api(client, headers, "command", text="E:").json["display"]
+    assert "enregistrée" in api(client, headers, "command", text=":E").json["display"]
     assert private.days
     # Cancelling a different, unread proposal is also allowed on its first page.
-    api(client, headers, "command", text="T: " + "Another paragraph. " * 80)
-    api(client, headers, "command", text="A:")
+    api(client, headers, "command", text=":T " + "Another paragraph. " * 80)
+    api(client, headers, "command", text=":A")
     assert private.draft is None
 
 
@@ -200,7 +200,7 @@ def test_hardware_echo_password_hidden_normal_input_once_and_routes_restored(
     keys = (
         submitted("SYNTHETIC_PW_q7")
         + submitted("SYNTHETIC_PW_q7")
-        + submitted("TEXTE : PRIVATE NOTE")
+        + submitted(":T PRIVATE NOTE")
         + bytes([chat.SEP, chat.K_SOMMAIRE])
     )
     serial = RoutingSerial(keys)
@@ -226,8 +226,8 @@ def test_hardware_echo_password_hidden_normal_input_once_and_routes_restored(
     assert serial.output.endswith("Journal verrouill\x19Be.\r\n".encode("ascii"))
     # Incremental cursor writes form one visible input and a separate preview;
     # raw UART substring counts no longer represent rendered text.
-    assert any("> TEXTE : PRIVATE NOTE" in frame for frame in frames)
-    assert any("PRIVATE NOTE" in frame and "> TEXTE : PRIVATE NOTE" not in frame for frame in frames)
+    assert any("> :T PRIVATE NOTE" in frame for frame in frames)
+    assert any("PRIVATE NOTE" in frame and "> :T PRIVATE NOTE" not in frame for frame in frames)
     assert not (registry.root / user.memory_key / "logs").exists()
 
 
@@ -343,12 +343,12 @@ def test_full_uart_loop_never_records_private_input(tmp_path, monkeypatch):
     keys = b"".join(
         submitted(text)
         for text in (
-            "JOURNAL INTIME",
+            ":JOURNAL INTIME",
             "q",
             "q",
-            "TEXTE : " + secret_text,
-            "ENREGISTRER",
-            "QUITTER",
+            ":T " + secret_text,
+            ":ENREGISTRER",
+            ":QUITTER",
             "Ordinary synthetic greeting.",
         )
     )

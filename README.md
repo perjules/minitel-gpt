@@ -489,8 +489,8 @@ et mode partagé lorsque ces changements conviennent.
 
 ### Intelligence dial
 
-In ordinary conversation, `INTELLIGENCE 1/3/5/7/9/11` selects a machine-wide
-intelligence profile; `INTELLIGENCE` reports it. The input header shows `I:05`.
+In ordinary conversation, `:INTELLIGENCE 1/3/5/7/9/11` selects a machine-wide
+intelligence profile; `:INTELLIGENCE` reports it. The input header shows `I:05`.
 Level 11 increases randomness beyond level 9. Configure the six profiles under
 **Configuration IA → Intelligence**. Operational tools retain their existing
 routing. See [the dial guide](docs/INTELLIGENCE_DIAL.md) for exact defaults,

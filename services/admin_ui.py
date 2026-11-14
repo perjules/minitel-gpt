@@ -2825,7 +2825,7 @@ def journal_api():
                     item.touch()
                     result = None
             if action == "command":
-                result = item.handle(data.get("text", ""))
+                result = item.keyboard(data.get("text", ""))
         with item.lock:
             if item.stage == "closed":
                 return journal_response({"closed": True, "display": "Journal verrouillé."})

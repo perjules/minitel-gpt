@@ -240,8 +240,8 @@ def test_real_dispatcher_never_calls_model_or_records_dial(dial):
         seen.append((copy.deepcopy(history), kwargs['profile']))
         return {'status': 'ordinary', 'text': 'Bonjour', 'chunks': [], 'references': []}
     helper = startup.StartupTests()
-    helper.run_session(startup.login_keys('fr') + submitted('hello') + submitted('INTELLIGENCE 11')
-                       + submitted('INTELLIGENCE') + submitted('INTELLIGENCE 10') + submitted('follow up'),
+    helper.run_session(startup.login_keys('fr') + submitted('hello') + submitted(':INTELLIGENCE 11')
+                       + submitted(':INTELLIGENCE') + submitted(':INTELLIGENCE 10') + submitted('follow up'),
                        factual_reply=answer)
     assert len(seen) == 2
     assert seen[0][1].temperature == .2 and seen[1][1].temperature == 1.1
@@ -385,3 +385,17 @@ def test_browser_preview_uses_same_level_11_prompt(dial, console, monkeypatch):
     dial.set_level(9)
     admin.llm_answer('', 'Que penses-tu de Tesla ?')
     assert 'RÉGIME DÉBRIDÉ' not in post.call_args.kwargs['json']['instructions']
+
+
+def test_one_shot_dial_command_and_unprefixed_chat(dial):
+    seen = []
+    def answer(history, *args, **kwargs):
+        seen.append((copy.deepcopy(history), kwargs['profile']))
+        return {'status': 'ordinary', 'text': 'Bonjour', 'chunks': [], 'references': []}
+    helper = startup.StartupTests()
+    helper.run_session(startup.login_keys('fr') + submitted('hello') + submitted(':')
+                       + submitted('INTELLIGENCE 11') + submitted('INTELLIGENCE 9'), factual_reply=answer)
+    assert dial.level == 11
+    assert len(seen) == 2
+    assert seen[1][0][-1]['content'] == 'INTELLIGENCE 9'
+    assert seen[1][1] == intelligence.defaults()[11]

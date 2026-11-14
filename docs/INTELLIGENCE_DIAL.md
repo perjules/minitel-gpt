@@ -1,8 +1,10 @@
 # Intelligence dial (software phase)
 
 The Philips wheel will eventually select six machine-wide positions. For now,
-use `INTELLIGENCE 1`, `3`, `5`, `7`, `9` or `11` in ordinary conversation.
-`INTELLIGENCE` reports the current position. Commands are local, case-insensitive
+use `:INTELLIGENCE 1`, `:INTELLIGENCE 3`, `:INTELLIGENCE 5`, `:INTELLIGENCE 7`,
+`:INTELLIGENCE 9` or `:INTELLIGENCE 11` in ordinary conversation.
+`:INTELLIGENCE` reports the current position. Submitting `:` first also arms
+the next entry as a command, so `INTELLIGENCE 11` then works without another colon. Commands are local, case-insensitive
 and tolerate surrounding/repeated whitespace. They never enter the model,
 conversation transcript, memory, printer history or prompt recall. Invalid input
 lists the six accepted positions. No conversation reset occurs.
@@ -200,10 +202,10 @@ force-reset. A first `git switch` normally tracks the fetched remote branch.
 
 1. In Configuration IA, select Mistral and the Conversations adapter; check the
    configured API key and six default profiles. Save. Return to ordinary chat.
-2. Type `INTELLIGENCE`: expect 05 initially, or the previously saved position.
-3. Ask a question producing several pages. Type `INTELLIGENCE 7`: the answer
+2. Type `:INTELLIGENCE`: expect 05 initially, or the previously saved position.
+3. Ask a question producing several pages. Type `:INTELLIGENCE 7`: the answer
    stays visible, status acknowledges AVANCÉ and the header shows `I:07`.
-   SUITE/RETOUR should still page the same answer. Type `INTELLIGENCE 10` and
+   SUITE/RETOUR should still page the same answer. Type `:INTELLIGENCE 10` and
    confirm all six accepted values appear with no API request.
 4. Select 9, ask `Invente trois slogans absurdes pour une administration qui
    réglemente les nuages.` Repeat several times. Select 11, confirm `I:11` and

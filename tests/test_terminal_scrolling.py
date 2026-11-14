@@ -313,7 +313,7 @@ def test_transient_write_failure_restores_mode_and_keeps_result(hardware, monkey
 def test_test_scroll_main_loop_is_local_and_does_not_change_history(monkeypatch):
     monkeypatch.setattr(chat.Term, "poll_key", Mock(return_value=("timeout", None)))
     helper = startup.StartupTests()
-    _, calls = helper.run_session(startup.login_keys("fr") + submitted("TEST SCROLL") + submitted("FOLLOW UP"))
+    _, calls = helper.run_session(startup.login_keys("fr") + submitted(":TEST SCROLL") + submitted("FOLLOW UP"))
     assert [call[1][-1]["content"] for call in calls] == ["FOLLOW UP"]
     assert "TEST SCROLL" not in str(helper.memories[0].record.mock_calls)
     assert any("Page 3/3" in screen and "Journal 54" in screen for screen in helper.result_screens)

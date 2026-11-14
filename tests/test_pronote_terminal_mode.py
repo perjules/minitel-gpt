@@ -20,7 +20,7 @@ class TerminalModeTests(unittest.TestCase):
 
     def test_direct_output_stays_visible_while_waiting_for_next_command(self):
         cases = [
-            (None, "NOTES / MOYENNES / DEVOIRS", b""),
+            (None, ":NOTES / :MOYENNES / :DEVOIRS", b""),
             ({"records": {"child": "Alex", "items": [{"subject": "Maths", "start": "2026-10-14T08:00",
                                                          "end": "2026-10-14T09:00"}]}}, "Maths", b""),
             ({"records": {"error": "not_enrolled"}}, "PRONOTE: not_enrolled", b""),
@@ -37,9 +37,9 @@ class TerminalModeTests(unittest.TestCase):
                     return Mock(is_alive=lambda: False), output, chat.time.monotonic()
 
                 keys = startup.login_keys("fr")
-                keys += b"PRONOTE" + startup.fn(chat.K_ENVOI)
+                keys += b":PRONOTE" + startup.fn(chat.K_ENVOI)
                 if response:
-                    keys += b"COURS" + startup.fn(chat.K_ENVOI) + paging
+                    keys += b":COURS" + startup.fn(chat.K_ENVOI) + paging
                 with (patch.object(chat.pronote, "backend", return_value=backend),
                       patch.object(chat, "start_pronote", side_effect=start) as request):
                     helper = startup.StartupTests()
@@ -50,7 +50,7 @@ class TerminalModeTests(unittest.TestCase):
                 screen.write(helper.uart.output)
                 rendered = "\n".join("".join(row) for row in screen.rows)
                 self.assertIn(visible_text, rendered)
-                self.assertIn("PRONOTE / AIDE / RETOUR", rendered)
+                self.assertIn(":PRONOTE / :AIDE / :RETOUR", rendered)
                 self.assertLessEqual(screen.row, 22)
                 self.assertEqual(request.call_count, 1 if response else 0)
 
@@ -69,7 +69,7 @@ class TerminalModeTests(unittest.TestCase):
 
         keys = startup.login_keys("en")
         for text in ("PRONOTE", "1", "COURS", "ENFANT", "2", "COURS"):
-            keys += text.encode() + startup.fn(chat.K_ENVOI)
+            keys += ((":" + text) if text.upper() in {"PRONOTE", "COURS", "ENFANT", "NOTES", "QUITTER", "RETOUR", "1", "2", "LIRE 1"} else text).encode() + startup.fn(chat.K_ENVOI)
         keys += startup.fn(chat.K_RETOUR) + b"Hello" + startup.fn(chat.K_ENVOI)
         with patch.object(chat.pronote, "backend", return_value=backend), patch.object(chat, "start_pronote", side_effect=start):
             helper = startup.StartupTests()
@@ -90,10 +90,10 @@ class TerminalModeTests(unittest.TestCase):
                 term = chat.Term(transport=uart)
                 self.assertEqual(chat.show_response(term, "\n".join(["x" * 39] * 40)), "done")
                 self.assertEqual(chat.read_question(term, calculator_mode=True), expected)
-        uart = startup.FakeSerial(startup.fn(chat.K_SUITE) * 3 + b"LIRE 1" + startup.fn(chat.K_ENVOI))
+        uart = startup.FakeSerial(startup.fn(chat.K_SUITE) * 3 + b":LIRE 1" + startup.fn(chat.K_ENVOI))
         term = chat.Term(uart)
         chat.show_response(term, "\n".join(["x" * 39] * 40))
-        self.assertEqual(chat.read_question(term), ("LIRE 1", "envoi"))
+        self.assertEqual(chat.read_question(term), (":LIRE 1", "envoi"))
         self.assertEqual(term.view.page, 2)
 
     def test_one_grade_per_page_with_forward_and_backward_function_keys(self):
@@ -109,11 +109,11 @@ class TerminalModeTests(unittest.TestCase):
 
         keys = startup.login_keys("fr")
         for text in ("PRONOTE", "NOTES"):
-            keys += text.encode() + startup.fn(chat.K_ENVOI)
+            keys += ((":" + text) if text.upper() in {"PRONOTE", "COURS", "ENFANT", "NOTES", "QUITTER", "RETOUR", "1", "2", "LIRE 1"} else text).encode() + startup.fn(chat.K_ENVOI)
         keys += startup.fn(chat.K_SUITE) + startup.fn(chat.K_RETOUR)
-        keys += b"SUIVANT" + startup.fn(chat.K_ENVOI) + startup.fn(chat.K_SUITE) * 2
+        keys += b":SUIVANT" + startup.fn(chat.K_ENVOI) + startup.fn(chat.K_SUITE) * 2
         for text in ("QUITTER", "Hello"):
-            keys += text.encode() + startup.fn(chat.K_ENVOI)
+            keys += ((":" + text) if text.upper() in {"PRONOTE", "COURS", "ENFANT", "NOTES", "QUITTER", "RETOUR", "1", "2", "LIRE 1"} else text).encode() + startup.fn(chat.K_ENVOI)
         with patch.object(chat.pronote, "backend", return_value=backend), patch.object(chat, "start_pronote", side_effect=start) as request:
             helper = startup.StartupTests()
             _screens, normal = helper.run_session(keys)
@@ -141,7 +141,7 @@ class TerminalModeTests(unittest.TestCase):
 
         keys = startup.login_keys("fr")
         for text in ("PRONOTE", "NOTES"):
-            keys += text.encode() + startup.fn(chat.K_ENVOI)
+            keys += ((":" + text) if text.upper() in {"PRONOTE", "COURS", "ENFANT", "NOTES", "QUITTER", "RETOUR", "1", "2", "LIRE 1"} else text).encode() + startup.fn(chat.K_ENVOI)
         with patch.object(chat.pronote, "backend", return_value=backend), patch.object(chat, "start_pronote", side_effect=start):
             helper = startup.StartupTests()
             helper.run_session(keys)
@@ -164,7 +164,7 @@ class TerminalModeTests(unittest.TestCase):
 
         keys = startup.login_keys("fr")
         for text in ("PRONOTE", "COURS", "retour", "Hello"):
-            keys += text.encode() + startup.fn(chat.K_ENVOI)
+            keys += ((":" + text) if text.upper() in {"PRONOTE", "COURS", "ENFANT", "NOTES", "QUITTER", "RETOUR", "1", "2", "LIRE 1"} else text).encode() + startup.fn(chat.K_ENVOI)
         with patch.object(chat.pronote, "backend", return_value=backend), patch.object(chat, "start_pronote", side_effect=start) as school:
             _, normal = startup.StartupTests().run_session(keys)
         self.assertEqual(school.call_count, 1)
@@ -172,7 +172,7 @@ class TerminalModeTests(unittest.TestCase):
         self.assertEqual(normal[0][1], [{"role": "user", "content": "Hello"}])
 
     def test_typed_exit_while_waiting_does_not_become_a_school_request(self):
-        for text in (b"RETOUR", b"quitter", b"SORTIX\x08R"):
+        for text in (b":RETOUR", b"quitter", b"SORTIX\x08R"):
             with self.subTest(text=text):
                 pending = (Mock(is_alive=lambda: True), Queue(), chat.time.monotonic())
                 term = chat.Term(transport=startup.FakeSerial(text + startup.fn(chat.K_ENVOI)))
@@ -181,18 +181,23 @@ class TerminalModeTests(unittest.TestCase):
     def test_exit_forgets_private_school_context_but_keeps_public_conversation(self):
         backend = Mock()
         backend.config.return_value = {"enabled": True, "children": {"Alex": {"name": "private"}}}
+        backend.tools.return_value = [{"function": {"parameters": {"properties": {}}}}]
         seen = []
 
         def answer(history, *args, **kwargs):
             seen.append([dict(t) for t in history])
             private = history[-1]["content"] == "Notes de Alex"
-            self.assertIs(kwargs.get("pronote"), backend if private else None)
+            if private:
+                self.assertIs(kwargs["pronote"].backend, backend)
+                self.assertEqual(set(kwargs["pronote"].config()["children"]), {"Alex"})
+            else:
+                self.assertIsNone(kwargs.get("pronote"))
             return {"status": "ordinary", "text": "PRIVATE RECORD" if private else "Public answer",
                     "chunks": [], "references": [], "private": private}
 
         keys = startup.login_keys("fr")
         for text in ("Soleil", "Notes de Alex", "PRONOTE", "RETOUR", "Hello"):
-            keys += text.encode() + startup.fn(chat.K_ENVOI)
+            keys += ((":" + text) if text.upper() in {"PRONOTE", "COURS", "ENFANT", "NOTES", "QUITTER", "RETOUR", "1", "2", "LIRE 1"} else text).encode() + startup.fn(chat.K_ENVOI)
         with patch.object(chat.pronote, "backend", return_value=backend):
             startup.StartupTests().run_session(keys, factual_reply=answer)
         self.assertEqual(len(seen), 3)

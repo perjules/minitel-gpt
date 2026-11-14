@@ -1,4 +1,4 @@
-"""One private, bounded mail session. Only user ENVOYER / E: can send."""
+"""One private, bounded mail session. Only user ENVOYER / :E can send."""
 
 import json
 import logging
@@ -68,7 +68,7 @@ SHORTCUTS = {
     "T": ("TEXTE:", True),
     "B": ("BROUILLON", False),
 }
-DRAFT_ACTIONS = "Après relecture: E: envoyer / M: modifier / A: annuler"
+DRAFT_ACTIONS = "Après relecture: :E envoyer / :M modifier / :A annuler"
 COMPOSE_REQUEST = re.compile(
     r"\b(?:send|write|compose|draft|envoie|envoyer|écris|ecris|écrire|ecrire|rédige|redige)\s+",
     re.IGNORECASE,
@@ -534,28 +534,30 @@ class MailSession:
                 raise GmailError("session_reset")
             return function()
 
-    def handle(self, question, ticket=None, timeout=60):
+    def handle(self, question, ticket=None, timeout=60, *, natural=False):
         q = question.strip()
+        if natural and (q.isdigit() or self.composition and re.fullmatch(r"[^\s<>@]+@[^\s<>@]+", q)):
+            natural = False  # Literal answers to an explicit selection prompt.
         if len(q) > 2000:
             return {"display": "Gmail: request_size_limit", "turn": None}
         try:
-            q = expand_command(q)
+            q = q if natural else expand_command(q)
         except command_shortcuts.ShortcutError as error:
             return {"display": str(error) + "\nT: texte pour un ajout littéral.", "turn": None}
-        if q.upper() in ("SOMMAIRE", "ANNULER", "QUITTER"):
+        if not natural and q.upper() in ("SOMMAIRE", "ANNULER", "QUITTER"):
             try:
                 self.reset(discard=q.upper() == "ANNULER")
             except GmailError as error:
                 return {"display": "Gmail: " + str(error), "turn": None}
             return {"display": "Brouillon annulé. Session mail effacée." if q.upper() == "ANNULER"
-                    else "Session mail quittée. B: reprendre le dernier brouillon sauvegardé.", "turn": None}
+                    else "Session mail quittée. :B reprendre le dernier brouillon sauvegardé.", "turn": None}
         with self.lock:
             if self.busy:
                 return {"display": "Gmail: busy", "turn": None}
             self.busy = True
             epoch = self.epoch
         try:
-            response = self.perform(q, ticket, epoch, time.monotonic() + timeout)
+            response = self.interpret(q, epoch, time.monotonic() + timeout) if natural else self.perform(q, ticket, epoch, time.monotonic() + timeout)
             self.save(epoch, lambda: None)
             return {"turn": None, **response}
         except GmailError as error:
@@ -583,11 +585,11 @@ class MailSession:
                 "recipient_resolution_invalid": "La sélection du destinataire n'est pas valide. Précisez le nom ou l'adresse; aucune adresse n'a été inventée.",
                 "catalogue_too_large": "Catalogue trop volumineux pour une sélection fiable. Saisissez directement une adresse email complète.",
                 "invalid_composition": "Le brouillon généré est incomplet ou mal formé. Reformulez vos instructions; aucun mail envoyé.",
-                "no_pending_draft": "Aucun brouillon actif. B: reprendre le dernier brouillon sauvegardé.",
-                "draft_storage_unavailable": "Sauvegarde locale indisponible. Aucun mail envoyé. B: reprendre le dernier brouillon sauvegardé.",
-                "saved_draft_changed": "Le brouillon sauvegardé a changé dans une autre session. B: le relire avant de continuer.",
-                "saved_draft_invalid": "Brouillon sauvegardé illisible; fichier conservé. A: pour le supprimer explicitement.",
-                "saved_send_uncertain": "Cette tentative a peut-être déjà été envoyée. Vérifiez Gmail / Envoyés. B: consulter le texte conservé; aucun renvoi automatique.",
+                "no_pending_draft": "Aucun brouillon actif. :B reprendre le dernier brouillon sauvegardé.",
+                "draft_storage_unavailable": "Sauvegarde locale indisponible. Aucun mail envoyé. :B reprendre le dernier brouillon sauvegardé.",
+                "saved_draft_changed": "Le brouillon sauvegardé a changé dans une autre session. :B le relire avant de continuer.",
+                "saved_draft_invalid": "Brouillon sauvegardé illisible; fichier conservé. :A pour le supprimer explicitement.",
+                "saved_send_uncertain": "Cette tentative a peut-être déjà été envoyée. Vérifiez Gmail / Envoyés. :B consulter le texte conservé; aucun renvoi automatique.",
             }
             if code in useful:
                 message = useful[code]
@@ -623,10 +625,10 @@ class MailSession:
                 self.editing = True
             return {
                 "display": self.edit_preview(self.draft)
-                + "\n\nModification libre ou T: texte exact à ajouter.\nLe nouveau brouillon devra être relu."
+                + "\n\nModification libre ou :T texte exact à ajouter.\nLe nouveau brouillon devra être relu."
             }
         if upper == "LIRE":
-            return {"display": "L: numéro (ou LIRE numéro) pour ouvrir un message."}
+            return {"display": ":L numéro (ou LIRE numéro) pour ouvrir un message."}
         match = re.fullmatch(r"(?:lire|read)?\s*(\d+)", question, re.IGNORECASE)
         recipient = re.fullmatch(r"destinataire\s+(\d+)", question, re.IGNORECASE)
         if self.choice_kind == "new" and self.recipient_choices and question.isdigit():
@@ -722,6 +724,13 @@ class MailSession:
             return self.resolve_composition(
                 question, self.recipient_choices, epoch, deadline
             )
+        return self.interpret(question, epoch, deadline)
+
+    def interpret(self, question, epoch, deadline):
+        if isinstance(self.client, user_services.ProfileMailClient):
+            self.client.tokens.guard("read")
+        if self.draft and self.draft["status"] != "draft":
+            raise GmailError("saved_send_uncertain")
         # Resolve ambiguous conversational edits through the same small router.
         # No selected body or mailbox metadata enters it. Invalidate review even
         # if interpretation of an attempted edit/new target subsequently fails.
@@ -826,7 +835,7 @@ class MailSession:
         adding = action in {"a", "ajouter", "texte"}
         if (not text.strip() or printable(text) != text or (adding and target == "tout")
                 or (target.isdigit() and not 1 <= int(target) <= len(spans))):
-            return {"display": "Commande invalide. T: texte exact à ajouter.\nBrouillon inchangé."}
+            return {"display": "Commande invalide. :T texte exact à ajouter.\nBrouillon inchangé."}
         closing = previous.get("personal_signoff")
         if adding:
             position = spans[int(target) - 1][1] if target else len(body)
@@ -860,7 +869,7 @@ class MailSession:
                 + ("non lu" if r["unread"] else "lu")
                 for i, r in enumerate(self.items, 1)
             )
-            + "\n\nL: numéro / RECHERCHE requête / Q: quitter\nB: reprendre le dernier brouillon sauvegardé."
+            + "\n\nL: numéro / RECHERCHE requête / :Q quitter\nB: reprendre le dernier brouillon sauvegardé."
         )
 
     def list(self, query, epoch, deadline):
@@ -1095,7 +1104,7 @@ class MailSession:
             "display": notice
             + "Quel destinataire ?\n"
             + text
-            + "\n\nDESTINATAIRE numéro / précisez le nom / A: annuler"
+            + "\n\nDESTINATAIRE numéro / précisez le nom / :A annuler"
         }
 
     def make_new(self, instruction, candidate, epoch, deadline, previous=None):
@@ -1277,7 +1286,7 @@ class MailSession:
         return {
             "display": f"Brouillon révision {draft['revision']}\nÀ: {recipient}\nObjet: {subject}\n\n{body}"
             + (self.limitation() if selected is not None else "")
-            + ("\n\nBrouillon sauvegardé. B: reprendre." if self.draft_store else "")
+            + ("\n\nBrouillon sauvegardé. :B reprendre." if self.draft_store else "")
             + "\n\n" + DRAFT_ACTIONS,
             "review_ticket": draft["ticket"],
         }
@@ -1340,7 +1349,7 @@ class MailSession:
         display = self.edit_preview(self.draft)
         if self.draft["status"] != "draft":
             return {"display": "ENVOI INCERTAIN. Vérifiez Gmail / Envoyés.\n"
-                    "Tentative bloquée; texte conservé. A: pour l'effacer.\n"
+                    "Tentative bloquée; texte conservé. :A pour l'effacer.\n"
                     + "Message-ID: " + self.draft["message_id"] + "\n\n" + display}
         return {"display": display + "\n\n" + DRAFT_ACTIONS, "review_ticket": self.draft["ticket"]}
 

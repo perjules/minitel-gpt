@@ -7,7 +7,14 @@ calls. The only mutable state is the loaded view, row cache and current input.
 from contextlib import nullcontext
 from dataclasses import dataclass
 
-from . import intelligence, io_limits, rose_terminal, terminal_qr, videotex
+from . import (
+    intelligence,
+    io_limits,
+    rose_terminal,
+    terminal_commands,
+    terminal_qr,
+    videotex,
+)
 
 
 @dataclass(frozen=True)
@@ -462,8 +469,9 @@ class View:
                     self.status("Saisie trop longue (2000 max). Recommencez.")
                 elif self.buffer or allow_empty:
                     text = "".join(self.buffer)
-                    word = text.strip().upper()
-                    link = terminal_qr.command(text)
+                    local_prefix = text.startswith(":") and not getattr(getattr(self.term, "command_input", None), "pending", False)
+                    word = text[1:].strip().upper() if local_prefix else ""
+                    link = terminal_qr.command(text[1:]) if local_prefix else None
                     if link is not None:
                         self.buffer.clear()
                         self.input()
@@ -496,9 +504,9 @@ class View:
                         continue
                     if navigation_mode:
                         self.carry_input = navigation_mode != "zones"
-                        return "SUIVANT" if code == chat.K_SUITE else "PRECEDENT", "envoi"
+                        return terminal_commands.Command("SUIVANT" if code == chat.K_SUITE else "PRECEDENT"), "envoi"
                     if code == chat.K_RETOUR and calculator_mode:
-                        return "RETOUR", "envoi"
+                        return terminal_commands.Command("RETOUR"), "envoi"
                     self.move(1 if code == chat.K_SUITE else -1)
                     continue
                 if code == chat.K_ANNUL:

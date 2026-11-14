@@ -108,7 +108,7 @@ def start(session, text):
 
     def request():
         try:
-            result = session.handle(text)
+            result = session.keyboard(text)
         except Exception:  # noqa: BLE001 - Private failures must never expose arbitrary payloads.
             session.close()
             result = session.result("Journal indisponible. Session verrouillée.")
@@ -194,7 +194,7 @@ def interact(term, session):
                     reviewed=(lambda token=token: session.acknowledge(token)) if token else None,
                 )
                 if action == "guide":
-                    text, action = "AIDE", "submit"
+                    text, action = ":AIDE", "submit"
                 elif action == "envoi":
                     action = "submit"
             if action == "overflow":
@@ -208,7 +208,7 @@ def interact(term, session):
                 # Password processing is local and bounded; never leave a secret
                 # referenced by a background thread or enable echo during input.
                 try:
-                    result = session.handle(text)
+                    result = session.keyboard(text)
                 finally:
                     text = None
                 term.s.reset_input_buffer()

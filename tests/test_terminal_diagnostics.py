@@ -48,7 +48,7 @@ def test_real_terminal_command_bypasses_model_and_does_not_enter_history_or_memo
         calls.append([dict(turn) for turn in history])
         return {"status": "ordinary", "text": "Normal answer", "chunks": [], "references": []}
     helper = startup.StartupTests()
-    helper.run_session(startup.login_keys("fr") + submitted("test Unicode")
+    helper.run_session(startup.login_keys("fr") + submitted(":test Unicode")
                        + startup.fn(chat.K_REPET) + submitted("FOLLOW UP"), factual_reply=answer)
     assert [turns[-1]["content"] for turns in calls] == ["FOLLOW UP"]
     assert calls[0] == [{"role": "user", "content": "FOLLOW UP"}]

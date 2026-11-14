@@ -6,7 +6,13 @@ from decimal import Decimal, InvalidOperation
 from functools import partial
 from queue import Queue
 
-from . import airzone_client, config_store, home_config, rose_terminal
+from . import (
+    airzone_client,
+    config_store,
+    home_config,
+    rose_terminal,
+    terminal_commands,
+)
 
 MODES = {1: "Arrêt", 2: "Climatisation", 3: "Chauffage", 4: "Ventilation",
          5: "Déshumidification", 7: "Auto"}
@@ -77,7 +83,7 @@ def render(state, zone, choosing_mode, notice, *, all_zones=False):
         lines.extend(f"{mode}  {mode_name(mode)}" for mode in supported_modes(state))
         lines.extend(("", "Numéro du mode + ENVOI"))
     elif all_zones:
-        lines.extend(("TOUTES LES ZONES", "C:20,5 / MARCHE / ARRET",
+        lines.extend(("TOUTES LES ZONES", ":C 20,5 / :MARCHE / :ARRET",
                       "Une confirmation pour toute la maison."))
     elif zone:
         if zone.get("available") is not True:
@@ -96,7 +102,7 @@ def render(state, zone, choosing_mode, notice, *, all_zones=False):
                 lines.append(warning)
             if number(zone.get("pending_setpoint")):
                 lines.append("Consigne en attente : " + display(zone["pending_setpoint"], " °C"))
-        lines.extend(("", "C:20,5 / MARCHE / ARRET"))
+        lines.extend(("", ":C 20,5 / :MARCHE / :ARRET"))
     else:
         for item in state.get("zones", []):
             lines.append(f"{item['id']}  {room_name(item)[:23]}")
@@ -108,7 +114,7 @@ def render(state, zone, choosing_mode, notice, *, all_zones=False):
         lines.extend(("", "0 ou TOUS : toutes les zones", "Numéro de zone / MODE"))
     if zone:
         lines.append("SUITE/RETOUR : zone suivante/précédente")
-    lines.append("MAJ : relire / taper RETOUR : sortir")
+    lines.append(":MAJ relire / :RETOUR sortir")
     return "\n".join(lines)
 
 
@@ -134,7 +140,7 @@ def proposal(state, zone, choosing_mode, command):
     else:
         match = re.fullmatch(r"C:\s*([+-]?[0-9]{1,3}(?:[.,][0-9]{1,3})?)", command)
         if not match:
-            raise airzone_client.AirzoneError("Utilisez C:20,5, MARCHE ou ARRET.")
+            raise airzone_client.AirzoneError("Utilisez :C 20,5, :MARCHE ou :ARRET.")
         field = "setpoint"
         target = Decimal(match[1].replace(",", "."))
         limits = [zone.get(key) for key in ("min", "max", "step")]
@@ -213,7 +219,7 @@ def choose_controller(term, language):
         answer, action = chat.read_question(term, calculator_mode=True)
         if action != "envoi":
             return None, action
-        answer = (answer or "").strip().upper()
+        answer = (answer or "").removeprefix(":").strip().upper()
         if answer in {"RETOUR", "NON"}:
             return None, "done"
         if answer in {"SOMMAIRE", "LOGOUT"}:
@@ -250,6 +256,7 @@ def run(term, client, language, *, initial=None, access=None, location=""):
         return "done", pending
 
     state, selected, choosing_mode, notice = {}, None, False, ""
+    command_input = terminal_commands.InputMode()
     queued_command = None
     if initial is not None:
         selected, choosing_mode = initial["selected"], initial["mode"]
@@ -291,12 +298,32 @@ def run(term, client, language, *, initial=None, access=None, location=""):
             queued_command = None
         else:
             answer, action = chat.read_question(term, navigation_mode="zones" if zone else False)
+            if action == "envoi":
+                kind, parsed = command_input.submit(answer or "")
+                if kind in {"prompt", "empty"}:
+                    terminal_commands.prompt(term, kind == "prompt")
+                    # Read again without replacing the panel or its input status.
+                    while kind in {"prompt", "empty"} and action == "envoi":
+                        answer, action = chat.read_question(term, navigation_mode="zones" if zone else False)
+                        if action == "envoi":
+                            kind, parsed = command_input.submit(answer or "")
+                    if action != "envoi":
+                        return action, pending
+                if kind == "chat" and not re.fullmatch(r"[0-9]+(?:[.,][0-9]+)?", parsed):
+                    notice = "Utilisez :COMMANDE (:MODE, :MAJ, :RETOUR)."
+                    continue
+                answer = parsed
         if action != "envoi":
             return action, pending
         command = (answer or "").strip().upper()
         if command in {"SOMMAIRE", "LOGOUT"}:
             return command.lower(), pending
         notice = ""
+        if command in {"AIDE", "GUIDE"}:
+            notice = ":MODE / :MAJ / :MARCHE / :ARRET\n:C température / :RETOUR"
+            continue
+        if command.startswith("C "):
+            command = "C:" + command[2:]
         if zone and command in {"SUIVANT", "PRECEDENT"}:
             ids = [item["id"] for item in state["zones"]]
             selected = ids[(ids.index(selected) + (1 if command == "SUIVANT" else -1)) % len(ids)]
@@ -341,7 +368,7 @@ def run(term, client, language, *, initial=None, access=None, location=""):
         answer, action = chat.read_question(term, calculator_mode=True)
         if action != "envoi":
             return action, pending
-        answer = (answer or "").strip().upper()
+        answer = (answer or "").removeprefix(":").strip().upper()
         if answer in {"SOMMAIRE", "LOGOUT"}:
             return answer.lower(), pending
         if answer != "OUI":
