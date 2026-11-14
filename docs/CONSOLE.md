@@ -37,7 +37,8 @@ un terminal interactif (`ssh -t`). Ctrl-Q ou Ctrl-C quitte et restaure le termin
 
 Ces touches ont exactement le comportement de la boucle Minitel selon l'écran.
 Commencez avec **Ctrl-P / SOMMAIRE** : le démarrage apparaît en français, puis
-**Ctrl-N / SUITE** ou 6 secondes d'attente ouvre la connexion. SOMMAIRE revient
+**Ctrl-N / SUITE** ou 6 secondes d'attente ouvre la connexion. Le nombre affiché
+décompte de 6 à 1 sans réafficher le démarrage ; les autres touches ne relancent pas le délai. SOMMAIRE revient
 ensuite à une conversation vide avec le même nom et la même langue. **LOGOUT**
 puis Entrée permet de changer de nom, sans rejouer le démarrage. RETOUR quitte la
 console CALC ou interrompt son spectacle; dans PRONOTE, il quitte le mode ou

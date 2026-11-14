@@ -7,6 +7,7 @@ SOMMAIRE réinitialise la conversation ; LOGOUT change d'utilisateur.
 """
 import json
 import logging
+import math
 import os
 import re
 import signal
@@ -1120,13 +1121,20 @@ def show_boot(t: Term, language, lines=None):
         for line in rows:
             t.line(line)
         deadline = time.monotonic() + BOOT_CONTINUE_TIMEOUT
+        shown = BOOT_CONTINUE_TIMEOUT
+        countdown_row = min(len(rows), 23)
+        countdown_column = BOOT_CONTINUE_PROMPT.index(str(BOOT_CONTINUE_TIMEOUT)) + 1
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return 'done'
-            kind, code = t.read_key(remaining)
-            if kind == 'timeout':
-                return 'done'
+            seconds = math.ceil(remaining)
+            if seconds != shown and rows and rows[-1] == BOOT_CONTINUE_PROMPT:
+                t.w(terminal_display.STANDARD.position(countdown_row, countdown_column))
+                t.w(str(seconds))
+                shown = seconds
+            # Wake at the next countdown boundary; keyboard input never resets it.
+            kind, code = t.read_key(min(remaining, remaining - (seconds - 1)))
             if kind == 'fn':
                 if code == K_SUITE:
                     return 'done'
