@@ -431,3 +431,48 @@ def test_real_dispatcher_shorthand_and_one_shot_are_local(dial):
     assert seen[1][0][-1]['content'] == 'I 9'
     assert seen[1][1] == intelligence.defaults()[11]
     assert ':i 7' not in str(helper.memories[0].record.mock_calls)
+
+
+@pytest.mark.parametrize('level', intelligence.LEVELS)
+def test_admin_edits_effective_prompt_without_touching_defaults(console, dial, level):
+    client, headers, _ = console
+    original = intelligence.load_prompt(level)
+    original_file = (intelligence.ROOT / f'intelligence_{level}_prompt.txt').read_bytes()
+    page = client.get('/?section=ai').text
+    assert f'dial-prompt-panel-{level}' in page and f'dial-prompt-form-{level}' in page
+    text = 'Instructions personnalisées : </textarea><script>bad()</script>'
+    data = {'prompt': text, 'revision': intelligence.prompt_revision(original)}
+    assert client.post(f'/intelligence-prompt/{level}', data=data).status_code == 403
+    assert client.post(f'/intelligence-prompt/{level}', data=data, headers=headers).status_code == 302
+    assert intelligence.load_prompt(level) == text
+    assert (intelligence.ROOT / f'intelligence_{level}_prompt.txt').read_bytes() == original_file
+    assert '&lt;/textarea&gt;&lt;script&gt;' in client.get('/?section=ai').text
+    assert intelligence.controller.level == 5
+    assert intelligence.Controller(dial.profiles_path.parent).profiles() == intelligence.defaults()
+    # Stale pages cannot overwrite a more recent edit.
+    client.post(f'/intelligence-prompt/{level}', data=data, headers=headers)
+    assert 'autre page' in client.get('/?section=ai').text
+    client.post(f'/intelligence-prompt/{level}', data={'restore': '1',
+                'revision': intelligence.prompt_revision(text)}, headers=headers)
+    assert intelligence.load_prompt(level) == original
+    admin.restart_terminal.assert_not_called()
+
+
+@pytest.mark.parametrize('text', ['', '   ', 'x' * 16001, 'bad\x00text'])
+def test_invalid_prompt_keeps_previous_configuration(dial, text):
+    before = intelligence.load_prompt(5)
+    with pytest.raises(config_store.InvalidConfig):
+        intelligence.save_prompt(5, text, intelligence.prompt_revision(before))
+    assert intelligence.load_prompt(5) == before
+
+
+def test_saved_prompt_reaches_provider_and_other_levels_stay_independent(dial, monkeypatch):
+    old = intelligence.load_prompt(11)
+    intelligence.save_prompt(11, 'Nouveau prompt niveau onze.', intelligence.prompt_revision(old))
+    assert intelligence.load_prompt(9) != 'Nouveau prompt niveau onze.'
+    post = Mock(return_value=response())
+    monkeypatch.setattr(mistral_answers.requests, 'post', post)
+    mistral_answers.answer([{'role': 'user', 'content': 'Bonjour'}], 'fr', 'synthetic', 'base',
+                           profile=dial.profiles()[11], intelligence_level=11)
+    assert post.call_args.kwargs['json']['instructions'].endswith('Nouveau prompt niveau onze.')
+    assert post.call_args.kwargs['json']['completion_args']['temperature'] == dial.profiles()[11].temperature

@@ -10,9 +10,11 @@ from urllib.parse import urlsplit
 import requests
 
 try:
-    from . import answer_diagnostics
+    from . import answer_diagnostics, intelligence
 except ImportError:
     import answer_diagnostics
+
+    from services import intelligence
 
 URL = "https://api.mistral.ai/v1/conversations"
 PROMPT_FILE = Path(__file__).resolve().parent.parent / "config" / "factual_prompt.txt"
@@ -236,8 +238,7 @@ def answer(history, language, key, model, web_search=True, timeout=60, knowledge
     if level is not None:
         if type(level) is not int or level not in (1, 3, 5, 7, 9, 11):
             raise ValueError("Invalid intelligence prompt level")
-        prompt = PROMPT_FILE.with_name(f"intelligence_{level}_prompt.txt")
-        payload["instructions"] += "\n\n" + prompt.read_text(encoding="utf-8")
+        payload["instructions"] += "\n\n" + intelligence.load_prompt(level)
     if profile is not None:
         payload["model"] = profile.model
         payload["completion_args"].update(profile.completion_args())

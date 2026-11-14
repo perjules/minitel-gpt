@@ -758,6 +758,8 @@ textarea{resize:vertical;font-size:.85em;line-height:1.5}
 .dial-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px}
 .dial-grid fieldset{min-width:0;margin:0;border:1px solid var(--border);border-radius:6px;padding:12px}
 .dial-grid input{width:100%;padding:10px;font-size:15px}
+.dial-grid fieldset:has([id^=dial-prompt-panel]:not([hidden])){grid-column:1/-1}
+.dial-grid textarea{min-height:18rem}
 .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .toolbar select{flex:1;min-width:180px}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px}
@@ -852,6 +854,17 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
         </select>
         <label for="dial-temperature-{{level}}">Température (0–1.5)</label>
         <input type=number id="dial-temperature-{{level}}" name="temperature_{{level}}" min=0 max=1.5 step=0.01 value="{{profile.temperature}}" required>
+        <button type=button class="btn btn-s" aria-expanded=false aria-controls="dial-prompt-panel-{{level}}" onclick="const p=document.getElementById('dial-prompt-panel-{{level}}');p.hidden=!p.hidden;this.setAttribute('aria-expanded',String(!p.hidden))">Voir / modifier le prompt</button>
+        <div id="dial-prompt-panel-{{level}}" hidden>
+          <p class=sub>Instructions ajoutées à la personnalité commune pour ce niveau. Application à la prochaine requête.</p>
+          {% if dial_prompt_error %}<p role=alert>{{dial_prompt_error}}</p>{% else %}
+          <label for="dial-prompt-{{level}}">Prompt Intelligence {{level}}</label>
+          <textarea id="dial-prompt-{{level}}" name=prompt form="dial-prompt-form-{{level}}" rows=14 maxlength=16000 required>{{dial_prompts[level]}}</textarea>
+          <input type=hidden name=revision form="dial-prompt-form-{{level}}" value="{{dial_prompt_revisions[level]}}">
+          <button type=submit class="btn btn-p" form="dial-prompt-form-{{level}}">Enregistrer ce prompt</button>
+          <button type=submit class="btn btn-s" form="dial-prompt-form-{{level}}" name=restore value=1 formnovalidate>Restaurer ce prompt par défaut</button>
+          {% endif %}
+        </div>
       </fieldset>
       {% endfor %}
       </div>
@@ -859,6 +872,9 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
       <button class="btn btn-p" type=submit>Enregistrer Intelligence</button>
       <button class="btn btn-s" type=submit name=restore value=1 formnovalidate>Restaurer les six profils par défaut</button>
     </form>
+    {% for level in dial_profiles %}
+    <form id="dial-prompt-form-{{level}}" method=POST action="/intelligence-prompt/{{level}}"><input type=hidden name=csrf value="{{csrf_token()}}"></form>
+    {% endfor %}
   </div>
   <div class=block>
     <h2>Fournisseur, modèle et clés API</h2>
@@ -1442,8 +1458,15 @@ def index():
     except (config_store.InvalidConfig, config_store.StorageFailure, OSError) as error:
         dial_profiles = intelligence.defaults()
         dial_error = str(error)
+    dial_prompts, dial_prompt_error = {}, ""
+    try:
+        dial_prompts = {n: intelligence.load_prompt(n) for n in intelligence.LEVELS}
+    except (ValueError, intelligence.config_store.StorageFailure, OSError) as error:
+        dial_prompt_error = str(error)
     return render_template_string(
-        ADMIN_HTML, dial_profiles=dial_profiles, dial_indicator=intelligence.indicator(),
+        ADMIN_HTML, dial_prompts=dial_prompts, dial_prompt_error=dial_prompt_error,
+        dial_prompt_revisions={n: intelligence.prompt_revision(text) for n, text in dial_prompts.items()},
+        dial_profiles=dial_profiles, dial_indicator=intelligence.indicator(),
         dial_labels=intelligence.LABELS, dial_error=dial_error, service_cards=service_cards(), journal=journal, lines=lines,
         diagnostic_log=recent_log if journal == "chatgpt" and lines == 40 else log_tail(journal, lines), provision_status=svc_status("wifi-manager"),
         previous=previous_release(), branch_preview=session.get("branch_preview"),
@@ -1765,6 +1788,21 @@ def available_models():
         return jsonify(ok=True, models=model_catalogue.models(provider, key))
     except model_catalogue.CatalogueError as error:
         return jsonify(ok=False, error=str(error)), 502
+
+
+@app.route("/intelligence-prompt/<int:level>", methods=["POST"])
+@require_login
+def save_intelligence_prompt(level):
+    if level not in intelligence.LEVELS:
+        abort(404)
+    try:
+        intelligence.save_prompt(level, request.form.get("prompt", ""),
+                                 request.form.get("revision", ""), restore=request.form.get("restore") == "1")
+    except (ValueError, intelligence.config_store.StorageFailure, OSError) as error:
+        session["flash"], session["flash_ok"] = "Prompt non enregistré : " + str(error), False
+    else:
+        session["flash"], session["flash_ok"] = f"Prompt Intelligence {level} enregistré.", True
+    return redirect(url_for("index", section="ai"))
 
 
 @app.route("/save-intelligence", methods=["POST"])

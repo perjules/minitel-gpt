@@ -26,3 +26,5 @@ config/homes.json
 
 config/intelligence-profiles.json
 config/intelligence-state.json
+
+config/intelligence-prompts.json

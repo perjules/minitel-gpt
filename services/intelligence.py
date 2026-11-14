@@ -151,3 +151,58 @@ def command(text):
         return str(error)
     except (config_store.StorageFailure, OSError):
         return "INTELLIGENCE : sauvegarde impossible"
+
+
+MAX_PROMPT_CHARS = 16000
+
+
+def validate_prompt(text):
+    if (not isinstance(text, str) or not text.strip() or len(text) > MAX_PROMPT_CHARS
+            or any(ord(c) < 32 and c not in '\n\r\t' for c in text)):
+        raise config_store.InvalidConfig("Prompt attendu : 1 à 16000 caractères, sans caractères de contrôle.")
+    return text
+
+
+def prompt_overrides(path):
+    if not path.exists() and not path.is_symlink():
+        return {}
+    try:
+        data = json.loads(config_store.read_bytes(path))
+        if (not isinstance(data, dict) or data.get('version') != 1
+                or not isinstance(data.get('prompts'), dict)
+                or set(data['prompts']) - {str(n) for n in LEVELS}):
+            raise ValueError
+        return {key: validate_prompt(value) for key, value in data['prompts'].items()}
+    except (ValueError, UnicodeError):
+        raise config_store.InvalidConfig("Prompts Intelligence illisibles ; fichier conservé.") from None
+
+
+def prompt_revision(text):
+    import hashlib
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def load_prompt(level):
+    valid_level(level)
+    path = controller.profiles_path.with_name('intelligence-prompts.json')
+    with config_store.locked(path):
+        overrides = prompt_overrides(path)
+        return overrides.get(str(level)) or config_store.read_bytes(
+            ROOT / f'intelligence_{level}_prompt.txt').decode('utf-8')
+
+
+def save_prompt(level, text, revision, *, restore=False):
+    valid_level(level)
+    if not restore:
+        validate_prompt(text)
+    path = controller.profiles_path.with_name('intelligence-prompts.json')
+    with config_store.locked(path):
+        if revision != prompt_revision(load_prompt(level)):
+            raise config_store.InvalidConfig("Prompt modifié dans une autre page ; rechargez avant de réessayer.")
+        overrides = prompt_overrides(path)
+        if restore:
+            overrides.pop(str(level), None)
+        else:
+            overrides[str(level)] = text
+        config_store.atomic_write(path, (json.dumps({'version': 1, 'prompts': overrides},
+                                                   ensure_ascii=False, indent=2) + '\n').encode('utf-8'))

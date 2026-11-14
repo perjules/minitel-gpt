@@ -250,3 +250,16 @@ available for those paths. Tests use a virtual clock and simulated UART, not rea
 waiting or live provider calls. Physical acceptance: submit a slow ordinary prompt,
 verify the status changes about every two seconds, cancel with SOMMAIRE, then try
 a fast prompt and confirm there is no minimum display delay or leftover task.
+
+## Editing individual prompts
+
+Each profile card has **Voir / modifier le prompt**, opening its own text editor.
+Save applies only that level's prompt to subsequent ordinary requests; restore
+returns only that level to the shipped default. Login and CSRF protection apply.
+Blank, over-16000-character and control-character input is rejected; a revision
+check prevents stale pages overwriting newer prompt edits. Text is HTML-escaped.
+The editor changes the level-specific suffix, leaving the shared personality and
+operational rules in place. Existing profile/model settings and active position
+are independent. Overrides live in Git-ignored `config/intelligence-prompts.json`,
+using the same atomic locked storage as other configuration. Tracked prompt files
+remain the defaults, so deployments preserve edits without dirtying the checkout.
