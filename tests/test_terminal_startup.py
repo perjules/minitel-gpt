@@ -48,7 +48,7 @@ def test_real_decoder_auto_boot_continues_despite_clock_adjustment_and_quiet_sta
                 self.status_sent = True
                 self.keys.extend(b"\x1b\x3a\x71\x40")
                 return bytes([self.keys.popleft()])
-            if now[0] >= 32:
+            if now[0] >= 8:
                 raise EndOfInput
             now[0] += .1  # A real bounded serial read with no keyboard input.
             return b""
@@ -72,12 +72,12 @@ def test_real_decoder_auto_boot_continues_despite_clock_adjustment_and_quiet_sta
     with pytest.raises(EndOfInput):
         chat.run(term)
     assert uart.countdown_at is not None
-    assert uart.clears[-1] - uart.countdown_at == pytest.approx(30, abs=.12)
+    assert uart.clears[-1] - uart.countdown_at == pytest.approx(6, abs=.12)
     assert "MINITELGPT WELCOME" in screen_text(uart.output)
     assert "Nom / name" in screen_text(uart.output)
     assert term._presence_enabled == status_support
     assert term._presence_seen == status_support
-    assert all(instant >= uart.countdown_at + 30 for instant in uart.probes)
+    assert all(instant >= uart.countdown_at + 6 for instant in uart.probes)
     assert render_videotex(uart.output)[1] is False
 
 
@@ -501,18 +501,18 @@ class StartupTests(unittest.TestCase):
                 self.assertEqual(chat.show_boot(term, "fr"), result)
             self.assertTrue(bytes(uart.output).endswith(chat.SCROLL_OFF))
 
-    def test_other_keys_do_not_restart_thirty_second_boot_deadline(self):
+    def test_other_keys_do_not_restart_six_second_boot_deadline(self):
         term = Mock()
         now = [0]
         timeouts = []
         def read(timeout):
             timeouts.append(timeout)
-            now[0] += 10
+            now[0] += 2
             return 'char', ord('x')
         term.read_key.side_effect = read
         with patch.object(chat.time, "monotonic", side_effect=lambda: now[0]):
             self.assertEqual(chat.show_boot(term, "fr"), "done")
-        self.assertEqual(timeouts, [30, 20, 10])
+        self.assertEqual(timeouts, [6, 4, 2])
 
     def test_status_acknowledgements_do_not_contaminate_keys_or_chat(self):
         _, calls = self.run_session(fn(chat.K_SOMMAIRE) + b"\x1b\x3a\x73\x42" + fn(chat.K_SUITE)

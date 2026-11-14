@@ -136,8 +136,8 @@ COLS = terminal_display.STANDARD.columns
 SCREEN_ROWS = terminal_display.STANDARD.rows
 CONTENT_ROWS = terminal_display.STANDARD.content_rows          # lignes de contenu par page de réponse
 IDLE_TIMEOUT = 300         # 5 min → nouvelle conversation, même utilisateur
-BOOT_CONTINUE_TIMEOUT = 30
-BOOT_CONTINUE_PROMPT = "SUITE: continuer / connexion dans 30 s"
+BOOT_CONTINUE_TIMEOUT = 6
+BOOT_CONTINUE_PROMPT = "SUITE: continuer / connexion dans 6 s"
 
 # ── Fournisseur d'IA (LLM) ───────────────────────────────────────────────
 # LLM_PROVIDER = "mistral" (defaut), "claude" ou "linkup". La cle et le modele
@@ -1108,7 +1108,7 @@ def prepare_boot(language):
 
 
 def show_boot(t: Term, language, lines=None):
-    """Fictional diagnostics, then SUITE or 30 seconds opens login."""
+    """Fictional diagnostics, then SUITE or 6 seconds opens login."""
     t.pause_presence()
     t.clear()
     try:
