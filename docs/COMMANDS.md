@@ -13,7 +13,7 @@ The pending state belongs to the current console and is discarded on exit/reset.
 
 Use `:AIDE` for the main command overview. Common entries are `:MAIL`, `:PRONOTE`,
 `:JOURNAL INTIME`, `:AIRZONE`, `:3615`, `:CALC`, `:NOEL`, `:MAJ`, `:IMPRIMER`,
-`:SOMMAIRE`, `:LOGOUT` and `:INTELLIGENCE 11`. Availability depends on installed/configured services.
+`:SOMMAIRE`, `:LOGOUT` and `:INTELLIGENCE 11` (or `:I 11`; `:I` shows the current level). Availability depends on installed/configured services.
 
 Inside a console, prefix its commands too: `:LIRE 2`, `:ENVOYER`, `:NOTES`,
 `:ENREGISTRER`, `:QUITTER`. Shortcuts put the colon first: `:T texte`, `:M corrections`,

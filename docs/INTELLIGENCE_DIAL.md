@@ -3,7 +3,8 @@
 The Philips wheel will eventually select six machine-wide positions. For now,
 use `:INTELLIGENCE 1`, `:INTELLIGENCE 3`, `:INTELLIGENCE 5`, `:INTELLIGENCE 7`,
 `:INTELLIGENCE 9` or `:INTELLIGENCE 11` in ordinary conversation.
-`:INTELLIGENCE` reports the current position. Submitting `:` first also arms
+`:INTELLIGENCE` reports the current position. `:I` is a shorthand: use `:I 11`
+to select a level or `:I` to show the current level. Submitting `:` first also arms
 the next entry as a command, so `INTELLIGENCE 11` then works without another colon. Commands are local, case-insensitive
 and tolerate surrounding/repeated whitespace. They never enter the model,
 conversation transcript, memory, printer history or prompt recall. Invalid input

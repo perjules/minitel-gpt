@@ -60,7 +60,7 @@ HELP = (
     ":COMMANDE : execution directe\n"
     ":MAIL / :PRONOTE / :JOURNAL INTIME\n"
     ":AIRZONE / :3615 / :CALC / :NOEL\n"
-    ":IMPRIMER / :MAJ / :INTELLIGENCE\n"
+    ":IMPRIMER / :MAJ / :I (INTELLIGENCE)\n"
     ":LOGOUT\n"
     "Sans : = conversation. GUIDE = aide."
 )

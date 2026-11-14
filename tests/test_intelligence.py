@@ -399,3 +399,32 @@ def test_one_shot_dial_command_and_unprefixed_chat(dial):
     assert len(seen) == 2
     assert seen[1][0][-1]['content'] == 'INTELLIGENCE 9'
     assert seen[1][1] == intelligence.defaults()[11]
+
+
+@pytest.mark.parametrize('level', intelligence.LEVELS)
+def test_intelligence_shorthand_levels_and_status(dial, level):
+    assert f'{level:02d}' in intelligence.command(f'  i  {level}  ')
+    assert dial.level == level
+    assert f'{level:02d}' in intelligence.command('I')
+
+
+@pytest.mark.parametrize('bad', ['0', '2', '10', '12', '05', 'x', '3 extra', '-1'])
+def test_intelligence_shorthand_rejects_invalid_levels(dial, bad):
+    assert intelligence.command('I ' + bad) == 'INTELLIGENCE : 1, 3, 5, 7, 9, 11'
+    assert dial.level == 5
+
+
+def test_real_dispatcher_shorthand_and_one_shot_are_local(dial):
+    seen = []
+    def answer(history, *args, **kwargs):
+        seen.append((copy.deepcopy(history), kwargs['profile']))
+        return {'status': 'ordinary', 'text': 'Bonjour', 'chunks': [], 'references': []}
+    helper = startup.StartupTests()
+    helper.run_session(startup.login_keys('fr') + submitted('hello') + submitted(':i 7')
+                       + submitted(':I') + submitted(':I 10') + submitted(':')
+                       + submitted('I 11') + submitted('I 9'), factual_reply=answer)
+    assert dial.level == 11
+    assert len(seen) == 2
+    assert seen[1][0][-1]['content'] == 'I 9'
+    assert seen[1][1] == intelligence.defaults()[11]
+    assert ':i 7' not in str(helper.memories[0].record.mock_calls)

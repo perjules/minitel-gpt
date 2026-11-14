@@ -136,7 +136,7 @@ def indicator():
 
 def command(text):
     """None means not a command; otherwise a short local acknowledgement/error."""
-    match = re.fullmatch(r"\s*INTELLIGENCE(?:\s+(.*?))?\s*", text or "", re.IGNORECASE)
+    match = re.fullmatch(r"\s*(?:INTELLIGENCE|I)(?:\s+(.*?))?\s*", text or "", re.IGNORECASE)
     if match is None:
         return None
     argument = (match[1] or "").strip()
