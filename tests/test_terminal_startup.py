@@ -1,7 +1,7 @@
 """Exercise startup through the real UART key decoder and conversation loop."""
 import unittest
 from collections import deque
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from pathlib import Path
 from queue import Queue
 from tempfile import TemporaryDirectory
@@ -224,7 +224,7 @@ def login_keys(language="en"):
 
 class StartupTests(unittest.TestCase):
     def run_session(self, keys, boot_text=None, boot_error=None, preset=None,
-                    factual_reply=None):
+                    factual_reply=None, normal_exit=False):
         uart = FakeSerial(keys)
         calls, memories = [], []
 
@@ -319,7 +319,7 @@ class StartupTests(unittest.TestCase):
                 patch.object(chat, "show_boot", boot_screen),
                 patch.object(chat, "get_ip", return_value="192.0.2.1"),
                 patch.object(chat.log, "info"),
-                self.assertRaises(EndOfInput),
+                nullcontext() if normal_exit else self.assertRaises(EndOfInput),
             )
             for context in contexts:
                 stack.enter_context(context)

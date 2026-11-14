@@ -1862,9 +1862,8 @@ def run_session(t):
                 continue
 
             # Local maintenance commands: never send them to an LLM.
-            maintenance = fixed.strip().lower()
-            if maintenance in ("mainframe --shutdown", "mainframe --reboot"):
-                operation = "poweroff" if maintenance.endswith("--shutdown") else "reboot"
+            operation = terminal_commands.power_operation(fixed)
+            if operation is not None:
                 t.line("MAINFRAME: " + operation.upper())
                 t.line("Confirmer: taper OUI puis ENVOI")
                 confirmation, confirm_action = read_question(t)

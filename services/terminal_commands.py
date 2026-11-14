@@ -61,7 +61,7 @@ HELP = (
     ":MAIL / :PRONOTE / :JOURNAL INTIME\n"
     ":AIRZONE / :3615 / :CALC / :NOEL\n"
     ":IMPRIMER / :MAJ / :I (INTELLIGENCE)\n"
-    ":LOGOUT\n"
+    ":LOGOUT / :REBOOT / :SHUTDOWN\n"
     "Sans : = conversation. GUIDE = aide."
 )
 
@@ -129,3 +129,14 @@ def execute(text, language, timeout, mail, ticket, memory, calc, *, generate=Non
         if re.match(r"^(?:MAILS?|MES MAILS|BROUILLON|LIRE|READ|DESTINATAIRE|ECRIRE|ÉCRIRE|REPONDRE|RÉPONDRE|MODIFIER|ENVOYER|ANNULER|QUITTER|TEXTE|AJOUTER|REMPLACER|FULL|RESUMER|RÉSUMER|RECHERCHE|SEARCH)(?:\s|:|$)", command.upper()):
             return {**mail.handle(command, ticket, timeout), "gmail": True}
     return result(UNKNOWN)
+
+
+def power_operation(text):
+    """Exact explicit commands only; caller retains physical confirmation."""
+    command = " ".join(text.strip().upper().split())
+    return {
+        "SHUTDOWN": "poweroff", "POWEROFF": "poweroff",
+        "ARRET": "poweroff", "ARRÊT": "poweroff",
+        "REBOOT": "reboot", "REDEMARRER": "reboot", "REDÉMARRER": "reboot",
+        "MAINFRAME --SHUTDOWN": "poweroff", "MAINFRAME --REBOOT": "reboot",
+    }.get(command)

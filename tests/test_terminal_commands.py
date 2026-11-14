@@ -104,3 +104,47 @@ def test_plain_send_word_uses_natural_mail_router():
     assert result['passthrough']
     model.route.assert_called_once()
     client.send.assert_not_called()
+
+
+@pytest.mark.parametrize('text,operation', [
+    ('REBOOT', 'reboot'), (' reBoOt ', 'reboot'), ('REDEMARRER', 'reboot'),
+    ('REDÉMARRER', 'reboot'), ('MAINFRAME   --reboot', 'reboot'),
+    ('SHUTDOWN', 'poweroff'), ('POWEROFF', 'poweroff'), ('ARRET', 'poweroff'),
+    ('ARRÊT', 'poweroff'), ('mainframe --shutdown', 'poweroff'),
+])
+def test_explicit_power_command_names(text, operation):
+    from services.terminal_commands import power_operation
+    assert power_operation(text) == operation
+
+
+@pytest.mark.parametrize('text', ['', 'please reboot', 'reboot now', 'shutdown; reboot',
+                                'mainframe --reboot extra', 'poweroff --force'])
+def test_power_commands_require_exact_name(text):
+    from services.terminal_commands import power_operation
+    assert power_operation(text) is None
+
+
+@pytest.mark.parametrize('command,operation', [('REBOOT', 'reboot'), ('SHUTDOWN', 'poweroff'),
+                                              ('POWEROFF', 'poweroff'), ('MAINFRAME --reboot', 'reboot'),
+                                              ('MAINFRAME --shutdown', 'poweroff')])
+@pytest.mark.parametrize('one_shot', [False, True])
+@pytest.mark.parametrize('confirmed', [False, True])
+def test_real_power_dispatch_keeps_confirmation_and_bypasses_chat(monkeypatch, command, operation, one_shot, confirmed):
+    from unittest.mock import Mock
+
+    from test_rose_echo import submitted
+    from test_terminal_startup import StartupTests, login_keys
+
+    from services import minitel_chatgpt as chat
+    launch = Mock()
+    monkeypatch.setattr(chat.subprocess, 'Popen', launch)
+    helper = StartupTests()
+    keys = submitted(':') + submitted(command) if one_shot else submitted(':' + command)
+    _, calls = helper.run_session(login_keys('fr') + keys + submitted('OUI' if confirmed else 'NON'),
+                                  normal_exit=confirmed)
+    assert not calls
+    if confirmed:
+        launch.assert_called_once()
+        assert launch.call_args.args[0] == ['sudo', '-n', '/usr/bin/systemctl', operation]
+    else:
+        launch.assert_not_called()

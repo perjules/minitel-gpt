@@ -50,3 +50,13 @@ final dispatcher validation review, all 56 affected command/mail/document/Christ
 tests passed again. Ruff, locked dependency sync, requirements export consistency
 and whitespace checks passed. These checks do not replace the physical acceptance
 steps above.
+
+## Power controls
+
+Use `:REBOOT` to restart the Pi, or `:SHUTDOWN` / `:POWEROFF` to shut it down.
+French aliases are `:REDEMARRER` / `:REDÉMARRER` and `:ARRET` / `:ARRÊT`.
+The original `:MAINFRAME --reboot` and `:MAINFRAME --shutdown` remain supported.
+Submit `:` first to use any of these names as the next one-shot command.
+Each requires typing literal `OUI` then ENVOI at the confirmation prompt;
+other input cancels. Unprefixed words stay ordinary conversation. Matching is
+case-insensitive and exact; arguments or extra text are rejected as commands.
