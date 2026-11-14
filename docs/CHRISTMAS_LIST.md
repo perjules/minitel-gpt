@@ -1,5 +1,7 @@
 # Liste au Père Noël
 
+> Terminal keyboard commands now use a leading colon. See [COMMANDS.md](COMMANDS.md) for command mode, shortcuts and literal password/confirmation input. Examples below also document internal service syntax.
+
 Saisir `LISTE AU PERE NOEL` (accents acceptés), `LISTE DE NOEL` ou `NOEL`
 dans la conversation Minitel ou son aperçu dans l'administration.
 La liste appartient au profil sélectionné, y compris le profil MinitelGPT sans nom.

@@ -67,7 +67,7 @@ def test_private_exit_keys_work_from_any_page_and_restore_echo(hardware, key, ac
 
 
 def test_stopword_and_textual_previous_do_not_leave_the_local_reader(hardware):
-    term, uart = hardware(fn(chat.K_SUITE) + submitted("PRECEDENT") + submitted("navet"))
+    term, uart = hardware(fn(chat.K_SUITE) + submitted(":PRECEDENT") + submitted("navet"))
     view = rose_terminal.display(term, response(), framed=True, safeword="navet")
     assert rose_terminal.read_field(term, safeword="navet") == ("navet", "safeword")
     assert view.page == 0 and uart.lines()[20].strip() == "Mot d'arret : navet"
@@ -128,3 +128,9 @@ def test_wait_echo_failure_tracks_and_cancels_worker_before_returning(hardware):
         rose_terminal.wait(term, job, "navet", 10)
     assert term._pending is pending
     job.cancel.assert_called_once_with()
+
+
+def test_safeword_overrides_pending_command_mode(hardware):
+    term, _ = hardware(submitted(':') + submitted('navet'))
+    rose_terminal.display(term, response(), framed=True, safeword='navet')
+    assert rose_terminal.read_field(term, safeword='navet') == ('navet', 'safeword')

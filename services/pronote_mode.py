@@ -206,9 +206,9 @@ class Session:
 
     def help(self):
         return narrow("PRONOTE" + (" / " + self.child if self.child else "") + "\n"
-                      + "NOTES / MOYENNES / DEVOIRS\nCOURS / CONTROLES / BULLETIN\n"
-                      "COMPETENCES / ABSENCES / RETARDS\nINFOS / CANTINE / BILAN / SANCTIONS\n"
-                      "ENFANT / AIDE / RETOUR")
+                      + ":NOTES / :MOYENNES / :DEVOIRS\n:COURS / :CONTROLES / :BULLETIN\n"
+                      ":COMPETENCES / :ABSENCES / :RETARDS\n:INFOS / :CANTINE / :BILAN / :SANCTIONS\n"
+                      ":ENFANT / :AIDE / :RETOUR")
 
     def children(self, aliases):
         if not aliases:

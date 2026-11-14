@@ -1,5 +1,7 @@
 # PRONOTE on 3615 IA
 
+> Terminal keyboard commands now use a leading colon. See [COMMANDS.md](COMMANDS.md) for command mode, shortcuts and literal password/confirmation input. Examples below also document internal service syntax.
+
 Read-only local access to academic records, timetable, school-life information
 and canteen menus through **PronotePy 2.15.7 / ParentClient**. Enrollment uses a parent mobile-app QR code, followed
 by token login. Every successful login saves the rotated token on the Pi.

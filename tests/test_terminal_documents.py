@@ -132,7 +132,7 @@ def test_real_mail_loop_accepts_read_and_reply_from_first_pages(tmp_path, monkey
     selected = memory_session.MemorySession("Alice", root=tmp_path / "users")
     selected.remember_language("fr")
     uart = FakeSerial(
-        b"".join(submitted(q) for q in ("MAIL", "L: 1", "REPONDRE oui"))
+        b"".join(submitted(q) for q in (":MAIL", ":L 1", ":REPONDRE oui"))
         + fn(chat.K_SOMMAIRE)
     )
     term = chat.Term(uart)

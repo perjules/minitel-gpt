@@ -502,7 +502,7 @@ class MemoryInterfaces(unittest.TestCase):
             + b"Retiens une preference"
             + fn(chat.K_ENVOI)
             + fn(chat.K_SOMMAIRE)
-            + b"LOGOUT" + fn(chat.K_ENVOI)
+            + b":LOGOUT" + fn(chat.K_ENVOI)
             + b"Bob"
             + fn(chat.K_ENVOI)
             + b"fr"
@@ -564,7 +564,7 @@ class MemoryInterfaces(unittest.TestCase):
                 keys
                 + question.encode()
                 + fn(chat.K_ENVOI)
-                + b"LOGOUT" + fn(chat.K_ENVOI)
+                + b":LOGOUT" + fn(chat.K_ENVOI)
             )
 
         uart = FakeSerial(

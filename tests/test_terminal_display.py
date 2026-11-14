@@ -210,7 +210,7 @@ def test_next_result_clears_dense_page_and_erases_submitted_input(hardware):
 
 
 def test_textual_paging_commands_never_return_to_feature_or_model(hardware):
-    term, uart = hardware(submitted("SUIVANT") + submitted("PRECEDENT") + submitted("MAIL"))
+    term, uart = hardware(submitted(":SUIVANT") + submitted(":PRECEDENT") + submitted("MAIL"))
     chat.show_response(term, long_answer())
     assert chat.read_question(term) == ("MAIL", "envoi")
     assert term.view.page == 0

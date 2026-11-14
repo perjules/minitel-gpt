@@ -360,15 +360,15 @@ class FullTerminalWorkflow(unittest.TestCase):
         session, api, _ = make_session()
         uart = startup.FakeSerial(
             startup.login_keys("fr")
-            + b"MAIL"
+            + b":MAIL"
             + fn(terminal.K_ENVOI)
-            + b"LIRE 1"
+            + b":LIRE 1"
             + fn(terminal.K_ENVOI)
-            + b"REPONDRE oui"
+            + b":REPONDRE oui"
             + fn(terminal.K_ENVOI)
-            + b"ENVOYER"
+            + b":ENVOYER"
             + fn(terminal.K_ENVOI)
-            + b"ENVOYER"
+            + b":ENVOYER"
             + fn(terminal.K_ENVOI)
             + fn(terminal.K_SOMMAIRE)
         )

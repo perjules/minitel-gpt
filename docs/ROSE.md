@@ -1,5 +1,7 @@
 # 3615 rose — prototype personnel
 
+> Terminal keyboard commands now use a leading colon. See [COMMANDS.md](COMMANDS.md) for command mode, shortcuts and literal password/confirmation input. Examples below also document internal service syntax.
+
 État courant, 25 octobre 2026 : les dix personnages fixes (cinq hommes,
 cinq femmes) utilisent provisoirement les consignes E5S5 de la grille pour
 les essais personnels. Voix, descriptions et modules les différencient ;

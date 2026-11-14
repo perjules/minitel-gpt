@@ -1,5 +1,7 @@
 # Calculateur et théâtre mathématique
 
+> Terminal keyboard commands now use a leading colon. See [COMMANDS.md](COMMANDS.md) for command mode, shortcuts and literal password/confirmation input. Examples below also document internal service syntax.
+
 Au prompt normal, tapez `17 * 23`, `-2 * (3 + 4)` ou `0,1 + 0.2`, puis **ENVOI**.
 Les expressions simples déclenchent automatiquement le calcul local. **CALC** puis
 ENVOI ouvre une petite console : les nombres seuls y sont aussi acceptés. **RETOUR**

@@ -234,7 +234,7 @@ class StartupTests(unittest.TestCase):
             user=registry.resolve(username)
             instance = Mock(user=user, registry=registry, username=username, key="users/test", pending=None,
                             take_warning=lambda: "", context=lambda q: "",
-                            interested=lambda q: False)
+                            interested=lambda q: False, session_instructions=lambda: "")
             instance.saved_language.return_value = None
             memories.append(instance)
             return instance
@@ -248,7 +248,7 @@ class StartupTests(unittest.TestCase):
         def start(system, history, language, options, knowledge, **kwargs):
             output = Queue()
             try:
-                result = chat.call_answer(system, history, language, options, knowledge)
+                result = chat.call_answer(system, history, language, options, knowledge, **kwargs)
                 output.put((result, None))
             except (ValueError, TypeError, RuntimeError, chat.requests.RequestException) as error:
                 output.put((None, error))
@@ -395,7 +395,7 @@ class StartupTests(unittest.TestCase):
         self.assertIn("Reply in English", calls[0][0])
 
     def test_logout_returns_to_login_and_can_change_language_without_boot(self):
-        _, calls = self.run_session(login_keys() + b"LOGOUT" + fn(chat.K_ENVOI)
+        _, calls = self.run_session(login_keys() + b":LOGOUT" + fn(chat.K_ENVOI)
             + b"fr" + fn(chat.K_ENVOI) + b"Bonjour" + fn(chat.K_ENVOI))
         self.assertEqual(self.user_selections, 2)
         self.assertEqual(len(self.boot_screens), 1)
@@ -529,7 +529,7 @@ def test_real_user_selection_sommaire_logout_and_shared_identity(tmp_path, monke
     keys = fn(chat.K_SOMMAIRE) + fn(chat.K_SUITE) + name + fn(chat.K_ENVOI)
     if name:
         keys += language.encode() + fn(chat.K_ENVOI)
-    keys += fn(chat.K_SOMMAIRE) + b"LOGOUT" + fn(chat.K_ENVOI)
+    keys += fn(chat.K_SOMMAIRE) + b":LOGOUT" + fn(chat.K_ENVOI)
     keys += b"Bob" + fn(chat.K_ENVOI) + b"fr" + fn(chat.K_ENVOI)
     uart = FakeSerial(keys)
     memories = []

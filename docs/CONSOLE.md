@@ -1,5 +1,7 @@
 # Console de test sans Minitel
 
+> Terminal keyboard commands now use a leading colon. See [COMMANDS.md](COMMANDS.md) for command mode, shortcuts and literal password/confirmation input. Examples below also document internal service syntax.
+
 Le prototype personnel `3615 rose` dispose aussi de son atelier isolé :
 [ROSE.md](ROSE.md) (porte locale obligatoire, `scripts/rose_console.py`,
 dialogue simulé optionnel, conversations transitoires).
