@@ -11,11 +11,15 @@ conversation transcript, memory, printer history or prompt recall. Invalid input
 lists the six accepted positions. No conversation reset occurs.
 
 The progression deliberately jumps from 9 to 11: 11 adds randomness, not ability.
-Level 11 also appends the approved `config/intelligence_11_prompt.txt` to the
-ordinary conversation system instructions. It encourages deadpan bureaucratic
+Each level appends its own `config/intelligence_<level>_prompt.txt` to ordinary
+conversation instructions: 1 gives a direct short answer; 3 adds a simple
+explanation; 5 balances synthesis and context; 7 examines assumptions and trade-offs;
+9 applies expert judgment and second-order consequences. Higher levels improve
+selection and depth rather than automatically increasing length. None claims new
+knowledge, tool access or permission. Level 11 uses a stronger deadpan, opinionated
+and absurd style without a fixed example to copy. It encourages deadpan bureaucratic
 absurdity, unexpected opinions and 80–140-word replies, while explicitly retaining
-factual accuracy, privacy and all operational safeguards. Levels 1–9 keep their
-original prompt. Both position and model profile are captured before the worker
+factual accuracy, privacy and all operational safeguards. All levels retain the shared factual and personality rules. Both position and model profile are captured before the worker
 starts, so switching the dial cannot change an in-flight request's personality.
 The browser conversation preview follows the same rule. School and other
 operational stages never receive this suffix. Existing saved temperatures and
@@ -227,3 +231,22 @@ force-reset. A first `git switch` normally tracks the fetched remote branch.
 
 Physical CRT appearance, model availability, output quality and latency remain
 manual acceptance items. Do not merge to develop/main on offline evidence alone.
+
+## Rotating waiting tasks
+
+Ordinary terminal submissions select a curated task from
+`services/waiting_tasks.py`, in shuffled bags without immediate repeats.
+Examples include rebobinating the reasoning, aligning core memory and thawing a
+standby Cray. While a request remains pending, the UART owner replaces the task
+every two seconds using only the cached 34-cell status region; I:xx stays visible.
+No busy redraw, input clearing, full-screen refresh, additional API call or sleep
+is used for rotation. A result already queued takes priority over the next task.
+Cancellation, errors and deadlines end the sequence with the existing request
+lifecycle. These are explicitly display theatre, never actual provider telemetry.
+French task names are used on both terminal language settings, like machine
+operation labels. Fixed service commands and calculator-specific waiting text
+keep their own messages. The original per-personality loading setting remains
+available for those paths. Tests use a virtual clock and simulated UART, not real
+waiting or live provider calls. Physical acceptance: submit a slow ordinary prompt,
+verify the status changes about every two seconds, cancel with SOMMAIRE, then try
+a fast prompt and confirm there is no minimum display delay or leftover task.

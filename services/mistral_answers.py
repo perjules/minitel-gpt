@@ -214,7 +214,7 @@ def request_payload(history, language, model, web_search=True, knowledge="", *, 
             "completion_args": {"max_tokens": 700}}
 
 
-def answer(history, language, key, model, web_search=True, timeout=60, knowledge="", pronote=None, *, session_context="", profile=None, unhinged=False):
+def answer(history, language, key, model, web_search=True, timeout=60, knowledge="", pronote=None, *, session_context="", profile=None, unhinged=False, intelligence_level=None):
     """Public dial snapshot only; operational school routing stays unchanged."""
     if pronote is not None:
         try:
@@ -232,8 +232,12 @@ def answer(history, language, key, model, web_search=True, timeout=60, knowledge
             from pronote_answers import public_history
         history = public_history(history)
     payload = request_payload(history, language, model, web_search, knowledge, session_context=session_context)
-    if unhinged:
-        payload["instructions"] += "\n\n" + UNHINGED_PROMPT_FILE.read_text(encoding="utf-8")
+    level = intelligence_level if intelligence_level is not None else 11 if unhinged else None
+    if level is not None:
+        if type(level) is not int or level not in (1, 3, 5, 7, 9, 11):
+            raise ValueError("Invalid intelligence prompt level")
+        prompt = PROMPT_FILE.with_name(f"intelligence_{level}_prompt.txt")
+        payload["instructions"] += "\n\n" + prompt.read_text(encoding="utf-8")
     if profile is not None:
         payload["model"] = profile.model
         payload["completion_args"].update(profile.completion_args())

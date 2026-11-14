@@ -53,6 +53,7 @@ try:  # Support both systemd's direct script and package imports in tests.
         terminal_scrolling,
         user_services,
         videotex,
+        waiting_tasks,
     )
 except ImportError:
     # Direct systemd entry point: keep one identity for exception/session classes.
@@ -85,6 +86,7 @@ except ImportError:
         terminal_scrolling,
         user_services,
         videotex,
+        waiting_tasks,
     )
 
 try:
@@ -841,7 +843,7 @@ def call_answer(system_prompt, history, language, options, knowledge,
         result = mistral_answers.answer(history, language, MISTRAL_KEY,
                                         MISTRAL_MODEL, web_search, timeout, knowledge,
                                         **({"pronote": school} if school_request else {"profile": intelligence_profile,
-                                                                                       "unhinged": intelligence_level == 11}),
+                                                                                       "intelligence_level": intelligence_level}),
                                         **({"session_context": session_context} if session_context else {}))
         if memory is not None:
             memory.active()
@@ -943,15 +945,21 @@ def retour_requested(kind, code, typed):
     return False
 
 
-def wait_answer(t, pending, timeout, allow_retour=False, *, language=None):
+def wait_answer(t, pending, timeout, allow_retour=False, *, language=None, tasks=None):
     """Reset stops local waiting; provider work/billing may continue."""
     _, output, started = pending
     deadline = started + timeout
     typed = []
+    next_task = time.monotonic() + waiting_tasks.INTERVAL if tasks is not None else None
     while time.monotonic() < deadline:
         try:
             result, error = output.get_nowait()
         except Empty:
+            if next_task is not None and time.monotonic() >= next_task:
+                view = getattr(t, "view", None)
+                if isinstance(view, terminal_display.View):
+                    view.status(next(tasks))
+                next_task = time.monotonic() + waiting_tasks.INTERVAL
             kind, code = t.read_key(min(0.1, max(0, deadline - time.monotonic())))
             if allow_retour and retour_requested(kind, code, typed):
                 return None, 'retour'
@@ -2043,7 +2051,9 @@ def run_session(t):
                 calculator.candidate(question) and not calculator_blocked(mail, memory)
                 and not (isinstance(getattr(memory, "welcome", None), memory_session.onboarding.Session)
                          and memory.welcome.should_greet()))
-            t.waiting(calculator.content(language)["loading"] if calculator_request else loading_msg)
+            tasks = waiting_tasks.sequence() if not calculator_request and not fixed_command else None
+            t.waiting(calculator.content(language)["loading"] if calculator_request else
+                      next(tasks) if tasks is not None else loading_msg)
             # Do not pile up paid calls while a locally abandoned HTTP request
             # is still running. Its isolated queue is discarded when it ends.
             response = None
@@ -2058,7 +2068,8 @@ def run_session(t):
                 optional.update(keyboard_mode=True, fixed_command=fixed_command)
                 pending = start_answer(system_prompt, candidate, language, options, knowledge, **optional)
                 t._pending = pending
-                response, action = wait_answer(t, pending, options[2], allow_retour=calculator_request, language=language)
+                response, action = wait_answer(t, pending, options[2], allow_retour=calculator_request, language=language,
+                                               **({"tasks": tasks} if tasks is not None else {}))
                 if action == 'guide':
                     show_guide(t, language)
                     break

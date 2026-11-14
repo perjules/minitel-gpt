@@ -300,6 +300,7 @@ def test_pronote_routing_never_receives_dial_profile(dial, monkeypatch):
     assert answer.call_args.kwargs['pronote'] is school
     assert 'profile' not in answer.call_args.kwargs
     assert 'unhinged' not in answer.call_args.kwargs
+    assert 'intelligence_level' not in answer.call_args.kwargs
     assert answer.call_args.args[3] == chat.MISTRAL_MODEL
 
 
@@ -344,11 +345,12 @@ def test_school_backend_defensively_discards_profile_even_if_supplied(monkeypatc
     assert result == {'private': True}
     assert 'profile' not in answer.call_args.kwargs
     assert 'unhinged' not in answer.call_args.kwargs
+    assert 'intelligence_level' not in answer.call_args.kwargs
     assert answer.call_args.args[3] == 'base'
 
 
 @pytest.mark.parametrize('level', intelligence.LEVELS)
-def test_only_11_appends_approved_prompt_to_public_request(dial, monkeypatch, level):
+def test_each_level_appends_its_approved_prompt_to_public_request(dial, monkeypatch, level):
     dial.set_level(level)
     monkeypatch.setattr(chat, 'PROVIDER', 'mistral')
     monkeypatch.setattr(chat, 'MISTRAL_KEY', 'synthetic-key')
@@ -360,14 +362,15 @@ def test_only_11_appends_approved_prompt_to_public_request(dial, monkeypatch, le
                               'fr', ('conversations', False, 60), '')
     assert result['turn']['content'] == 'Bonjour.'
     payload = post.call_args.kwargs['json']
-    suffix = mistral_answers.UNHINGED_PROMPT_FILE.read_text(encoding='utf-8')
+    suffix = mistral_answers.PROMPT_FILE.with_name(f'intelligence_{level}_prompt.txt').read_text(encoding='utf-8')
     base = mistral_answers.request_payload([{'role': 'user', 'content': 'Que penses-tu de Tesla ?'}],
                                           'fr', dial.resolve().model, False)['instructions']
-    assert payload['instructions'] == base + ('\n\n' + suffix if level == 11 else '')
+    assert payload['instructions'] == base + '\n\n' + suffix
     assert payload['model'] == dial.resolve().model
     assert payload['completion_args']['temperature'] == dial.resolve().temperature
     assert 'FACTUAL AND OPERATIONAL RULES' in payload['instructions']
-    assert '80 à 140 mots' in suffix
+    if level == 11:
+        assert '80 à 140 mots' in suffix
 
 
 def test_browser_preview_uses_same_level_11_prompt(dial, console, monkeypatch):
