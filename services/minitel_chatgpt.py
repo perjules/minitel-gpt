@@ -2208,11 +2208,14 @@ def main():
     def stop(_signum, _frame):
         raise KeyboardInterrupt
     previous = signal.signal(signal.SIGTERM, stop)
+    from services import intelligence_hardware
+    intelligence_hardware.start(intelligence.controller)
     try:
         terminal_link.serve(Term, run)
     except KeyboardInterrupt:
         pass  # SIGTERM/Ctrl-C already ran session and terminal cleanup.
     finally:
+        intelligence_hardware.stop()
         signal.signal(signal.SIGTERM, previous)
 
 
