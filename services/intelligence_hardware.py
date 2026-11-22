@@ -12,9 +12,11 @@ from . import config_store
 
 log = logging.getLogger(__name__)
 LEVELS = (1, 3, 5, 7, 9, 11)
-# Observed endpoint at maximum: ~3.298 V. Equal-voltage bands are provisional.
+# Physically validated v1: equal-voltage bands, 30 mV hysteresis, 400 ms dwell.
 MAX_VOLTAGE = 3.3
 ADDRESS = "0x48"
+HYSTERESIS_V = 0.03
+DWELL_SECONDS = 0.4
 
 
 def decode(word):
@@ -26,6 +28,17 @@ def decode(word):
 def band(volts):
     index = min(5, max(0, int(volts / MAX_VOLTAGE * 6)))
     return LEVELS[index]
+
+
+def stable_index(volts, current):
+    """Match the physically tested level_test.py Schmitt-style thresholds."""
+    target = min(5, max(0, int(volts / MAX_VOLTAGE * 6)))
+    if current is None or target == current:
+        return target
+    width = MAX_VOLTAGE / 6
+    if target > current:
+        return target if volts >= (current + 1) * width + HYSTERESIS_V else current
+    return target if volts <= current * width - HYSTERESIS_V else current
 
 
 def _i2c(args):
@@ -40,7 +53,7 @@ def sample():
     volts = raw * 4.096 / 32768
     if not -0.05 <= volts <= 3.4:
         raise ValueError("ADC sample outside expected wheel voltage")
-    return band(max(0, volts))
+    return max(0, volts)
 
 
 class Wheel:
@@ -83,12 +96,14 @@ class Wheel:
                     failures = 0
                     self._stop.wait(.5)
                     continue
-                level = sample()
+                volts = sample()
+                target = stable_index(volts, LEVELS.index(last) if last is not None else None)
+                level = LEVELS[target]
                 failures = 0
                 now = time.monotonic()
                 if level != candidate:
                     candidate, since = level, now
-                elif level != last and now - since >= .4:
+                elif level != last and now - since >= DWELL_SECONDS:
                     # Set selection before advertising hardware authority.
                     self.controller.set_level(level)
                     last = level
