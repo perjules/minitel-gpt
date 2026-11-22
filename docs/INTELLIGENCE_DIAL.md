@@ -268,8 +268,8 @@ remain the defaults, so deployments preserve edits without dirtying the checkout
 
 The optional in-process `services/intelligence_hardware.py` reader polls ADS1115
 A0 on I²C bus 1 at address `0x48`. The wheel has measured endpoints of
-approximately 0–3.298 V. Equal-voltage six-way quantization is **provisional**
-pending a measured sweep. A candidate must remain stable for 0.4 s before
+approximately 0–3.298 V. Equal-voltage six-way quantization is the physically tested v1 mapping.
+A 30 mV hysteresis margin prevents switching near band boundaries, and a candidate must remain stable for 0.4 s before
 changing the controller; active requests retain their immutable profile.
 
 The terminal process starts and stops the polling thread. It requires
