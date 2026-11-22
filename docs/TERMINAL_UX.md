@@ -304,7 +304,7 @@ an outgoing draft before any deliberate send. No deployment/push is automatic.
 
 | Check | Expected observation |
 | --- | --- |
-| Power-on/boot/30-second continuation | Original startup; no repeated boot after SOMMAIRE |
+| Power-on/boot/6-second continuation | Original startup; no repeated boot after SOMMAIRE |
 | Login and long chat result | Frame restored after dense-page clear; correct page count and input cursor |
 | Short answer followed by another short answer | Right-to-left, bottom-to-top erasure; no old tail |
 | Dense answer followed by a short answer; MAIL list/read/reply | Fast full clear and rebuilt frame; new content starts on blank cells |

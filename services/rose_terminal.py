@@ -5,7 +5,7 @@ import time
 from contextlib import contextmanager
 from queue import Empty
 
-from . import rose, terminal_link, videotex
+from . import rose, terminal_commands, terminal_link, videotex
 
 log = logging.getLogger(__name__)
 
@@ -127,6 +127,7 @@ def read_field(term, secret=False, safeword="", paging=False):
 
 def _read_field(term, secret, safeword, paging, view=None):
     chat = api()
+    mode = terminal_commands.InputMode()
     buf = []
     overflow = False
     if view is None:
@@ -169,8 +170,33 @@ def _read_field(term, secret, safeword, paging, view=None):
                 if rose.normalized(text) in ("RETOUR", "SOMMAIRE"):
                     return None, rose.normalized(text).lower()
                 return text, "submit"
+            if safeword and text.strip().casefold() == safeword.casefold():
+                return text, "safeword"
+            if safeword:
+                kind, parsed = mode.submit(text)
+                if kind in {"prompt", "empty"}:
+                    buf.clear()
+                    terminal_commands.prompt(term, kind == "prompt")
+                    continue
+                if kind == "command":
+                    word = rose.normalized(parsed)
+                    if word in {"AIDE", "GUIDE"}:
+                        return parsed, "help"
+                    if word in {"SUITE", "SUIVANT", "PRECEDENT"} and view is not None:
+                        buf.clear()
+                        view.move(-1 if word == "PRECEDENT" else 1)
+                        continue
+                    if word in {"Q", "QUITTER", "RETOUR", "LOGOUT", "SOMMAIRE"}:
+                        return None, "sommaire" if word == "SOMMAIRE" else "retour"
+                    buf.clear()
+                    if view is not None:
+                        view.input()
+                        view.status(terminal_commands.UNKNOWN)
+                    else:
+                        term.line(terminal_commands.UNKNOWN)
+                    continue
             reason = rose.stop_reason(text, safeword)
-            if view is not None and not paging and reason is None and rose.normalized(text) in (
+            if view is not None and not safeword and not paging and reason is None and rose.normalized(text) in (
                     "SUITE", "SUIVANT", "PRECEDENT"):
                 buf.clear()
                 view.move(-1 if rose.normalized(text) == "PRECEDENT" else 1)
@@ -459,7 +485,7 @@ def _run(term, alias, model, timeout=30, row_delay=0.32, test=False):
                             framed=True, safeword=session.safeword)
             while True:
                 text, action = read_field(term, safeword=session.safeword)
-                if action == "help" or (action == "submit" and rose.normalized(text) == "AIDE"):
+                if action == "help":
                     display(term, "Mot d'arrêt : " + session.safeword +
                             "\n\nRETOUR / SOMMAIRE : quitter.\nLe mot d'arrêt quitte immédiatement.\nFrançais uniquement.",
                             framed=True, safeword=session.safeword)

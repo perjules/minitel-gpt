@@ -220,7 +220,7 @@ class ExpansionTests(unittest.TestCase):
         self.assertIn("Test-2", session.prepare("SUIVANT")["display"])
         self.assertIn("Test-1", session.prepare("PRECEDENT")["display"])
         self.assertIn("Test-0", session.prepare("PRECEDENT")["display"])
-        self.assertIn("NOTES / MOYENNES", session.prepare("PRECEDENT")["display"])
+        self.assertIn(":NOTES / :MOYENNES", session.prepare("PRECEDENT")["display"])
         self.assertFalse(session.grade_view)
         self.assertTrue(session.mode)
         session.prepare("QUITTER")

@@ -169,7 +169,7 @@ def test_main_loop_stream_request_is_isolated_and_uses_configured_adapter(monkey
     monkeypatch.setattr(chat.llm_streaming, "mistral", factory)
     monkeypatch.setattr(chat.stream_sources, "show", display)
     helper = startup.StartupTests()
-    helper.run_session(startup.login_keys("fr") + submitted("STREAM Explain Jacquard") + submitted("FOLLOW UP"),
+    helper.run_session(startup.login_keys("fr") + submitted(":STREAM Explain Jacquard") + submitted("FOLLOW UP"),
                        boot_text="BOOT")
     assert factory.call_count == 1
     assert factory.call_args.args[0] == [{"role": "user", "content": "Explain Jacquard"}]
@@ -187,7 +187,7 @@ def test_main_loop_process_diagnostic_is_local_and_has_no_history(monkeypatch):
     monkeypatch.setattr(chat.stream_sources, "ProcessSource", factory)
     monkeypatch.setattr(chat.stream_sources, "show", display)
     helper = startup.StartupTests()
-    _, calls = helper.run_session(startup.login_keys("fr") + submitted("TEST STREAM") + submitted("FOLLOW UP"))
+    _, calls = helper.run_session(startup.login_keys("fr") + submitted(":TEST STREAM") + submitted("FOLLOW UP"))
     assert factory.call_count == 1 and "--stream-demo" in factory.call_args.args[0]
     assert [call[1][-1]["content"] for call in calls] == ["FOLLOW UP"]
     assert "TEST STREAM" not in str(helper.memories[0].record.mock_calls)

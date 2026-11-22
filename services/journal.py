@@ -11,7 +11,13 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from . import command_shortcuts, gmail_mail, journal_store, persistent_memory
+from . import (
+    command_shortcuts,
+    gmail_mail,
+    journal_store,
+    persistent_memory,
+    terminal_commands,
+)
 
 JournalError = journal_store.JournalError
 IDLE_SECONDS = 300
@@ -25,13 +31,14 @@ SHORTCUTS = {
 }
 HELP = (
     "Texte libre : proposer un ajout.\n"
-    "T: texte exact sans IA\n"
-    "M: modifier / E: enregistrer\n"
-    "L: jj/mm/aaaa / AUJOURD'HUI\n"
-    "S: effacer aujourd'hui / A: annuler\n"
-    "P: mot de passe / Q: quitter\n"
-    "Commandes complètes aussi acceptées."
+    ":T texte exact sans IA\n"
+    ":M modifier / :E enregistrer\n"
+    ":L jj/mm/aaaa / :AUJOURD'HUI\n"
+    ":S effacer aujourd'hui / :A annuler\n"
+    ":P mot de passe / :Q quitter\n"
+    ": seul : prochaine saisie = commande."
 )
+
 DISCLOSURE = (
     "Journal personnel chiffré.\n"
     "La rédaction assistée transmet vos instructions et le texte concerné à Mistral.\n"
@@ -300,7 +307,7 @@ class Session:
         action = (
             "AJOUT" if draft["operation"] == "append" else "REMPLACEMENT DE LA JOURNÉE"
         )
-        return f"Brouillon — {action}\n{draft['day']}\n\n{draft['text']}\n\nE: enregistrer / M: modifier / A: annuler"
+        return f"Brouillon — {action}\n{draft['day']}\n\n{draft['text']}\n\n:E enregistrer / :M modifier / :A annuler"
 
     def acknowledge(self, token=None):
         with self.lock:
@@ -325,6 +332,51 @@ class Session:
         if "aujourd" in folded:
             return self.date()
         return None
+
+    def keyboard(self, text):
+        """Terminal input boundary; passwords and pending confirmations stay literal."""
+        if not isinstance(text, str) or len(text) > 2000:
+            return self.result("Saisie trop longue (2000 caractères maximum).")
+        if self.secret:
+            return self.handle(text)
+        mode = getattr(self, "command_input", None)
+        if mode is None:
+            mode = self.command_input = terminal_commands.InputMode()
+        kind, value = mode.submit(text)
+        if kind in {"prompt", "empty"}:
+            return self.result("COMMANDE : prochaine saisie" if kind == "prompt" else "Commande vide. :AIDE")
+        if kind == "command":
+            try:
+                value = terminal_commands.expand_shortcut(value, SHORTCUTS)
+            except terminal_commands.CommandError as error:
+                return self.result(str(error))
+            word = value.upper()
+            exact = {"QUITTER", "SOMMAIRE", "LOGOUT", "RETOUR", "AIDE", "GUIDE", "ANNULER",
+                     "MOT DE PASSE", "ENREGISTRER", "EFFACER AUJOURD'HUI", "LIRE", "DERNIER",
+                     "AUJOURD'HUI", "MODIFIER"}
+            if word not in exact and not re.match(r"^(?:LIRE|MODIFIER)\s+.+|^TEXTE\s*:", word, re.DOTALL):
+                return self.result(terminal_commands.UNKNOWN)
+            return self.handle(value)
+        if self.delete_pending:
+            return self.handle(text)
+        if not self.turn_lock.acquire(blocking=False):
+            return self.result("Requête précédente en cours.")
+        try:
+            with self.lock:
+                self.check()
+                self.touch()
+                self.delete_pending = None
+                epoch, current = self.epoch, self.date()
+            output = self.model.draft(text, "")
+            with self.lock:
+                self.check()
+                if epoch != self.epoch:
+                    raise JournalError("Réponse abandonnée. Journal verrouillé.")
+                return self.preview(output, "append", current.isoformat())
+        except (JournalError, persistent_memory.MemoryProblem) as error:
+            return self.result(str(error))
+        finally:
+            self.turn_lock.release()
 
     def handle(self, text):
         if not isinstance(text, str) or len(text) > 2000:
@@ -417,7 +469,7 @@ class Session:
                 return self.result(
                     "Effacer TOUTE la journée du "
                     + self.delete_pending
-                    + " ?\nOUI / A: annuler"
+                    + " ?\nOUI / :A annuler"
                 )
             if command in {"lire", "dernier"}:
                 return self.result(self.read_day())
@@ -445,7 +497,7 @@ class Session:
                 )
             if command == "modifier":
                 return self.result(
-                    "M: suivi de vos corrections (ou MODIFIER). T: propose un ajout exact."
+                    ":M suivi de vos corrections (ou :MODIFIER). :T propose un ajout exact."
                 )
             if reading:
                 epoch, current = self.epoch, self.date()

@@ -1,7 +1,7 @@
 """Exercise startup through the real UART key decoder and conversation loop."""
 import unittest
 from collections import deque
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from pathlib import Path
 from queue import Queue
 from tempfile import TemporaryDirectory
@@ -29,7 +29,7 @@ def test_real_decoder_auto_boot_continues_despite_clock_adjustment_and_quiet_sta
     """A live but busy terminal answers status once, then stays quiet through boot."""
     now = [0.0]
     monkeypatch.setattr(chat.time, "monotonic", lambda: now[0])
-    monkeypatch.setattr(chat.time, "time", lambda: 1_000_000 + now[0] + (clock_jump if now[0] >= 10 else 0))
+    monkeypatch.setattr(chat.time, "time", lambda: 1_000_000 + now[0] + (clock_jump if now[0] >= 2 else 0))
     monkeypatch.setattr(chat.time, "sleep", lambda seconds: now.__setitem__(0, now[0] + seconds))
 
     class IdleSerial:
@@ -48,7 +48,7 @@ def test_real_decoder_auto_boot_continues_despite_clock_adjustment_and_quiet_sta
                 self.status_sent = True
                 self.keys.extend(b"\x1b\x3a\x71\x40")
                 return bytes([self.keys.popleft()])
-            if now[0] >= 32:
+            if now[0] >= 8:
                 raise EndOfInput
             now[0] += .1  # A real bounded serial read with no keyboard input.
             return b""
@@ -72,12 +72,12 @@ def test_real_decoder_auto_boot_continues_despite_clock_adjustment_and_quiet_sta
     with pytest.raises(EndOfInput):
         chat.run(term)
     assert uart.countdown_at is not None
-    assert uart.clears[-1] - uart.countdown_at == pytest.approx(30, abs=.12)
+    assert uart.clears[-1] - uart.countdown_at == pytest.approx(6, abs=.12)
     assert "MINITELGPT WELCOME" in screen_text(uart.output)
     assert "Nom / name" in screen_text(uart.output)
     assert term._presence_enabled == status_support
     assert term._presence_seen == status_support
-    assert all(instant >= uart.countdown_at + 30 for instant in uart.probes)
+    assert all(instant >= uart.countdown_at + 6 for instant in uart.probes)
     assert render_videotex(uart.output)[1] is False
 
 
@@ -224,7 +224,7 @@ def login_keys(language="en"):
 
 class StartupTests(unittest.TestCase):
     def run_session(self, keys, boot_text=None, boot_error=None, preset=None,
-                    factual_reply=None):
+                    factual_reply=None, normal_exit=False):
         uart = FakeSerial(keys)
         calls, memories = [], []
 
@@ -234,7 +234,7 @@ class StartupTests(unittest.TestCase):
             user=registry.resolve(username)
             instance = Mock(user=user, registry=registry, username=username, key="users/test", pending=None,
                             take_warning=lambda: "", context=lambda q: "",
-                            interested=lambda q: False)
+                            interested=lambda q: False, session_instructions=lambda: "")
             instance.saved_language.return_value = None
             memories.append(instance)
             return instance
@@ -248,7 +248,7 @@ class StartupTests(unittest.TestCase):
         def start(system, history, language, options, knowledge, **kwargs):
             output = Queue()
             try:
-                result = chat.call_answer(system, history, language, options, knowledge)
+                result = chat.call_answer(system, history, language, options, knowledge, **kwargs)
                 output.put((result, None))
             except (ValueError, TypeError, RuntimeError, chat.requests.RequestException) as error:
                 output.put((None, error))
@@ -274,11 +274,14 @@ class StartupTests(unittest.TestCase):
             snapshot()
 
         real_read_key = chat.Term.read_key
+        real_monotonic = chat.time.monotonic
+        idle_elapsed = [0.0]
 
         def read_key(term, timeout):
             try:
                 return real_read_key(term, timeout)
             except ReadTimeout:
+                idle_elapsed[0] += timeout
                 return 'timeout', None
 
         response = Mock()
@@ -295,6 +298,7 @@ class StartupTests(unittest.TestCase):
                 patch.object(chat.memory_session, "MemorySession", side_effect=memory),
                 patch.object(chat.serial, "Serial", return_value=uart),
                 patch.object(chat.time, "sleep"),
+                patch.object(chat.time, "monotonic", lambda: real_monotonic() + idle_elapsed[0]),
                 patch.object(chat.Term, "read_key", read_key),
                 patch.object(chat.terminal_display.View, "install", capture_install),
                 patch.object(chat.terminal_display.View, "move", capture_move),
@@ -315,7 +319,7 @@ class StartupTests(unittest.TestCase):
                 patch.object(chat, "show_boot", boot_screen),
                 patch.object(chat, "get_ip", return_value="192.0.2.1"),
                 patch.object(chat.log, "info"),
-                self.assertRaises(EndOfInput),
+                nullcontext() if normal_exit else self.assertRaises(EndOfInput),
             )
             for context in contexts:
                 stack.enter_context(context)
@@ -358,7 +362,7 @@ class StartupTests(unittest.TestCase):
                 self.assertEqual(calls[0][1], [{"role": "user", "content": "Hello"}])
 
     def test_boot_timeout_continues_login_and_language_timeout_defaults_to_french(self):
-        screens, calls = self.run_session([*fn(chat.K_SOMMAIRE), None, None,
+        screens, calls = self.run_session([*fn(chat.K_SOMMAIRE), *([None] * 6), None,
                                           *b"Bonjour", *fn(chat.K_ENVOI)])
         self.assertIn("Choose language", screens[2])
         self.assertEqual(len(calls), 1)
@@ -395,7 +399,7 @@ class StartupTests(unittest.TestCase):
         self.assertIn("Reply in English", calls[0][0])
 
     def test_logout_returns_to_login_and_can_change_language_without_boot(self):
-        _, calls = self.run_session(login_keys() + b"LOGOUT" + fn(chat.K_ENVOI)
+        _, calls = self.run_session(login_keys() + b":LOGOUT" + fn(chat.K_ENVOI)
             + b"fr" + fn(chat.K_ENVOI) + b"Bonjour" + fn(chat.K_ENVOI))
         self.assertEqual(self.user_selections, 2)
         self.assertEqual(len(self.boot_screens), 1)
@@ -498,21 +502,24 @@ class StartupTests(unittest.TestCase):
             with patch.object(chat.time, "sleep"), patch.object(term, "read_key", wraps=term.read_key) as read:
                 if key is None:
                     read.return_value = ("timeout", None)
-                self.assertEqual(chat.show_boot(term, "fr"), result)
+                    with patch.object(chat.time, "monotonic", side_effect=[0, 0, 6, 6]):
+                        self.assertEqual(chat.show_boot(term, "fr"), result)
+                else:
+                    self.assertEqual(chat.show_boot(term, "fr"), result)
             self.assertTrue(bytes(uart.output).endswith(chat.SCROLL_OFF))
 
-    def test_other_keys_do_not_restart_thirty_second_boot_deadline(self):
+    def test_other_keys_do_not_restart_six_second_boot_deadline(self):
         term = Mock()
         now = [0]
         timeouts = []
         def read(timeout):
             timeouts.append(timeout)
-            now[0] += 10
+            now[0] += 2
             return 'char', ord('x')
         term.read_key.side_effect = read
         with patch.object(chat.time, "monotonic", side_effect=lambda: now[0]):
             self.assertEqual(chat.show_boot(term, "fr"), "done")
-        self.assertEqual(timeouts, [30, 20, 10])
+        self.assertEqual(timeouts, [1, 1, 1])
 
     def test_status_acknowledgements_do_not_contaminate_keys_or_chat(self):
         _, calls = self.run_session(fn(chat.K_SOMMAIRE) + b"\x1b\x3a\x73\x42" + fn(chat.K_SUITE)
@@ -529,7 +536,7 @@ def test_real_user_selection_sommaire_logout_and_shared_identity(tmp_path, monke
     keys = fn(chat.K_SOMMAIRE) + fn(chat.K_SUITE) + name + fn(chat.K_ENVOI)
     if name:
         keys += language.encode() + fn(chat.K_ENVOI)
-    keys += fn(chat.K_SOMMAIRE) + b"LOGOUT" + fn(chat.K_ENVOI)
+    keys += fn(chat.K_SOMMAIRE) + b":LOGOUT" + fn(chat.K_ENVOI)
     keys += b"Bob" + fn(chat.K_ENVOI) + b"fr" + fn(chat.K_ENVOI)
     uart = FakeSerial(keys)
     memories = []
@@ -568,3 +575,31 @@ def test_real_user_selection_sommaire_logout_and_shared_identity(tmp_path, monke
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.parametrize('height', [8, 30])
+def test_boot_countdown_updates_only_digits_in_short_and_scrolled_screens(monkeypatch, height):
+    clock = [0.0]
+    monkeypatch.setattr(chat.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(chat.time, 'sleep', lambda _: None)
+    uart = FakeSerial([])
+    term = chat.Term(uart)
+    snapshots = []
+    before = [0]
+    def read(timeout):
+        snapshots.append(render_videotex(uart.output)[0])
+        assert 0 < timeout <= 1
+        clock[0] += timeout
+        if not before[0]:
+            before[0] = len(uart.output)
+        return 'timeout', None
+    monkeypatch.setattr(term, 'read_key', read)
+    rows = [f'Boot row {n}' for n in range(height)] + [chat.UI['fr']['boot'][-1]]
+    assert chat.show_boot(term, 'fr', rows) == 'done'
+    row = min(len(rows), 23) - 1
+    for seconds, screen in zip(range(6, 0, -1), snapshots, strict=True):
+        assert screen[row].strip() == chat.BOOT_CONTINUE_PROMPT.replace('6 s', f'{seconds} s')
+        assert screen[:row] == snapshots[0][:row]
+        assert screen[row + 1:] == snapshots[0][row + 1:]
+    assert clock[0] == 6
+    assert b'\x0c' not in uart.output[before[0]:]

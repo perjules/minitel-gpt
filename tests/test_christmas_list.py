@@ -280,6 +280,6 @@ def test_api_diagnostic_never_exposes_provider_error_payload(monkeypatch, caplog
 def test_display_separates_title_and_last_entry_from_surrounding_text(household):
     current, _ = session(household("Alice"))
     assert "LISTE AU PÈRE NOËL - Alice\n\nPublique" in current.display()
-    assert "(Liste vide)\n\nA:" in current.display()
+    assert "(Liste vide)\n\n:A" in current.display()
     current.handle("T: Une loupe")
-    assert "1. [ ] Une loupe\n\nA:" in current.display()
+    assert "1. [ ] Une loupe\n\n:A" in current.display()

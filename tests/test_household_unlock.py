@@ -171,7 +171,7 @@ def test_timeout_and_unavailable_echo_never_unlock_or_restore_secret_typeahead(m
 def test_real_uart_unlock_save_inventory_relock_and_next_session(monkeypatch):
     subject = selected("")
     subject.model.plan.return_value = {"operation": "save", "kind": "fact", "text": "The household owns a Thermomix."}
-    keys = b"".join(submitted(q) for q in ("ACTIVER MEMOIRE", PASSWORD, "RETIENS le Thermomix", "MEMOIRE GLOBALE",
+    keys = b"".join(submitted(q) for q in (":ACTIVER MEMOIRE", PASSWORD, ":RETIENS le Thermomix", ":MEMOIRE GLOBALE",
                                           "DESACTIVER MEMOIRE", "RETIENS encore le Thermomix")) + fn(chat.K_SOMMAIRE)
     serial = RoutingSerial(keys)
     serial.keys.append(EndOfInput())

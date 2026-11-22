@@ -54,6 +54,7 @@ try:
         gmail_mail,
         gmail_oauth,
         home_config,
+        intelligence,
         io_limits,
         journal,
         journal_page,
@@ -108,7 +109,7 @@ except ImportError:
     import user_reports
     import user_services
 
-    from services import home_config, journal, journal_page, journal_store
+    from services import home_config, intelligence, journal, journal_page, journal_store
 
 PROJ_DIR = Path(__file__).parent.parent
 ASSETS_DIR = PROJ_DIR / "assets"
@@ -616,6 +617,7 @@ def llm_answer(system_prompt, user_message, knowledge="", selected=None):
     """Interroge le LLM configuré comme le ferait le terminal (system + question).
     Retourne le texte de la réponse."""
     import requests
+    level, profile = intelligence.snapshot(with_level=True)
     history = [{"role": "user", "content": user_message}]
     provider = llm_provider()
     session_context = (selected.session_instructions()
@@ -676,7 +678,7 @@ def llm_answer(system_prompt, user_message, knowledge="", selected=None):
         result = mistral_answers.answer(history, "fr", key, mistral_model(),
                                         options[1], options[2], knowledge,
                                         **({"pronote": school} if pronote_answers.school_tool_request(
-                                            user_message, school.config()["children"]) and school.tools() else {}),
+                                            user_message, school.config()["children"]) and school.tools() else {"profile": profile, "intelligence_level": level}),
                                         **({"session_context": session_context} if session_context else {}))
         if selected is not None:
             selected.private_turn = bool(result.get("private"))
@@ -753,6 +755,11 @@ textarea{resize:vertical;font-size:.85em;line-height:1.5}
 .btn-p{background:var(--accent);color:#06201d}.btn-p:hover{background:var(--accent-d)}
 .btn-s{background:transparent;color:var(--accent);border:1px solid var(--accent)}.btn-s:hover{background:#16302e}
 .btn-d{background:transparent;color:var(--danger);border:1px solid var(--danger)}.btn-d:hover{background:#2a1414}
+.dial-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px}
+.dial-grid fieldset{min-width:0;margin:0;border:1px solid var(--border);border-radius:6px;padding:12px}
+.dial-grid input{width:100%;padding:10px;font-size:15px}
+.dial-grid fieldset:has([id^=dial-prompt-panel]:not([hidden])){grid-column:1/-1}
+.dial-grid textarea{min-height:18rem}
 .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .toolbar select{flex:1;min-width:180px}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px}
@@ -827,6 +834,55 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 
 <!-- PERSONNALITES (editeur) -->
 <section class="panel {{'active' if section=='ai'}}" id=ai>
+  <div class=block>
+    <h2>Intelligence</h2>
+    <p>Six positions du bouton, de 1 à 11. Conversation Mistral uniquement ; les opérations gardent leurs réglages dédiés. Le modèle global reste utilisé par les autres tâches et le mode de secours.</p>
+    <p class=sub>Position actuelle : {{dial_indicator}}. Enregistrement immédiat, sans redémarrage. Modèles manuels : vérifiez leur disponibilité avec le catalogue Mistral ci-dessous. Raisonnement : défaut fournisseur, ou valeur explicitement prise en charge par le modèle.</p>
+    {% if dial_error %}<p role=alert>{{dial_error}}</p>{% endif %}
+    <form method=POST action=/save-intelligence-wheel>
+      <input type=hidden name=csrf value="{{csrf_token()}}">
+      <label><input type=checkbox name=enabled value=1 {{'checked' if dial_wheel_enabled else ''}}>
+        Activer la molette physique (si détectée)</label>
+      <button class="btn btn-s" type=submit>Enregistrer la molette</button>
+      <p class=sub>Molette active : les commandes :I # sont bloquées. Désactivée ou absente : :I # fonctionne.</p>
+    </form>
+    <form method=POST action=/save-intelligence>
+      <input type=hidden name=csrf value="{{csrf_token()}}">
+      <div class=dial-grid>
+      {% for level, profile in dial_profiles.items() %}
+      <fieldset><legend>{{level}} — {{dial_labels[level]}}</legend>
+        <label for="dial-model-{{level}}">Modèle</label>
+        <input type=text id="dial-model-{{level}}" name="model_{{level}}" value="{{profile.model}}" maxlength=200 required>
+        <label for="dial-effort-{{level}}">Raisonnement</label>
+        <select id="dial-effort-{{level}}" name="effort_{{level}}">
+        {% for effort in ['', 'none', 'low', 'medium', 'high'] %}
+          <option value="{{effort}}" {{'selected' if profile.reasoning_effort==effort}}>{{effort or 'Défaut fournisseur'}}</option>
+        {% endfor %}
+        </select>
+        <label for="dial-temperature-{{level}}">Température (0–1.5)</label>
+        <input type=number id="dial-temperature-{{level}}" name="temperature_{{level}}" min=0 max=1.5 step=0.01 value="{{profile.temperature}}" required>
+        <button type=button class="btn btn-s" aria-expanded=false aria-controls="dial-prompt-panel-{{level}}" onclick="const p=document.getElementById('dial-prompt-panel-{{level}}');p.hidden=!p.hidden;this.setAttribute('aria-expanded',String(!p.hidden))">Voir / modifier le prompt</button>
+        <div id="dial-prompt-panel-{{level}}" hidden>
+          <p class=sub>Instructions ajoutées à la personnalité commune pour ce niveau. Application à la prochaine requête.</p>
+          {% if dial_prompt_error %}<p role=alert>{{dial_prompt_error}}</p>{% else %}
+          <label for="dial-prompt-{{level}}">Prompt Intelligence {{level}}</label>
+          <textarea id="dial-prompt-{{level}}" name=prompt form="dial-prompt-form-{{level}}" rows=14 maxlength=16000 required>{{dial_prompts[level]}}</textarea>
+          <input type=hidden name=revision form="dial-prompt-form-{{level}}" value="{{dial_prompt_revisions[level]}}">
+          <button type=submit class="btn btn-p" form="dial-prompt-form-{{level}}">Enregistrer ce prompt</button>
+          <button type=submit class="btn btn-s" form="dial-prompt-form-{{level}}" name=restore value=1 formnovalidate>Restaurer ce prompt par défaut</button>
+          {% endif %}
+        </div>
+      </fieldset>
+      {% endfor %}
+      </div>
+      <p class=sub>11 reprend par défaut le modèle et le raisonnement de 9, avec température 1.1 expérimentale. Aucun changement de top_p.</p>
+      <button class="btn btn-p" type=submit>Enregistrer Intelligence</button>
+      <button class="btn btn-s" type=submit name=restore value=1 formnovalidate>Restaurer les six profils par défaut</button>
+    </form>
+    {% for level in dial_profiles %}
+    <form id="dial-prompt-form-{{level}}" method=POST action="/intelligence-prompt/{{level}}"><input type=hidden name=csrf value="{{csrf_token()}}"></form>
+    {% endfor %}
+  </div>
   <div class=block>
     <h2>Fournisseur, modèle et clés API</h2>
     <p>Fournisseur enregistré : <b>{{provider}}</b></p>
@@ -1403,8 +1459,27 @@ def index():
     lines = int(lines) if lines in {"40", "100", "200"} else 40
     recent_log = log_tail("chatgpt")
     flash = session.pop("flash", None); flash_ok = session.pop("flash_ok", False)
+    dial_error = ""
+    try:
+        dial_profiles = intelligence.controller.profiles()
+    except (config_store.InvalidConfig, config_store.StorageFailure, OSError) as error:
+        dial_profiles = intelligence.defaults()
+        dial_error = str(error)
+    try:
+        dial_wheel_enabled = intelligence.controller.wheel_enabled()
+    except (ValueError, intelligence.config_store.StorageFailure, OSError) as error:
+        dial_wheel_enabled = False
+        dial_error = str(error)
+    dial_prompts, dial_prompt_error = {}, ""
+    try:
+        dial_prompts = {n: intelligence.load_prompt(n) for n in intelligence.LEVELS}
+    except (ValueError, intelligence.config_store.StorageFailure, OSError) as error:
+        dial_prompt_error = str(error)
     return render_template_string(
-        ADMIN_HTML, service_cards=service_cards(), journal=journal, lines=lines,
+        ADMIN_HTML, dial_prompts=dial_prompts, dial_prompt_error=dial_prompt_error,
+        dial_prompt_revisions={n: intelligence.prompt_revision(text) for n, text in dial_prompts.items()},
+        dial_profiles=dial_profiles, dial_indicator=intelligence.indicator(), dial_wheel_enabled=dial_wheel_enabled,
+        dial_labels=intelligence.LABELS, dial_error=dial_error, service_cards=service_cards(), journal=journal, lines=lines,
         diagnostic_log=recent_log if journal == "chatgpt" and lines == 40 else log_tail(journal, lines), provision_status=svc_status("wifi-manager"),
         previous=previous_release(), branch_preview=session.get("branch_preview"),
         checked_at=session.get("update_checked_at", "jamais"), section=section, presets=presets, knowledge=all_knowledge(),
@@ -1725,6 +1800,54 @@ def available_models():
         return jsonify(ok=True, models=model_catalogue.models(provider, key))
     except model_catalogue.CatalogueError as error:
         return jsonify(ok=False, error=str(error)), 502
+
+
+@app.route("/intelligence-prompt/<int:level>", methods=["POST"])
+@require_login
+def save_intelligence_prompt(level):
+    if level not in intelligence.LEVELS:
+        abort(404)
+    try:
+        intelligence.save_prompt(level, request.form.get("prompt", ""),
+                                 request.form.get("revision", ""), restore=request.form.get("restore") == "1")
+    except (ValueError, intelligence.config_store.StorageFailure, OSError) as error:
+        session["flash"], session["flash_ok"] = "Prompt non enregistré : " + str(error), False
+    else:
+        session["flash"], session["flash_ok"] = f"Prompt Intelligence {level} enregistré.", True
+    return redirect(url_for("index", section="ai"))
+
+
+@app.route("/save-intelligence-wheel", methods=["POST"])
+@require_login
+def save_intelligence_wheel():
+    try:
+        intelligence.controller.set_wheel_enabled(request.form.get("enabled") == "1")
+    except (ValueError, config_store.StorageFailure, OSError) as error:
+        session["flash"], session["flash_ok"] = "Molette non enregistrée : " + str(error), False
+    else:
+        session["flash"], session["flash_ok"] = "Configuration de la molette enregistrée.", True
+    return redirect(url_for("index", section="ai"))
+
+
+@app.route("/save-intelligence", methods=["POST"])
+@require_login
+def save_intelligence():
+    try:
+        if request.form.get("restore") == "1":
+            profiles = {str(n): intelligence.asdict(p) for n, p in intelligence.defaults().items()}
+        else:
+            profiles = {str(n): {"model": request.form.get(f"model_{n}", "").strip(),
+                                 "reasoning_effort": request.form.get(f"effort_{n}", "").strip(),
+                                 "temperature": float(request.form.get(f"temperature_{n}", ""))}
+                        for n in intelligence.LEVELS}
+        intelligence.controller.save_profiles(profiles)
+    except (ValueError, config_store.StorageFailure, OSError) as error:
+        session["flash"] = "Intelligence non enregistrée : " + str(error)
+        session["flash_ok"] = False
+    else:
+        session["flash"] = "Intelligence enregistrée. Application à la prochaine requête."
+        session["flash_ok"] = True
+    return redirect(url_for("index", section="ai"))
 
 
 @app.route("/save-llm", methods=["POST"])
@@ -2764,7 +2887,7 @@ def journal_api():
                     item.touch()
                     result = None
             if action == "command":
-                result = item.handle(data.get("text", ""))
+                result = item.keyboard(data.get("text", ""))
         with item.lock:
             if item.stage == "closed":
                 return journal_response({"closed": True, "display": "Journal verrouillé."})

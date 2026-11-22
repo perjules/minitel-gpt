@@ -1,5 +1,7 @@
 # Gmail prototype — 3615 IA
 
+> Terminal keyboard commands now use a leading colon. See [COMMANDS.md](COMMANDS.md) for command mode, shortcuts and literal password/confirmation input. Examples below also document internal service syntax.
+
 > Model selection and reasoning for Gmail tasks: see [GMAIL_MODELS.md](GMAIL_MODELS.md).
 
 > Multi-user profiles and Gmail/PRONOTE assignments: see [USERS.md](USERS.md).

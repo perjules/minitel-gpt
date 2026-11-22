@@ -81,7 +81,7 @@ def test_real_terminal_sommaire_leaves_welcome_and_resume_is_explicit_without_bo
         + fn(chat.K_ENVOI)
     )
     keys += b"10" + fn(chat.K_ENVOI)
-    keys += b"SOMMAIRE" + fn(chat.K_ENVOI) if typed_sommaire else fn(chat.K_SOMMAIRE)
+    keys += b":SOMMAIRE" + fn(chat.K_ENVOI) if typed_sommaire else fn(chat.K_SOMMAIRE)
     keys += b"Bonjour" + fn(chat.K_ENVOI)
     keys += b"REPRENDRE ACCUEIL" + fn(chat.K_ENVOI)
     keys += b"FIN ACCUEIL" + fn(chat.K_ENVOI) + fn(chat.K_SOMMAIRE)

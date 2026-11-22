@@ -236,11 +236,11 @@ def test_boot_notice_is_plain_local_text_before_continuation(monkeypatch, availa
     harness = startup.StartupTests()
     screens, calls = harness.run_session(login_keys() + b'Hello' + fn(chat.K_ENVOI))
     text = '\n'.join(screens)
-    assert ('MISES A JOUR DISPONIBLES - MAJ' in text) is (available is True)
+    assert ('MISES A JOUR DISPONIBLES - :MAJ' in text) is (available is True)
     assert len(calls) == 1 and harness.boot_requests == []
     check.assert_called_once()
     if available:
-        assert text.index('MISES A JOUR DISPONIBLES - MAJ') < text.index(chat.BOOT_CONTINUE_PROMPT)
+        assert text.index('MISES A JOUR DISPONIBLES - :MAJ') < text.index(chat.BOOT_CONTINUE_PROMPT)
 
 
 @pytest.mark.parametrize("failure,reason", [("truncated", "incomplete_response"), ("timeout", "timeout")])
@@ -305,17 +305,17 @@ def test_real_uart_confirmation_routes_locally_and_never_enters_chat(confirmatio
     harness = startup.StartupTests()
     requests, queue, play = Mock(side_effect=synthetic_requests), Mock(return_value=(True, "queued")), Mock(
         return_value=("done", "Maintenance terminee."))
-    keys = login_keys("fr") + b"MAJ" + fn(chat.K_ENVOI)
+    keys = login_keys("fr") + b":MAJ" + fn(chat.K_ENVOI)
     keys += confirmation.encode() + fn(chat.K_ENVOI) + b"Bonjour" + fn(chat.K_ENVOI)
     with patch.object(chat, "start_update_request", requests), patch.object(deployment, "queue_deployment", queue), \
             patch.object(deployment, "unchanged", return_value=True), patch.object(chat, "play_update", play):
         screens, calls = harness.run_session(keys)
     text = "\n".join(screens)
-    assert "Mettre a jour le mainframe ? OUI/NON" in text
+    assert "Mise a jour du mainframe ? OUI/NON" in text
     uart = bytes(harness.uart.output)
     assert any("Visa obtenu." in frame and "Revisions disponibles." in frame
                for frame in harness.result_screens)
-    assert ("Preparation du protocole Alcatel..." if launch else
+    assert ("Preparation du protocole Alcate..." if launch else
             "Dossier classe sans suite.") in startup.screen_text(uart)
     assert len(calls) == 1 and calls[0][1] == [{"role": "user", "content": "Bonjour"}]
     assert queue.call_count == int(launch) and play.call_count == int(launch)

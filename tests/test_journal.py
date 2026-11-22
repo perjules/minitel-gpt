@@ -231,3 +231,31 @@ def json_data(text):
     import json
 
     return json.loads(text)
+
+
+def test_colon_keyboard_keeps_plain_command_words_as_draft_input(diary):
+    result = diary.keyboard('ENREGISTRER')
+    assert result.get('review')
+    diary.model.draft.assert_called_once_with('ENREGISTRER', '')
+    assert diary.days == {}
+    diary.model.reset_mock()
+    assert 'inconnue' in diary.keyboard(':NOT_A_COMMAND')['display']
+    diary.model.draft.assert_not_called()
+    assert 'prochaine saisie' in diary.keyboard(':')['display']
+    assert diary.keyboard('T :literal')['review']
+    assert diary.draft['text'] == ':literal'
+    diary.model.draft.assert_not_called()
+
+
+def test_colon_password_is_literal(vault):
+    session = journal.Session(vault, model=Mock())
+    session.open()
+    session.keyboard(':password')
+    session.keyboard(':password')
+    assert not session.secret
+    session.close()
+    reopened = journal.Session(vault, model=Mock())
+    reopened.open()
+    reopened.keyboard(':password')
+    assert not reopened.secret
+    reopened.close()

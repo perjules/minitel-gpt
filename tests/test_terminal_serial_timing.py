@@ -198,7 +198,7 @@ def test_precedent_with_usb_backpressure_keeps_all_pages_and_input(paced, reader
     assert uart.output.count(b"\x0c") == 1
 
 
-@pytest.mark.parametrize("backward", [b"\x13\x42", submitted("PRECEDENT")])
+@pytest.mark.parametrize("backward", [b"\x13\x42", submitted(":PRECEDENT")])
 def test_upward_wipe_then_long_answer_and_paging_with_usb_backpressure(paced, backward):
     term, uart, _clock = paced(submitted("NEXT"), transport=BufferedUART)
     chat.show_response(term, "Old answer")

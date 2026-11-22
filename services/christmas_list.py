@@ -41,10 +41,10 @@ SHORTCUTS = {
     "L": ("LIRE", True), "T": ("TEXTE", True), "Q": ("QUITTER", False),
 }
 HELP = (
-    "A: souhaits (IA) / T: texte exact\n"
-    "S: n supprimer / C: n cocher\n"
-    "D: n décocher / L: nom consulter\n"
-    "LIRE seul : ma liste / Q: quitter"
+    ":A souhaits (IA) / :T texte exact\n"
+    ":S n supprimer / :C n cocher\n"
+    ":D n décocher / :L nom consulter\n"
+    "LIRE seul : ma liste / :Q quitter"
 )
 
 
@@ -186,20 +186,20 @@ class Model:
                 "generation_unavailable", "generation_incomplete", "draft_size_limit",
             }
             code = str(error) if str(error) in known else "unavailable"
-            self.fail("api_" + code, "Ajout IA indisponible. Aucun ajout. Réessayez ou utilisez T: sans IA.")
+            self.fail("api_" + code, "Ajout IA indisponible. Aucun ajout. Réessayez ou utilisez :T sans IA.")
         try:
             result = json.loads(raw)
         except (ValueError, TypeError):
-            self.fail("invalid_json", "Réponse IA illisible. Aucun ajout. Réessayez ou utilisez T: sans IA.")
+            self.fail("invalid_json", "Réponse IA illisible. Aucun ajout. Réessayez ou utilisez :T sans IA.")
         if (not isinstance(result, dict) or set(result) != {"items"}
                 or not isinstance(result["items"], list) or len(result["items"]) > 30):
-            self.fail("invalid_schema", "Réponse IA inattendue. Aucun ajout. Réessayez ou utilisez T: sans IA.")
+            self.fail("invalid_schema", "Réponse IA inattendue. Aucun ajout. Réessayez ou utilisez :T sans IA.")
         if not result["items"]:
-            self.fail("no_items", "Aucun cadeau reconnu. Aucun ajout. Reformulez vos souhaits ou utilisez T: sans IA.")
+            self.fail("no_items", "Aucun cadeau reconnu. Aucun ajout. Reformulez vos souhaits ou utilisez :T sans IA.")
         try:
             items = [clean_item(item) for item in result["items"]]
         except persistent_memory.MemoryProblem:
-            self.fail("invalid_item", "Article IA invalide. Aucun ajout. Reformulez ou utilisez T: sans IA.")
+            self.fail("invalid_item", "Article IA invalide. Aucun ajout. Reformulez ou utilisez :T sans IA.")
         log.info("christmas_add status=ok items=%d", len(items))
         return items
 
@@ -274,7 +274,7 @@ class Session:
                 "cocher": "check", "coche": "check", "decocher": "uncheck", "decoche": "uncheck",
             }.get(verb)
             if operation is None:
-                raise persistent_memory.MemoryProblem("Utilisez A: souhaits pour ajouter, ou AIDE.")
+                raise persistent_memory.MemoryProblem("Utilisez :A souhaits pour ajouter, ou AIDE.")
             if self.target.id != self.owner.user.id:
                 raise persistent_memory.MemoryProblem("Seul le propriétaire modifie sa liste. LIRE seul : votre liste.")
             if not payload:
@@ -286,7 +286,7 @@ class Session:
                 operation = "add"
             else:
                 if not re.fullmatch(r"[0-9]{1,3}", payload):
-                    raise persistent_memory.MemoryProblem("Indiquez un numéro : S: 2 / C: 2 / D: 2.")
+                    raise persistent_memory.MemoryProblem("Indiquez un numéro : :S 2 / :C 2 / :D 2.")
                 value = int(payload)
             # Model calls occur outside this lock. A reset closes the guard before a late write.
             with self.owner.lock:

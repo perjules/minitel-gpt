@@ -52,3 +52,9 @@ def no_memory_background_network(monkeypatch):
 def optional_onboarding_off_by_default(monkeypatch):
     # Dedicated welcome tests opt in with synthetic model responses.
     monkeypatch.setenv("MINITEL_ONBOARDING", "0")
+
+
+@pytest.fixture(autouse=True)
+def isolated_intelligence(tmp_path, monkeypatch):
+    from services import intelligence
+    monkeypatch.setattr(intelligence, "controller", intelligence.Controller(tmp_path / "dial"))

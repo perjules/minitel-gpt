@@ -68,7 +68,7 @@ class ConsoleTests(unittest.TestCase):
         # SOMMAIRE -> boot -> SUITE -> blank username/shared French. Page a long
         # reply, follow up, use arithmetic, then reset while retaining the user.
         keys = (["\x10", "\x0e"] + list("\nhello\n")
-                + ["\x0e"] + list("follow up\nCALC 2+3\n") + ["\x10"])
+                + ["\x0e"] + list("follow up\n:CALC 2+3\n") + ["\x10"])
         console = ConsoleSerial(Window(keys))
         snapshots = []
         original_write = console.write
