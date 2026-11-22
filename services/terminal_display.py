@@ -4,6 +4,7 @@ Rows are one-based, excluding service row 00. No mixed/80-column mode or model
 calls. The only mutable state is the loaded view, row cache and current input.
 """
 
+import time
 from contextlib import nullcontext
 from dataclasses import dataclass
 
@@ -409,7 +410,7 @@ class View:
         self.term.w(b"\x11")
 
     def read(self, *, allow_empty=False, calculator_mode=False, navigation_mode=False,
-             touch=None, echo=False, recall=False):
+             touch=None, echo=False, recall=False, idle=None):
         """Own the editor only while receiving input; always restore echo on exit.
 
         echo=True is for the journal, whose outer password/session guard already
@@ -417,9 +418,9 @@ class View:
         """
         context = nullcontext() if echo else rose_terminal.hidden_echo(self.term)
         with context:
-            return self._read(allow_empty, calculator_mode, navigation_mode, touch, recall)
+            return self._read(allow_empty, calculator_mode, navigation_mode, touch, recall, idle)
 
-    def _read(self, allow_empty, calculator_mode, navigation_mode, touch, recall):
+    def _read(self, allow_empty, calculator_mode, navigation_mode, touch, recall, idle=None):
         chat = rose_terminal.api()
         self.feature_navigation = ("zones" if navigation_mode == "zones" else
                                    "grades" if navigation_mode else "exit" if calculator_mode else False)
@@ -429,14 +430,19 @@ class View:
         self.draw()
         if self.qr is None or not self.qr.full_screen:
             self.term.w(b"\x11")  # Input is ready; keep the caret inside its region.
+        active_at = time.monotonic() if idle is not None else 0
         while True:
             self.active()
-            kind, code = self.term.read_key(0.2 if self.check is not None else chat.IDLE_TIMEOUT)
+            if idle is not None:
+                idle()
+            kind, code = self.term.read_key(0.2 if self.check is not None or idle is not None else chat.IDLE_TIMEOUT)
             self.active()
             if kind == "timeout":
-                if self.check is not None:
+                if self.check is not None or (idle is not None and time.monotonic() - active_at < chat.IDLE_TIMEOUT):
                     continue
                 return None, "timeout"
+            if idle is not None:
+                active_at = time.monotonic()
             if touch is not None:
                 touch()
             if self.qr is not None and self.qr.full_screen:

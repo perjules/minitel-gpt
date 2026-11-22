@@ -51,6 +51,7 @@ try:  # Support both systemd's direct script and package imports in tests.
         terminal_scrolling,
         user_services,
         videotex,
+        yolo_terminal,
     )
 except ImportError:
     # Direct systemd entry point: keep one identity for exception/session classes.
@@ -81,6 +82,7 @@ except ImportError:
         terminal_scrolling,
         user_services,
         videotex,
+        yolo_terminal,
     )
 
 try:
@@ -802,6 +804,10 @@ def call_answer(system_prompt, history, language, options, knowledge,
         response = mail.handle(history[-1]["content"], review_ticket, timeout)
         if not response.get("passthrough"):
             return {**response, "gmail": True}
+    if (PROVIDER == "mistral" and api == "conversations" and yolo_terminal.configured()
+            and not blocked and not school_request and not explicit_memory and not note_request
+            and yolo_terminal.intent(question)):
+        return yolo_terminal.proposal(question, language, MISTRAL_KEY, MISTRAL_MODEL, timeout)
     if (PROVIDER == "mistral" and api == "conversations" and home_config.enabled()
             and not blocked and not school_request and not explicit_memory and not note_request
             and airzone_answers.interested(question)):
@@ -1687,6 +1693,17 @@ def run_session(t):
                 username = language = None
                 break
 
+            if yolo_terminal.fixed(question) and not (calc.mode or school_mode.mode or calculator_blocked(mail, memory)):
+                action = yolo_terminal.run(t, language)
+                if action == "logout":
+                    username = language = None
+                    break
+                if action == "guide":
+                    show_guide(t, language)
+                if action in {"guide", "sommaire", "timeout"}:
+                    break
+                continue
+
             if recall_eligible and (question or "").strip().upper() == "AIRZONE":
                 if pending is not None and pending[0].is_alive():
                     show_response(t, "Requête précédente en cours. Réessayez bientôt.", language)
@@ -2021,6 +2038,17 @@ def run_session(t):
                     answer = response["display"]
                     if response["turn"] is not None:
                         history = mistral_answers.bound_history(candidate + [response["turn"]])
+
+            if response is not None and response.get("yolo_proposal"):
+                action = yolo_terminal.run(t, language, initial=response["yolo_proposal"])
+                if action == "logout":
+                    username = language = None
+                    break
+                if action == "guide":
+                    show_guide(t, language)
+                if action in {"guide", "sommaire", "timeout"}:
+                    break
+                continue
 
             if response is not None and response.get("airzone"):
                 prepared = response.get("airzone_proposal")
