@@ -839,6 +839,13 @@ hr{border:none;border-top:1px solid var(--border);margin:16px 0}
     <p>Six positions du bouton, de 1 à 11. Conversation Mistral uniquement ; les opérations gardent leurs réglages dédiés. Le modèle global reste utilisé par les autres tâches et le mode de secours.</p>
     <p class=sub>Position actuelle : {{dial_indicator}}. Enregistrement immédiat, sans redémarrage. Modèles manuels : vérifiez leur disponibilité avec le catalogue Mistral ci-dessous. Raisonnement : défaut fournisseur, ou valeur explicitement prise en charge par le modèle.</p>
     {% if dial_error %}<p role=alert>{{dial_error}}</p>{% endif %}
+    <form method=POST action=/save-intelligence-wheel>
+      <input type=hidden name=csrf value="{{csrf_token()}}">
+      <label><input type=checkbox name=enabled value=1 {{'checked' if dial_wheel_enabled else ''}}>
+        Activer la molette physique (si détectée)</label>
+      <button class="btn btn-s" type=submit>Enregistrer la molette</button>
+      <p class=sub>Molette active : les commandes :I # sont bloquées. Désactivée ou absente : :I # fonctionne.</p>
+    </form>
     <form method=POST action=/save-intelligence>
       <input type=hidden name=csrf value="{{csrf_token()}}">
       <div class=dial-grid>
@@ -1458,6 +1465,11 @@ def index():
     except (config_store.InvalidConfig, config_store.StorageFailure, OSError) as error:
         dial_profiles = intelligence.defaults()
         dial_error = str(error)
+    try:
+        dial_wheel_enabled = intelligence.controller.wheel_enabled()
+    except (ValueError, intelligence.config_store.StorageFailure, OSError) as error:
+        dial_wheel_enabled = False
+        dial_error = str(error)
     dial_prompts, dial_prompt_error = {}, ""
     try:
         dial_prompts = {n: intelligence.load_prompt(n) for n in intelligence.LEVELS}
@@ -1466,7 +1478,7 @@ def index():
     return render_template_string(
         ADMIN_HTML, dial_prompts=dial_prompts, dial_prompt_error=dial_prompt_error,
         dial_prompt_revisions={n: intelligence.prompt_revision(text) for n, text in dial_prompts.items()},
-        dial_profiles=dial_profiles, dial_indicator=intelligence.indicator(),
+        dial_profiles=dial_profiles, dial_indicator=intelligence.indicator(), dial_wheel_enabled=dial_wheel_enabled,
         dial_labels=intelligence.LABELS, dial_error=dial_error, service_cards=service_cards(), journal=journal, lines=lines,
         diagnostic_log=recent_log if journal == "chatgpt" and lines == 40 else log_tail(journal, lines), provision_status=svc_status("wifi-manager"),
         previous=previous_release(), branch_preview=session.get("branch_preview"),
@@ -1802,6 +1814,18 @@ def save_intelligence_prompt(level):
         session["flash"], session["flash_ok"] = "Prompt non enregistré : " + str(error), False
     else:
         session["flash"], session["flash_ok"] = f"Prompt Intelligence {level} enregistré.", True
+    return redirect(url_for("index", section="ai"))
+
+
+@app.route("/save-intelligence-wheel", methods=["POST"])
+@require_login
+def save_intelligence_wheel():
+    try:
+        intelligence.controller.set_wheel_enabled(request.form.get("enabled") == "1")
+    except (ValueError, config_store.StorageFailure, OSError) as error:
+        session["flash"], session["flash_ok"] = "Molette non enregistrée : " + str(error), False
+    else:
+        session["flash"], session["flash_ok"] = "Configuration de la molette enregistrée.", True
     return redirect(url_for("index", section="ai"))
 
 
