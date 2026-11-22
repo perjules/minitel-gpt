@@ -23,3 +23,9 @@ integration. Keep the existing source layout and unpackaged application model.
 Work directly on `develop` unless the owner explicitly requests another branch;
 stable `main` follows physical validation. See docs/TESTING.md for test collection
 and compatibility.
+
+Intelligence dial work must preserve the boundary in **docs/INTELLIGENCE_DIAL.md**:
+resolve one immutable profile per ordinary request; never pass it to operational
+Gmail/PRONOTE/home/memory calls. Commands and future hardware adapters share
+`services.intelligence.controller.set_level(int)`. Render only on the UART owner,
+keep profiles separate from active selection, and retain all six fixed positions.

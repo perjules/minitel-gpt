@@ -8,7 +8,14 @@ import time
 from contextlib import nullcontext
 from dataclasses import dataclass
 
-from . import io_limits, rose_terminal, terminal_qr, videotex
+from . import (
+    intelligence,
+    io_limits,
+    rose_terminal,
+    terminal_commands,
+    terminal_qr,
+    videotex,
+)
 
 
 @dataclass(frozen=True)
@@ -270,7 +277,14 @@ class View:
         if self.qr is not None and self.qr.full_screen:
             return
         fallback = "Commande + ENVOI / SOMMAIRE" if self.language == "fr" else "Command + ENVOI / SOMMAIRE"
-        self.row(self.geometry.status_row, text or fallback)
+        if self.input_notice is not None:
+            self.row(self.geometry.status_row, text or fallback)
+            return  # Private stop words and password/editor notices retain full width.
+        width = self.geometry.width - 5
+        label = text or fallback
+        if len(label) > width:
+            label = label[:width - 3] + "..."
+        self.row(self.geometry.status_row, label.ljust(width + 1) + intelligence.indicator())
 
     def busy(self, message):
         """Accept input, show waiting status, then clear the previous answer."""
@@ -278,14 +292,15 @@ class View:
         self.close_qr(redraw=False)
         chat = rose_terminal.api()
         label = chat.safe_display(message).replace("\n", " ").replace("\t", " ")
-        if len(label) > self.geometry.width:
-            label = label[:self.geometry.width - 3] + "..."
+        status_width = self.geometry.width if self.input_notice is not None else self.geometry.width - 5
+        if len(label) > status_width:
+            label = label[:status_width - 3] + "..."
         self.buffer.clear()
         self.pending_input.clear()
         self.carry_input = False
         self.processing = True
         self._erase_input()
-        self.status(label.center(self.geometry.width))
+        self.status(label.center(status_width))
         self.row(self.geometry.navigation_row, "Requete en cours...")
         self._clear_content()
         self.term.w(self.geometry.position(self.geometry.input_first, 3))
@@ -430,19 +445,32 @@ class View:
         self.draw()
         if self.qr is None or not self.qr.full_screen:
             self.term.w(b"\x11")  # Input is ready; keep the caret inside its region.
-        active_at = time.monotonic() if idle is not None else 0
+        idle_deadline = time.monotonic() + chat.IDLE_TIMEOUT
+        last_indicator = intelligence.indicator()
         while True:
             self.active()
             if idle is not None:
                 idle()
-            kind, code = self.term.read_key(0.2 if self.check is not None or idle is not None else chat.IDLE_TIMEOUT)
+            # Short keyboard polls let the UART owner refresh the wheel indicator.
+            # The ADC worker must never write to the terminal itself.
+            remaining = idle_deadline - time.monotonic()
+            if self.check is None and remaining <= 0:
+                return None, "timeout"
+            kind, code = self.term.read_key(
+                0.2 if self.check is not None else min(0.2, remaining))
             self.active()
+            shown = intelligence.indicator()
+            if shown != last_indicator:
+                last_indicator = shown
+                if self.input_notice is None and not (self.qr is not None and self.qr.full_screen):
+                    self.status(self.notice)
+                    # Status painting moves the cursor; preserve an in-progress draft.
+                    self.input()
             if kind == "timeout":
-                if self.check is not None or (idle is not None and time.monotonic() - active_at < chat.IDLE_TIMEOUT):
+                if self.check is not None or time.monotonic() < idle_deadline:
                     continue
                 return None, "timeout"
-            if idle is not None:
-                active_at = time.monotonic()
+            idle_deadline = time.monotonic() + chat.IDLE_TIMEOUT
             if touch is not None:
                 touch()
             if self.qr is not None and self.qr.full_screen:
@@ -460,8 +488,9 @@ class View:
                     self.status("Saisie trop longue (2000 max). Recommencez.")
                 elif self.buffer or allow_empty:
                     text = "".join(self.buffer)
-                    word = text.strip().upper()
-                    link = terminal_qr.command(text)
+                    local_prefix = text.startswith(":") and not getattr(getattr(self.term, "command_input", None), "pending", False)
+                    word = text[1:].strip().upper() if local_prefix else ""
+                    link = terminal_qr.command(text[1:]) if local_prefix else None
                     if link is not None:
                         self.buffer.clear()
                         self.input()
@@ -494,9 +523,9 @@ class View:
                         continue
                     if navigation_mode:
                         self.carry_input = navigation_mode != "zones"
-                        return "SUIVANT" if code == chat.K_SUITE else "PRECEDENT", "envoi"
+                        return terminal_commands.Command("SUIVANT" if code == chat.K_SUITE else "PRECEDENT"), "envoi"
                     if code == chat.K_RETOUR and calculator_mode:
-                        return "RETOUR", "envoi"
+                        return terminal_commands.Command("RETOUR"), "envoi"
                     self.move(1 if code == chat.K_SUITE else -1)
                     continue
                 if code == chat.K_ANNUL:

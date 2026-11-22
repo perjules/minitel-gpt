@@ -19,7 +19,7 @@ TEXT = {
         "busy": "Une maintenance est deja en cours.",
         "current": "ALCATEL MF-83 : dossiers a jour.\nLe Minitel reste irreprochable.",
         "announcement": "Liaison avec France Telecom etablie.\nVisa du bureau des revisions obtenu.\nDes revisions du mainframe attendent\nleur bordereau de mise en service.\nLe Minitel, lui, est irreprochable.",
-        "confirm": "Mettre a jour le mainframe ? OUI/NON",
+        "confirm": "Mise a jour du mainframe ? OUI/NON",
         "cancelled": "Dossier classe sans suite.",
         "invalid": "Repondez OUI ou NON puis ENVOI.",
         "preparing": "Preparation du protocole Alcatel...",

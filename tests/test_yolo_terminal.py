@@ -25,16 +25,16 @@ def test_intent_is_conservative(question, operation):
     assert yolo.intent(question) == operation
 
 
-def test_fixed_command_goes_to_panel_without_model(monkeypatch):
+@pytest.mark.parametrize("keys", [submitted(":yolo"), submitted(":") + submitted("yolo")])
+def test_fixed_command_goes_to_panel_without_model(monkeypatch, keys):
     helper = terminal_tests.startup.StartupTests()
     launched = Mock(return_value="sommaire")
     model = Mock(side_effect=AssertionError("Fixed command must use no model"))
     monkeypatch.setattr(yolo, "run", launched)
     monkeypatch.setattr(chat, "call_answer", model)
-    helper.run_session(terminal_tests.login_keys("fr") + submitted(":yolo"))
+    helper.run_session(terminal_tests.login_keys("fr") + keys)
     assert launched.call_count == 1
     model.assert_not_called()
-    assert not yolo.fixed(" :YOLO") and not yolo.fixed(":YOLO extra")
 
 
 def test_tool_prepares_original_requirement_only(monkeypatch):

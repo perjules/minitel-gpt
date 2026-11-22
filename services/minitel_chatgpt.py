@@ -7,6 +7,7 @@ SOMMAIRE réinitialise la conversation ; LOGOUT change d'utilisateur.
 """
 import json
 import logging
+import math
 import os
 import re
 import signal
@@ -35,6 +36,7 @@ try:  # Support both systemd's direct script and package imports in tests.
         deployment,
         gmail_mail,
         home_config,
+        intelligence,
         io_limits,
         llm_streaming,
         mainframe_update,
@@ -45,12 +47,14 @@ try:  # Support both systemd's direct script and package imports in tests.
         pronote_answers,
         pronote_mode,
         stream_sources,
+        terminal_commands,
         terminal_diagnostics,
         terminal_display,
         terminal_link,
         terminal_scrolling,
         user_services,
         videotex,
+        waiting_tasks,
         yolo_terminal,
     )
 except ImportError:
@@ -66,6 +70,7 @@ except ImportError:
         deployment,
         gmail_mail,
         home_config,
+        intelligence,
         io_limits,
         llm_streaming,
         mainframe_update,
@@ -76,12 +81,14 @@ except ImportError:
         pronote_answers,
         pronote_mode,
         stream_sources,
+        terminal_commands,
         terminal_diagnostics,
         terminal_display,
         terminal_link,
         terminal_scrolling,
         user_services,
         videotex,
+        waiting_tasks,
         yolo_terminal,
     )
 
@@ -132,8 +139,8 @@ COLS = terminal_display.STANDARD.columns
 SCREEN_ROWS = terminal_display.STANDARD.rows
 CONTENT_ROWS = terminal_display.STANDARD.content_rows          # lignes de contenu par page de réponse
 IDLE_TIMEOUT = 300         # 5 min → nouvelle conversation, même utilisateur
-BOOT_CONTINUE_TIMEOUT = 30
-BOOT_CONTINUE_PROMPT = "SUITE: continuer / connexion dans 30 s"
+BOOT_CONTINUE_TIMEOUT = 6
+BOOT_CONTINUE_PROMPT = "SUITE: continuer / connexion dans 6 s"
 
 # ── Fournisseur d'IA (LLM) ───────────────────────────────────────────────
 # LLM_PROVIDER = "mistral" (defaut), "claude" ou "linkup". La cle et le modele
@@ -745,28 +752,37 @@ def prompt_recall_allowed(memory, mail, calc, school, printer, *, onboarding_act
 
 
 def call_answer(system_prompt, history, language, options, knowledge,
-                mail=None, review_ticket=None, memory=None, calc=None, welcome_start=False):
+                mail=None, review_ticket=None, memory=None, calc=None, welcome_start=False,
+                intelligence_profile=None, intelligence_level=None, keyboard_mode=False, fixed_command=False):
+    if intelligence_profile is None:
+        intelligence_level, intelligence_profile = intelligence.snapshot(with_level=True)
     api, web_search, timeout = options
     welcome = getattr(memory, "welcome", None)
     if welcome_start:
         return (welcome.respond(None, system_prompt, language, timeout, start=True)
                 or {"display": "", "turn": None, "onboarding": True})
     question = history[-1]["content"]
-    if memory is not None and memory_session.household_command(question):
+    if keyboard_mode and fixed_command:
+        return terminal_commands.execute(question, language, timeout, mail, review_ticket, memory, calc,
+            generate=lambda expr, lang: calculator.generate_scene(expr, lang, MISTRAL_KEY, MISTRAL_MODEL))
+    local = not keyboard_mode
+    calculation_input = local or calculator.candidate(question) or (
+        calc is not None and calc.mode and re.fullmatch(r"[0-9.,+*/()\s-]+", question))
+    if local and memory is not None and memory_session.household_command(question):
         return memory.handle(question, language, timeout)
-    if isinstance(getattr(memory, "user", None), user_services.user_registry.User):
+    if local and isinstance(getattr(memory, "user", None), user_services.user_registry.User):
         christmas = christmas_list.route(memory, question, settings=lambda: (MISTRAL_KEY, MISTRAL_MODEL), timeout=timeout)
         if christmas is not None:
             return christmas
     if memory is not None and hasattr(memory, "begin_turn"):
         memory.begin_turn()
-    if mail is not None and gmail_mail.enabled() and (gmail_mail.shortcut(question) or gmail_mail.literal_command(question)
+    if local and mail is not None and gmail_mail.enabled() and (gmail_mail.shortcut(question) or gmail_mail.literal_command(question)
                                                      or question.strip().upper() == "BROUILLON"):
         # Explicit mail instructions cannot be intercepted by welcome, memory,
         # school or calculator routing. Keep the user's actual line for approval.
         return {**mail.handle(question, review_ticket, timeout), "gmail": True}
     blocked = calculator_blocked(mail, memory)
-    if calc is not None and calc.explicit(question):
+    if calc is not None and calculation_input and calc.explicit(question):
         if isinstance(getattr(memory, "user", None), user_services.user_registry.User):
             memory.capture(question, "theatre")
         return calc.handle(question, language, generate=lambda expr, lang:
@@ -801,7 +817,7 @@ def call_answer(system_prompt, history, language, options, knowledge,
         if not response.get("passthrough"):
             return response
     if mail is not None and mail.interested(history[-1]["content"]):
-        response = mail.handle(history[-1]["content"], review_ticket, timeout)
+        response = mail.handle(history[-1]["content"], review_ticket, timeout, **({"natural": True} if keyboard_mode else {}))
         if not response.get("passthrough"):
             return {**response, "gmail": True}
     if (PROVIDER == "mistral" and api == "conversations" and yolo_terminal.configured()
@@ -812,7 +828,7 @@ def call_answer(system_prompt, history, language, options, knowledge,
             and not blocked and not school_request and not explicit_memory and not note_request
             and airzone_answers.interested(question)):
         return airzone_answers.answer(history, language, MISTRAL_KEY, MISTRAL_MODEL, timeout)
-    if calc is not None and not blocked:
+    if calc is not None and not blocked and calculation_input:
         if (not school_request and (calculator.candidate(question) or calc.mode)
                 and isinstance(getattr(memory, "user", None), user_services.user_registry.User)):
             memory.capture(question, "theatre")
@@ -833,7 +849,8 @@ def call_answer(system_prompt, history, language, options, knowledge,
     if PROVIDER == "mistral" and api == "conversations":
         result = mistral_answers.answer(history, language, MISTRAL_KEY,
                                         MISTRAL_MODEL, web_search, timeout, knowledge,
-                                        **({"pronote": school} if school_request else {}),
+                                        **({"pronote": school} if school_request else {"profile": intelligence_profile,
+                                                                                       "intelligence_level": intelligence_level}),
                                         **({"session_context": session_context} if session_context else {}))
         if memory is not None:
             memory.active()
@@ -844,7 +861,8 @@ def call_answer(system_prompt, history, language, options, knowledge,
             # Operational notices are not successful factual turns. Do not
             # display an unverified current answer as a successful lookup.
             return {"display": notice, "turn": None}
-        return {"display": pronote_answers.render(result, language), "turn": {
+        return {"display": pronote_answers.render(result, language) + (
+            "\n\nINTELLIGENCE : mode de secours" if result.get("intelligence_fallback") else ""), "turn": {
             "role": "assistant", "content": result["text"],
             "chunks": result["chunks"], "references": result["references"],
             **({"private": True} if result.get("private") else {}),
@@ -857,9 +875,10 @@ def call_answer(system_prompt, history, language, options, knowledge,
 
 
 def start_answer(system_prompt, history, language, options, knowledge,
-                 mail=None, review_ticket=None, memory=None, calc=None, welcome_start=False):
+                 mail=None, review_ticket=None, memory=None, calc=None, welcome_start=False, keyboard_mode=False, fixed_command=False):
     """One daemon worker; no UART access. File operations use the scoped memory guard."""
     output = Queue(maxsize=1)
+    level, profile = intelligence.snapshot(with_level=True)  # Freeze before scheduling.
 
     def request():
         try:
@@ -868,9 +887,12 @@ def start_answer(system_prompt, history, language, options, knowledge,
                 optional["memory"] = memory
             if calc is not None:
                 optional["calc"] = calc
+            if keyboard_mode:
+                optional.update(keyboard_mode=True, fixed_command=fixed_command)
             if welcome_start:
                 optional["welcome_start"] = True
-            output.put((call_answer(system_prompt, history, language, options, knowledge, **optional), None))
+            output.put((call_answer(system_prompt, history, language, options, knowledge,
+                                    intelligence_profile=profile, intelligence_level=level, **optional), None))
         except Exception as error:  # noqa: BLE001 - Forward every worker failure to the UART owner.
             output.put((None, error))
 
@@ -919,7 +941,7 @@ def retour_requested(kind, code, typed):
     if kind == 'fn' and code == K_RETOUR:
         return True
     if (kind == 'fn' and code == K_ENVOI) or (kind == 'char' and code in (CR, LF)):
-        command = "".join(typed).strip().upper()
+        command = "".join(typed).removeprefix(":").strip().upper()
         typed.clear()
         return command in ("RETOUR", "SORTIR", "QUITTER")
     if (kind == 'fn' and code == K_CORR) or (kind == 'char' and code in (BS, 0x7F)):
@@ -930,15 +952,21 @@ def retour_requested(kind, code, typed):
     return False
 
 
-def wait_answer(t, pending, timeout, allow_retour=False, *, language=None):
+def wait_answer(t, pending, timeout, allow_retour=False, *, language=None, tasks=None):
     """Reset stops local waiting; provider work/billing may continue."""
     _, output, started = pending
     deadline = started + timeout
     typed = []
+    next_task = time.monotonic() + waiting_tasks.INTERVAL if tasks is not None else None
     while time.monotonic() < deadline:
         try:
             result, error = output.get_nowait()
         except Empty:
+            if next_task is not None and time.monotonic() >= next_task:
+                view = getattr(t, "view", None)
+                if isinstance(view, terminal_display.View):
+                    view.status(next(tasks))
+                next_task = time.monotonic() + waiting_tasks.INTERVAL
             kind, code = t.read_key(min(0.1, max(0, deadline - time.monotonic())))
             if allow_retour and retour_requested(kind, code, typed):
                 return None, 'retour'
@@ -1087,7 +1115,7 @@ def prepare_boot(language):
 
 
 def show_boot(t: Term, language, lines=None):
-    """Fictional diagnostics, then SUITE or 30 seconds opens login."""
+    """Fictional diagnostics, then SUITE or 6 seconds opens login."""
     t.pause_presence()
     t.clear()
     try:
@@ -1099,13 +1127,20 @@ def show_boot(t: Term, language, lines=None):
         for line in rows:
             t.line(line)
         deadline = time.monotonic() + BOOT_CONTINUE_TIMEOUT
+        shown = BOOT_CONTINUE_TIMEOUT
+        countdown_row = min(len(rows), 23)
+        countdown_column = BOOT_CONTINUE_PROMPT.index(str(BOOT_CONTINUE_TIMEOUT)) + 1
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return 'done'
-            kind, code = t.read_key(remaining)
-            if kind == 'timeout':
-                return 'done'
+            seconds = math.ceil(remaining)
+            if seconds != shown and rows and rows[-1] == BOOT_CONTINUE_PROMPT:
+                t.w(terminal_display.STANDARD.position(countdown_row, countdown_column))
+                t.w(str(seconds))
+                shown = seconds
+            # Wake at the next countdown boundary; keyboard input never resets it.
+            kind, code = t.read_key(min(remaining, remaining - (seconds - 1)))
             if kind == 'fn':
                 if code == K_SUITE:
                     return 'done'
@@ -1313,7 +1348,7 @@ def wait_connection(t):
 def show_question_prompt(t: Term, question_msg):
     if t.view is None:
         terminal_display.View(t, question_msg).install()
-    t.view.status("SOMMAIRE: reset / LOGOUT: connexion")
+    t.view.status("SOMMAIRE: reset / :LOGOUT connexion")
 
 
 def show_guide(t: Term, language="fr"):
@@ -1332,8 +1367,9 @@ def show_guide(t: Term, language="fr"):
     t.center("Use your administration password" if language == "en" else
              "Utilisez votre mot de passe admin")
     t.w(bytes([CR, LF, CR, LF]))
-    t.center("UPDATE / MAJ: mainframe maintenance" if language == "en" else
-             "UPDATE / MAJ: maintenance du mainframe")
+    t.line(":COMMANDE / : puis ENVOI")
+    t.center(":UPDATE / :MAJ: mainframe maintenance" if language == "en" else
+             ":UPDATE / :MAJ: maintenance du mainframe")
     t.line()
     t.w(FG_CYAN); t.center(UI[language]["guide_return"])
     t.read_key(120)
@@ -1438,9 +1474,9 @@ def read_question_legacy(t: Term, allow_empty=False, calculator_mode=False, navi
                 overflow = False
                 continue
             if navigation_mode and code in (K_SUITE, K_RETOUR):
-                return 'SUIVANT' if code == K_SUITE else 'PRECEDENT', 'envoi'
+                return terminal_commands.Command('SUIVANT' if code == K_SUITE else 'PRECEDENT'), 'envoi'
             if calculator_mode and code == K_RETOUR:
-                return 'RETOUR', 'envoi'
+                return terminal_commands.Command('RETOUR'), 'envoi'
             if code == K_SOMMAIRE:
                 return None, 'sommaire'
             if code == K_GUIDE:
@@ -1573,7 +1609,7 @@ def run_session(t):
     if update_available:
         boot_lines = list(boot_lines)
         # Keep the continuation prompt last and the countdown unchanged.
-        boot_lines[-1:-1] = ["MISES A JOUR DISPONIBLES - MAJ", ""]
+        boot_lines[-1:-1] = ["MISES A JOUR DISPONIBLES - :MAJ", ""]
     result = show_boot(t, "fr", boot_lines)
     if result == 'guide':
         show_guide(t, "fr")
@@ -1661,6 +1697,8 @@ def run_session(t):
         else:
             show_question_prompt(t, question_msg)
 
+        command_input = terminal_commands.InputMode()
+        t.command_input = command_input
         queued_question = None
         onboarding_active = greeted
         while True:  # boucle conversation
@@ -1673,7 +1711,24 @@ def run_session(t):
                                                         onboarding_active=onboarding_active)
                 question, action = read_question(t, calculator_mode=calc.mode or school_mode.mode,
                                                  navigation_mode=school_mode.grade_view, recall=recall_eligible)
-            if action == 'envoi' and (question or '').strip().upper() == 'SOMMAIRE':
+            fixed_command = False
+            if action == 'envoi':
+                kind, question = command_input.submit(question or '')
+                if kind in {'prompt', 'empty'}:
+                    terminal_commands.prompt(t, kind == 'prompt')
+                    continue
+                fixed_command = kind == 'command'
+            fixed = question if fixed_command else ''
+            if fixed_command and getattr(t, "view", None) is not None:
+                word = fixed.upper()
+                if not school_mode.grade_view and word in {"SUITE", "SUIVANT", "PRECEDENT"}:
+                    t.view.move(-1 if word == "PRECEDENT" else 1)
+                    continue
+                link = terminal_display.terminal_qr.command(fixed)
+                if link is not None:
+                    t.view.open_link(link)
+                    continue
+            if action == 'envoi' and fixed.strip().upper() == 'SOMMAIRE':
                 action = 'sommaire'
             if action == 'guide':
                 show_guide(t, language)
@@ -1681,7 +1736,7 @@ def run_session(t):
             if action in ('sommaire', 'timeout'):
                 break
 
-            if (question or "").strip().upper() == "LOGOUT":
+            if fixed.strip().upper() == "LOGOUT":
                 action = 'logout'
                 username = language = None
                 break
@@ -1693,7 +1748,15 @@ def run_session(t):
                 username = language = None
                 break
 
-            if yolo_terminal.fixed(question) and not (calc.mode or school_mode.mode or calculator_blocked(mail, memory)):
+            dial_allowed = prompt_recall_allowed(memory, mail, calc, school_mode, printer)
+            dial_notice = intelligence.command(fixed) if fixed_command and dial_allowed else None
+            if dial_notice is not None:
+                if getattr(t, "view", None) is not None:
+                    t.view.status(dial_notice)
+                    t.view.input()
+                continue
+
+            if fixed.strip().upper() == "YOLO" and not (calc.mode or school_mode.mode or calculator_blocked(mail, memory)):
                 action = yolo_terminal.run(t, language)
                 if action == "logout":
                     username = language = None
@@ -1704,7 +1767,7 @@ def run_session(t):
                     break
                 continue
 
-            if recall_eligible and (question or "").strip().upper() == "AIRZONE":
+            if fixed.strip().upper() == "AIRZONE":
                 if pending is not None and pending[0].is_alive():
                     show_response(t, "Requête précédente en cours. Réessayez bientôt.", language)
                     continue
@@ -1729,13 +1792,13 @@ def run_session(t):
 
             # Deterministic local tool: use the ordinary answer display path,
             # but never send the fixture to a model, memory, history or printer.
-            if recall_eligible and terminal_diagnostics.unicode_command(question):
+            if recall_eligible and terminal_diagnostics.unicode_command(fixed):
                 diagnostic = terminal_diagnostics.test_unicode()
                 show_response(t, diagnostic["display"], language)
                 t.view.status("TEST UNICODE - local, sans API")
                 continue
 
-            if recall_eligible and terminal_diagnostics.scroll_command(question):
+            if recall_eligible and terminal_diagnostics.scroll_command(fixed):
                 diagnostic = terminal_diagnostics.test_scroll()
                 result = terminal_scrolling.show(t, diagnostic["display"], language)
                 if result == "guide":
@@ -1745,8 +1808,8 @@ def run_session(t):
                     break
                 continue
 
-            stream_test = recall_eligible and terminal_diagnostics.stream_command(question)
-            stream_request = llm_streaming.command(question) if recall_eligible else None
+            stream_test = recall_eligible and terminal_diagnostics.stream_command(fixed)
+            stream_request = llm_streaming.command(fixed) if recall_eligible else None
             if stream_test or stream_request is not None:
                 if pending is not None and pending[0].is_alive():
                     show_response(t, "Requête précédente en cours. Réessayez bientôt.", language)
@@ -1778,7 +1841,7 @@ def run_session(t):
                     break
                 continue
 
-            memory_control = memory_session.household_command(question)
+            memory_control = memory_session.household_command(fixed)
             if memory_control:
                 if memory_control == "lock":
                     memory.lock_household()
@@ -1796,7 +1859,7 @@ def run_session(t):
                 continue
 
             # Intercept before any ordinary model, history, transcript or tool.
-            if journal.entry(question):
+            if journal.entry(fixed):
                 if pending is not None and pending[0].is_alive():
                     t.line("Requête précédente en cours. Réessayez bientôt.")
                     continue
@@ -1816,9 +1879,8 @@ def run_session(t):
                 continue
 
             # Local maintenance commands: never send them to an LLM.
-            maintenance = (question or "").strip().lower()
-            if maintenance in ("mainframe --shutdown", "mainframe --reboot"):
-                operation = "poweroff" if maintenance.endswith("--shutdown") else "reboot"
+            operation = terminal_commands.power_operation(fixed)
+            if operation is not None:
                 t.line("MAINFRAME: " + operation.upper())
                 t.line("Confirmer: taper OUI puis ENVOI")
                 confirmation, confirm_action = read_question(t)
@@ -1840,7 +1902,7 @@ def run_session(t):
                 show_question_prompt(t, question_msg)
                 continue
 
-            if mainframe_update.command(question):
+            if mainframe_update.command(fixed):
                 if pending is not None and pending[0].is_alive():
                     t.line("Requete precedente en cours. Reessayez bientot.")
                     continue
@@ -1854,8 +1916,8 @@ def run_session(t):
                 t.center(UI[language]["follow_up"])
                 continue
 
-            rose_test = rose.test_entry(question)
-            rose_alias = "" if rose_test else rose.entry(question)
+            rose_test = rose.test_entry(fixed)
+            rose_alias = "" if rose_test else rose.entry(fixed)
             if (rose_alias is not None and not calc.mode and not school_mode.mode
                     and not calculator_blocked(mail, memory)):
                 if pending is not None and pending[0].is_alive():
@@ -1875,8 +1937,12 @@ def run_session(t):
                 t.center(UI[language]["follow_up"])
                 continue
 
-            direct = school_mode.prepare(question)
+            direct = school_mode.prepare(fixed) if fixed_command else (
+                school_mode.prepare(question) if school_mode.mode and (school_mode.selecting or school_mode.child is None) and question.isdigit()
+                else school_mode.fallback(question) if school_mode.mode else None)
             if direct is not None:
+                if fixed_command and "fallback" in direct:
+                    direct = {"display": terminal_commands.UNKNOWN}
                 if "display" in direct:
                     answer = direct["display"]
                     if direct.get("print"):
@@ -1936,13 +2002,13 @@ def run_session(t):
                 t.w(bytes([CR, LF]))
                 t.w(FG_WHITE)
                 t.center("Matiere / LIRE n / IMPRIMER" if school_mode.grade_view else
-                         "PRONOTE / AIDE / RETOUR" if school_mode.mode else UI[language]["follow_up"])
+                         ":PRONOTE / :AIDE / :RETOUR" if school_mode.mode else UI[language]["follow_up"])
                 t.w(bytes([CR, LF]))
                 continue
 
             # A selected email is a document in its own right, not an LLM turn.
             # Always print its full body, never the preview or summary.
-            if question.strip().upper() == "IMPRIMER" and mail is not None and mail.selected:
+            if fixed.strip().upper() == "IMPRIMER" and mail is not None and mail.selected:
                 if printing_session.installed():
                     document = printing_session.PrintDocument(
                         "3615 IA / COURRIER",
@@ -1959,6 +2025,8 @@ def run_session(t):
 
             # Only trusted keyboard input may trigger physical printing.
             print_intent = printing_session.intent(question)
+            if not fixed_command and printer.approval is None and print_intent == "direct":
+                print_intent = None
             if printer.approval is not None:
                 if print_intent in ("non", "annuler"):
                     printer.cancel()
@@ -2007,7 +2075,9 @@ def run_session(t):
                 calculator.candidate(question) and not calculator_blocked(mail, memory)
                 and not (isinstance(getattr(memory, "welcome", None), memory_session.onboarding.Session)
                          and memory.welcome.should_greet()))
-            t.waiting(calculator.content(language)["loading"] if calculator_request else loading_msg)
+            tasks = waiting_tasks.sequence() if not calculator_request and not fixed_command else None
+            t.waiting(calculator.content(language)["loading"] if calculator_request else
+                      next(tasks) if tasks is not None else loading_msg)
             # Do not pile up paid calls while a locally abandoned HTTP request
             # is still running. Its isolated queue is discarded when it ends.
             response = None
@@ -2019,9 +2089,11 @@ def run_session(t):
                 optional = {"mail": mail, "review_ticket": review_ticket} if mail is not None else {}
                 optional["memory"] = memory
                 optional["calc"] = calc
+                optional.update(keyboard_mode=True, fixed_command=fixed_command)
                 pending = start_answer(system_prompt, candidate, language, options, knowledge, **optional)
                 t._pending = pending
-                response, action = wait_answer(t, pending, options[2], allow_retour=calculator_request, language=language)
+                response, action = wait_answer(t, pending, options[2], allow_retour=calculator_request, language=language,
+                                               **({"tasks": tasks} if tasks is not None else {}))
                 if action == 'guide':
                     show_guide(t, language)
                     break
@@ -2164,11 +2236,14 @@ def main():
     def stop(_signum, _frame):
         raise KeyboardInterrupt
     previous = signal.signal(signal.SIGTERM, stop)
+    from services import intelligence_hardware
+    intelligence_hardware.start(intelligence.controller)
     try:
         terminal_link.serve(Term, run)
     except KeyboardInterrupt:
         pass  # SIGTERM/Ctrl-C already ran session and terminal cleanup.
     finally:
+        intelligence_hardware.stop()
         signal.signal(signal.SIGTERM, previous)
 
 

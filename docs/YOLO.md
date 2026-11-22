@@ -12,8 +12,7 @@ production `YOLO_TOKEN_FILE=/etc/yolo/control.token` et éventuellement
 sans fichier indiqué. Ne copiez pas le contenu du jeton dans `.env`.
 
 Tapez `:YOLO` puis ENVOI dans la conversation. Le préfixe doit être en première
-position. Sur ce branchement de `develop`, `:YOLO` est une commande locale
-réservée et la saisie d'un deux-points seul conserve son comportement habituel.
+position. Vous pouvez aussi saisir `:`, puis ENVOI, puis `YOLO` et ENVOI.
 
 | Commande du panneau | Effet |
 | --- | --- |

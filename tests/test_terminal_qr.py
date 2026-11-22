@@ -117,7 +117,7 @@ def test_long_url_full_screen_return_and_overflow(hardware):
 
 
 def test_link_commands_consumed_locally_recall_and_feature_paging_preserved(hardware):
-    keys = submitted("link 2") + fn(chat.K_RETOUR) + b"DRAFT" + fn(chat.K_SUITE) + submitted(" END")
+    keys = submitted(":link 2") + fn(chat.K_RETOUR) + b"DRAFT" + fn(chat.K_SUITE) + submitted(" END")
     term, uart = hardware(keys)
     view = display.View(term, long_answer(), references=REFS).install()
     view.page = 1
@@ -133,7 +133,7 @@ def test_link_commands_consumed_locally_recall_and_feature_paging_preserved(hard
 
 
 def test_opening_qr_does_not_acknowledge_unseen_review_pages(hardware):
-    term, _ = hardware(submitted("link 1") + fn(chat.K_RETOUR) + submitted("SEND"))
+    term, _ = hardware(submitted(":link 1") + fn(chat.K_RETOUR) + submitted("SEND"))
     reviewed = Mock()
     view = display.View(term, long_answer(), references=REFS, reviewed=reviewed).install()
     assert view.read() == ("SEND", "envoi")
@@ -160,7 +160,7 @@ def test_new_view_and_busy_clear_all_mosaic_cells_without_stale_sources(hardware
 
 
 def test_malformed_link_stays_local_and_does_not_reuse_prior_sources(hardware):
-    keys = submitted("link 999") + submitted("lien potato") + submitted("link") + submitted("next question")
+    keys = submitted(":link 999") + submitted(":lien potato") + submitted(":link") + submitted("next question")
     term, _ = hardware(keys)
     chat.show_response(term, "[1] a fake marker", references=())
     assert chat.read_question(term) == ("next question", "envoi")
@@ -178,8 +178,8 @@ def test_main_loop_keeps_source_order_and_never_sends_link_commands_to_api():
                            {"type": "text", "text": ", second "},
                            {"type": "tool_reference", **REFS[1]}], "references": REFS}
     helper = startup.StartupTests()
-    helper.run_session(login_keys("fr") + submitted("first question") + submitted("LINK 2")
-                       + fn(chat.K_RETOUR) + submitted("LIEN 1")
+    helper.run_session(login_keys("fr") + submitted("first question") + submitted(":LINK 2")
+                       + fn(chat.K_RETOUR) + submitted(":LIEN 1")
                        + fn(chat.K_RETOUR) + submitted("second question"), factual_reply=answer)
     assert len(calls) == 2
     assert calls[1][-1]["content"] == "second question"
@@ -203,7 +203,7 @@ def test_replacing_qr_never_repaints_answer_in_between_and_keeps_editor(hardware
 
 
 def test_partial_drawing_failure_restores_g0_echo_and_invalidates_graphics(hardware, monkeypatch):
-    term, uart = hardware(submitted("LINK 1"))
+    term, uart = hardware(submitted(":LINK 1"))
     view = display.View(term, "", references=REFS).install()
     routes, original = dict(uart.routes), uart.write
     failed = False
@@ -237,7 +237,7 @@ def test_expired_view_blocks_qr_before_any_graphics_are_written(hardware):
 
 
 def test_full_screen_typeahead_returns_to_input_without_losing_first_character(hardware):
-    term, uart = hardware(submitted("LINK 1") + submitted("NEXT"))
+    term, uart = hardware(submitted(":LINK 1") + submitted("NEXT"))
     view = display.View(term, long_answer(), references=[{"url": "https://example.org/" + "a" * 130}]).install()
     assert view.read() == ("NEXT", "envoi")
     assert view.qr is None and view.page == 0
@@ -280,7 +280,7 @@ def test_stream_attaches_only_completed_transcript_references(hardware, monkeypa
 
 @pytest.mark.parametrize("length", [0, 230])
 def test_qr_backpressure_presence_echo_and_retour_at_real_wire_speed(paced, length):
-    keys = submitted("LINK 1") + fn(chat.K_RETOUR) + submitted("NEXT")
+    keys = submitted(":LINK 1") + fn(chat.K_RETOUR) + submitted("NEXT")
     term, uart, clock = paced(keys, transport=timing_tests.BufferedUART, capacity=256)
     routes = dict(uart.routes)
     chat.show_response(term, long_answer(), references=[{"url": "https://example.org/" + "x" * length}])

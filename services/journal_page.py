@@ -8,6 +8,7 @@ a{color:#4ecdc4}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#000;
 input,button{font:inherit;padding:.6em;max-width:100%;box-sizing:border-box}input{width:100%;margin:.5em 0}button{margin:.3em}
 [hidden]{display:none!important}</style><link rel="stylesheet" href="/assets/aizone/admin-skin.css">
 <a href="/test?mode=conversation">Retour aux tests</a><h1>Journal intime</h1>
+<p>:COMMANDE ou : puis ENVOI pour une commande. Texte libre pour rédiger.</p>
 <p>Ce journal est chiffré avec son propre mot de passe. Sans lui, son contenu ne peut pas être déchiffré, même par l’administrateur : il n’existe pas de clé de secours. Les textes ne sont pas journalisés ni mémorisés par la conversation.</p>
 <form id=choose autocomplete=off><label>Profil nommé<input id=username maxlength=60 value="{{username}}" required></label>
 <button>Ouvrir le journal</button></form>

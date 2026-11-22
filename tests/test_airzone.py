@@ -116,7 +116,7 @@ def test_explicit_confirmation(monkeypatch, commands, expected):
         return pending[1].get(timeout=2)[0], "done"
 
     chat = SimpleNamespace(wait_answer=wait, show_response=Mock(),
-                           read_question=Mock(side_effect=[(command, "envoi") for command in commands]))
+                           read_question=Mock(side_effect=[(command if command in {"OUI", "NON"} or command.replace(".", "").isdigit() else ":" + command, "envoi") for command in commands]))
     monkeypatch.setattr(panel.rose_terminal, "api", lambda: chat)
     controller = Mock()
     controller.state.side_effect = state
@@ -152,9 +152,9 @@ def test_airzone_is_intercepted_before_completion_and_returns_to_chat(monkeypatc
 
     monkeypatch.setattr(chat, "wait_answer", wait_for_panel)
     send = fn(chat.K_ENVOI)
-    commands = b"airzone" + send
+    commands = b":airzone" + send
     if configured:
-        commands += b"5" + send + b"RETOUR" + send + b"RETOUR" + send
+        commands += b"5" + send + b":RETOUR" + send + b":RETOUR" + send
     startup = StartupTests()
     _, calls = startup.run_session(login_keys("fr") + commands + b"FOLLOW UP" + send)
     assert factory.called is configured
@@ -189,7 +189,7 @@ def test_failed_read_keeps_terminal_usable(monkeypatch):
         return pending[1].get(timeout=2)[0], "done"
 
     chat = SimpleNamespace(wait_answer=wait, show_response=Mock(),
-                           read_question=Mock(return_value=("RETOUR", "envoi")))
+                           read_question=Mock(return_value=(":RETOUR", "envoi")))
     monkeypatch.setattr(panel.rose_terminal, "api", lambda: chat)
     client = Mock()
     client.state.side_effect = api.AirzoneError("Lecture Aizone indisponible.")
@@ -247,7 +247,7 @@ def test_all_zone_confirmation(monkeypatch, accepted, selector):
 
     commands = [selector, "C:20,5", "OUI" if accepted else "NON", "RETOUR", "RETOUR"]
     chat = SimpleNamespace(wait_answer=wait, show_response=Mock(),
-                           read_question=Mock(side_effect=[(command, "envoi") for command in commands]))
+                           read_question=Mock(side_effect=[(command if command in {"OUI", "NON"} or command.replace(".", "").isdigit() else ":" + command, "envoi") for command in commands]))
     monkeypatch.setattr(panel.rose_terminal, "api", lambda: chat)
     client = Mock()
     client.state.side_effect = house
@@ -282,7 +282,7 @@ def test_mode_pending_can_be_confirmed_by_manual_refresh(monkeypatch):
 
     commands = ["MODE", "2", "OUI", "MAJ", "RETOUR", "RETOUR"]
     chat = SimpleNamespace(wait_answer=wait, show_response=Mock(),
-                           read_question=Mock(side_effect=[(command, "envoi") for command in commands]))
+                           read_question=Mock(side_effect=[(command if command in {"OUI", "NON"} or command.replace(".", "").isdigit() else ":" + command, "envoi") for command in commands]))
     monkeypatch.setattr(panel.rose_terminal, "api", lambda: chat)
     initial, changed = state(age=30), state(age=1)
     changed["zones"][0]["mode"] = 2
@@ -315,9 +315,9 @@ def test_physical_suite_retour_cycle_nonconsecutive_zones(monkeypatch):
     monkeypatch.setattr(chat, "wait_answer", wait)
     submit = fn(chat.K_ENVOI)
     # Partly typed C: must not be carried to another zone.
-    keys = (login_keys("fr") + b"AIRZONE" + submit + b"1" + submit
+    keys = (login_keys("fr") + b":AIRZONE" + submit + b"1" + submit
             + b"C:" + fn(chat.K_SUITE) + fn(chat.K_RETOUR) + fn(chat.K_RETOUR)
-            + b"RETOUR" + submit + b"RETOUR" + submit + b"FOLLOW UP" + submit)
+            + b":RETOUR" + submit + b":RETOUR" + submit + b"FOLLOW UP" + submit)
     helper = StartupTests()
     _, calls = helper.run_session(keys)
     detail = [screen for screen in helper.result_screens if "Humidité" in screen]

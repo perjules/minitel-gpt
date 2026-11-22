@@ -100,10 +100,6 @@ def client():
         raise YoloError("Port YOLO invalide.") from error
 
 
-def fixed(question):
-    return (question or "").upper() == ":YOLO"
-
-
 def label(text, limit=40):
     return " ".join(str(text or "").split())[:limit]
 

@@ -515,7 +515,7 @@ class AdminAndUARTTests(unittest.TestCase):
             fn(terminal.K_SOMMAIRE) + fn(terminal.K_SUITE)
             + b"Owner" + fn(terminal.K_ENVOI)
             + b"fr" + fn(terminal.K_ENVOI)
-            + b"CALC"
+            + b":CALC"
             + fn(terminal.K_ENVOI)
             + b"0.1+0,2"
             + fn(terminal.K_ENVOI)

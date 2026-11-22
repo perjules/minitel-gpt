@@ -1,5 +1,7 @@
 # Journal intime
 
+> Terminal keyboard commands now use a leading colon. See [COMMANDS.md](COMMANDS.md) for command mode, shortcuts and literal password/confirmation input. Examples below also document internal service syntax.
+
 The journal is a password-encrypted Markdown document, separate from ordinary
 conversation archives and saved memory. It is available to named profiles only.
 Names still select profiles without authenticating them; the journal password is

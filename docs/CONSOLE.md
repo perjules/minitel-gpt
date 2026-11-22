@@ -1,5 +1,7 @@
 # Console de test sans Minitel
 
+> Terminal keyboard commands now use a leading colon. See [COMMANDS.md](COMMANDS.md) for command mode, shortcuts and literal password/confirmation input. Examples below also document internal service syntax.
+
 Le prototype personnel `3615 rose` dispose aussi de son atelier isolé :
 [ROSE.md](ROSE.md) (porte locale obligatoire, `scripts/rose_console.py`,
 dialogue simulé optionnel, conversations transitoires).
@@ -35,7 +37,8 @@ un terminal interactif (`ssh -t`). Ctrl-Q ou Ctrl-C quitte et restaure le termin
 
 Ces touches ont exactement le comportement de la boucle Minitel selon l'écran.
 Commencez avec **Ctrl-P / SOMMAIRE** : le démarrage apparaît en français, puis
-**Ctrl-N / SUITE** ou 30 secondes d'attente ouvre la connexion. SOMMAIRE revient
+**Ctrl-N / SUITE** ou 6 secondes d'attente ouvre la connexion. Le nombre affiché
+décompte de 6 à 1 sans réafficher le démarrage ; les autres touches ne relancent pas le délai. SOMMAIRE revient
 ensuite à une conversation vide avec le même nom et la même langue. **LOGOUT**
 puis Entrée permet de changer de nom, sans rejouer le démarrage. RETOUR quitte la
 console CALC ou interrompt son spectacle; dans PRONOTE, il quitte le mode ou
