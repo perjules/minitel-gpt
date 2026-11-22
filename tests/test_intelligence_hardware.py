@@ -61,6 +61,20 @@ def test_adc_sample_commands(monkeypatch):
         return Result()
     monkeypatch.setattr(intelligence_hardware.subprocess, "run", fake_run)
     monkeypatch.setattr(intelligence_hardware.time, "sleep", lambda _: None)
-    assert intelligence_hardware.sample() == 11
+    assert intelligence_hardware.sample() == pytest.approx(26384 * 4.096 / 32768)
     assert calls[0][:3] == ["i2cset", "-y", "1"]
     assert calls[1][:3] == ["i2cget", "-y", "1"]
+
+
+def test_hysteresis_holds_near_each_boundary():
+    for index in range(5):
+        boundary = (index + 1) * intelligence_hardware.MAX_VOLTAGE / 6
+        assert intelligence_hardware.stable_index(boundary + .02, index) == index
+        assert intelligence_hardware.stable_index(boundary + .04, index) == index + 1
+        assert intelligence_hardware.stable_index(boundary - .02, index + 1) == index + 1
+        assert intelligence_hardware.stable_index(boundary - .04, index + 1) == index
+
+
+def test_hysteresis_allows_skipping_levels():
+    assert intelligence_hardware.stable_index(3.1, 1) == 5
+    assert intelligence_hardware.stable_index(.2, 5) == 0
