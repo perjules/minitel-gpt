@@ -8,6 +8,8 @@ import subprocess
 import threading
 import time
 
+from . import config_store
+
 log = logging.getLogger(__name__)
 LEVELS = (1, 3, 5, 7, 9, 11)
 # Observed endpoint at maximum: ~3.298 V. Equal-voltage bands are provisional.
@@ -92,7 +94,7 @@ class Wheel:
                     last = level
                 with self._lock:
                     self._present = True
-            except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            except (OSError, ValueError, subprocess.SubprocessError, config_store.StorageFailure) as exc:
                 failures += 1
                 if failures == 3:
                     log.warning("intelligence wheel unavailable: %s", type(exc).__name__)
