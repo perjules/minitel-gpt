@@ -141,7 +141,7 @@ write occurs on a worker/adapter thread. The command does not cancel an in-fligh
 request; changes submitted after a locally abandoned request affect only later
 requests. The existing waiting screen does not parse typed commands while waiting.
 
-## Future hardware adapter contract
+## Original hardware integration plan (historical)
 
 The hardware/calibration implementation belongs in
 [mainframe-maintenance](https://github.com/perjules/mainframe-maintenance).
@@ -263,3 +263,39 @@ operational rules in place. Existing profile/model settings and active position
 are independent. Overrides live in Git-ignored `config/intelligence-prompts.json`,
 using the same atomic locked storage as other configuration. Tracked prompt files
 remain the defaults, so deployments preserve edits without dirtying the checkout.
+
+## Physical wheel adapter (experimental, 22 November 2026)
+
+The optional in-process `services/intelligence_hardware.py` reader polls ADS1115
+A0 on I²C bus 1 at address `0x48`. The wheel has measured endpoints of
+approximately 0–3.298 V. Equal-voltage six-way quantization is **provisional**
+pending a measured sweep. A candidate must remain stable for 0.4 s before
+changing the controller; active requests retain their immutable profile.
+
+The terminal process starts and stops the polling thread. It requires
+`i2c-tools` and access to `/dev/i2c-1` (normally membership of the `i2c`
+group for the service user). No extra Python library, daemon, API or UART
+writer is introduced. Missing I²C tools/device leave keyboard commands usable;
+three consecutive polling failures mark hardware unavailable. Transient errors
+do not immediately transfer authority.
+
+In **Configuration IA → Intelligence**, the independent **Activer la molette
+physique** checkbox defaults to on and is stored in the Git-ignored
+`config/intelligence-wheel.json`. When enabled and the ADC is responding,
+the wheel exclusively selects levels: `:I #` and `:INTELLIGENCE #` return
+`INTELLIGENCE : utilisez la molette`. Bare `:I` still reports the current
+level. When disabled or unavailable, keyboard selection is active. Disabling
+the wheel preserves the last selected level; re-enabling selects the physical
+position after stabilization. The adapter does not edit model profiles.
+
+**Important limitation:** detecting a responding ADS1115 does not prove the
+potentiometer's wiper is connected. A floating A0 can yield plausible values.
+There is no reliable software-only standard disconnect test for this circuit;
+wiper validity remains TODO until a bias/resistor or equivalent hardware
+strategy is selected. The admin checkbox is the manual override.
+
+Acceptance on the Pi: use the standalone
+`mainframe-maintenance/hardware/intelligence-dial/probe.py` to characterize
+the wheel; then verify six stable positions, the admin opt-out, both command
+paths, startup selection, missing-device fallback, user changes and in-flight
+profile immutability. Hardware behavior has not yet been physically accepted.
