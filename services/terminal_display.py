@@ -6,6 +6,7 @@ calls. The only mutable state is the loaded view, row cache and current input.
 
 from contextlib import nullcontext
 from dataclasses import dataclass
+import time
 
 from . import (
     intelligence,
@@ -444,14 +445,30 @@ class View:
         self.draw()
         if self.qr is None or not self.qr.full_screen:
             self.term.w(b"\x11")  # Input is ready; keep the caret inside its region.
+        idle_deadline = time.monotonic() + chat.IDLE_TIMEOUT
+        last_indicator = intelligence.indicator()
         while True:
             self.active()
-            kind, code = self.term.read_key(0.2 if self.check is not None else chat.IDLE_TIMEOUT)
+            # Short keyboard polls let the UART owner refresh the wheel indicator.
+            # The ADC worker must never write to the terminal itself.
+            remaining = idle_deadline - time.monotonic()
+            if self.check is None and remaining <= 0:
+                return None, "timeout"
+            kind, code = self.term.read_key(
+                0.2 if self.check is not None else min(0.2, remaining))
             self.active()
+            shown = intelligence.indicator()
+            if shown != last_indicator:
+                last_indicator = shown
+                if self.input_notice is None and not (self.qr is not None and self.qr.full_screen):
+                    self.status(self.notice)
+                    # Status painting moves the cursor; preserve an in-progress draft.
+                    self.input()
             if kind == "timeout":
-                if self.check is not None:
+                if self.check is not None or time.monotonic() < idle_deadline:
                     continue
                 return None, "timeout"
+            idle_deadline = time.monotonic() + chat.IDLE_TIMEOUT
             if touch is not None:
                 touch()
             if self.qr is not None and self.qr.full_screen:
