@@ -85,6 +85,27 @@ class Controller:
             except (ValueError, UnicodeError):
                 raise config_store.InvalidConfig("Configuration Intelligence invalide.") from None
 
+    def wheel_enabled(self):
+        """Administrative opt-out; default on, independent of profile selection."""
+        path = self.profiles_path.with_name("intelligence-wheel.json")
+        with config_store.locked(path):
+            if not path.exists():
+                return True
+            try:
+                data = json.loads(config_store.read_bytes(path))
+                if (not isinstance(data, dict) or data.get("version") != 1
+                        or type(data.get("enabled")) is not bool):
+                    raise ValueError
+                return data["enabled"]
+            except (ValueError, UnicodeError):
+                raise config_store.InvalidConfig("Configuration molette invalide.") from None
+
+    def set_wheel_enabled(self, enabled):
+        if type(enabled) is not bool:
+            raise config_store.InvalidConfig("Etat molette invalide.")
+        path = self.profiles_path.with_name("intelligence-wheel.json")
+        config_store.atomic_write(path, (json.dumps({"version": 1, "enabled": enabled}) + "\n").encode())
+
     def save_profiles(self, data):
         profiles = validate_profiles(data)
         config_store.atomic_write(self.profiles_path, (json.dumps({"version": 1, "profiles": {
@@ -144,6 +165,9 @@ def command(text):
         if argument:
             if argument not in {str(n) for n in LEVELS}:
                 raise config_store.InvalidConfig("INTELLIGENCE : 1, 3, 5, 7, 9, 11")
+            from . import intelligence_hardware
+            if intelligence_hardware.active():
+                return "INTELLIGENCE : utilisez la molette"
             controller.set_level(int(argument))
         level = controller.level
         return f"INTELLIGENCE : {level:02d} - " + ("ÇA CHAUFFE !" if level == 11 else LABELS[level])
